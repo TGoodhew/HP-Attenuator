@@ -33,6 +33,14 @@ namespace HpAttenuator.Instruments
 
         public string ResourceName => _link.ResourceName;
 
+        public void Initialize()
+        {
+            // Device clear drops pending I/O and deasserts a latched SRQ; IP presets to a
+            // known state (Free-Run T0, SRQ mask = HP-IB code error only).
+            _link.Clear();
+            _link.Write("IP");
+        }
+
         public void Reset() => _link.Write("IP");
 
         public void LoadOffsetCalFactors(double referenceCf, IReadOnlyList<CalFactor> table)

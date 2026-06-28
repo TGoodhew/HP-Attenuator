@@ -16,6 +16,8 @@ namespace HpAttenuator.Visa
         public bool IsSimulated => true;
         public IReadOnlyList<string> History => _history;
 
+        public void Clear() { /* nothing to clear */ }
+
         public void Write(string command) => _history.Add(command);
 
         public string Read() => string.Empty;

@@ -12,6 +12,9 @@ namespace HpAttenuator.Visa
         string ResourceName { get; }
         bool IsSimulated { get; }
 
+        /// <summary>Sends a GPIB device clear (SDC) to reset the device's bus state.</summary>
+        void Clear();
+
         /// <summary>Sends a raw command string (terminator added by the link).</summary>
         void Write(string command);
 

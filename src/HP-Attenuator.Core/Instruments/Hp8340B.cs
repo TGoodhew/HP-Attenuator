@@ -17,6 +17,13 @@ namespace HpAttenuator.Instruments
 
         public string ResourceName => _link.ResourceName;
 
+        public void Initialize()
+        {
+            _link.Clear();          // GPIB device clear — drop any pending I/O / SRQ
+            _link.Write("IP");      // instrument preset
+            _link.Write("RF0");     // RF off until we set up
+        }
+
         public void Preset() => _link.Write("IP");
 
         public void SetFrequencyMHz(double mhz) =>

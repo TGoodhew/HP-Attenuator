@@ -23,6 +23,9 @@ namespace HpAttenuator.Measurement
         /// <summary>Run the 8902A 3-point range-calibration pass before measuring (hardware).</summary>
         public bool RangeCalibrate { get; set; } = true;
 
+        /// <summary>Attenuation step (dB) used only for the range-calibration pass.</summary>
+        public int CalStepDb { get; set; } = 10;
+
         public IEnumerable<double> Frequencies()
         {
             int n = (int)System.Math.Round((FreqStopMHz - FreqStartMHz) / FreqStepMHz) + 1;
@@ -33,6 +36,13 @@ namespace HpAttenuator.Measurement
         public IEnumerable<int> AttenuationSteps()
         {
             for (int a = AttenStartDb; a <= AttenStopDb; a += AttenStepDb)
+                yield return a;
+        }
+
+        /// <summary>Coarser attenuation points used only for the range-calibration pass.</summary>
+        public IEnumerable<int> CalSteps()
+        {
+            for (int a = AttenStartDb; a <= AttenStopDb; a += CalStepDb)
                 yield return a;
         }
 

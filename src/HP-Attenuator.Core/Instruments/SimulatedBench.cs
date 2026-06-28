@@ -80,6 +80,7 @@ namespace HpAttenuator.Instruments
         private readonly SimulatedBench _bench;
         public SimulatedSource(SimulatedBench bench) => _bench = bench;
         public string ResourceName => "SIM:SOURCE";
+        public void Initialize() { _bench.SourceRfOn = false; }
         public void Preset() { _bench.SourceRfOn = false; }
         public void SetFrequencyMHz(double mhz) => _bench.SourceFreqMHz = mhz;
         public void SetPowerDbm(double dbm) => _bench.SourcePowerDbm = dbm;
@@ -95,6 +96,7 @@ namespace HpAttenuator.Instruments
         public string ResourceName => "SIM:LO";
         public double MinFrequencyMHz => 2000.0;
         public double MaxFrequencyMHz => 26500.0;
+        public void Initialize() { _bench.LoRfOn = false; }
         public void Preset() { _bench.LoRfOn = false; }
         public void SetFrequencyMHz(double mhz) => _bench.LoFreqMHz = mhz;
         public void SetPowerDbm(double dbm) => _bench.LoPowerDbm = dbm;
@@ -115,6 +117,8 @@ namespace HpAttenuator.Instruments
 
         public string ResourceName => "SIM:11713A";
         public AttenuatorConfig Config { get; }
+
+        public void Initialize() => _bench.EngagedDigits.Clear();
 
         public string SetAttenuationDb(int db)
         {
@@ -151,6 +155,7 @@ namespace HpAttenuator.Instruments
         public SimulatedReceiver(SimulatedBench bench) => _bench = bench;
         public string ResourceName => "SIM:8902A";
 
+        public void Initialize() { _haveReference = false; }
         public void Reset() { _haveReference = false; }
         public void LoadOffsetCalFactors(double referenceCf, System.Collections.Generic.IReadOnlyList<CalFactor> table) { }
         public void SelectRfPower() { }

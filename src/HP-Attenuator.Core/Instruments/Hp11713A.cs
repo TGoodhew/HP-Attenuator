@@ -25,6 +25,12 @@ namespace HpAttenuator.Instruments
         public AttenuatorConfig Config { get; }
         public DeviceState State { get; } = new DeviceState();
 
+        public void Initialize()
+        {
+            _link.Clear();                          // ignored by the listen-only 11713A, but harmless
+            SetEngaged(System.Array.Empty<int>());  // known state: 0 dB (all sections bypassed)
+        }
+
         public string ResourceName => _link.ResourceName;
         public bool IsSimulated => _link.IsSimulated;
         public IReadOnlyList<string> History => _link.History;

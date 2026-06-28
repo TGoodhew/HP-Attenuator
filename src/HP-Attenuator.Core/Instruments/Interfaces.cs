@@ -7,6 +7,10 @@ namespace HpAttenuator.Instruments
     public interface ISignalSource
     {
         string ResourceName { get; }
+
+        /// <summary>Device clear + preset to a known state (no stale errors/SRQ).</summary>
+        void Initialize();
+
         void Preset();
         void SetFrequencyMHz(double mhz);
         void SetPowerDbm(double dbm);
@@ -29,6 +33,9 @@ namespace HpAttenuator.Instruments
     {
         string ResourceName { get; }
         AttenuatorConfig Config { get; }
+
+        /// <summary>Device clear + set to a known (0 dB) state.</summary>
+        void Initialize();
 
         /// <summary>Sets total attenuation in dB; returns the data string sent.</summary>
         string SetAttenuationDb(int db);
@@ -60,6 +67,9 @@ namespace HpAttenuator.Instruments
     public interface IMeasuringReceiver
     {
         string ResourceName { get; }
+
+        /// <summary>Device clear + preset to a known state (no stale errors/SRQ).</summary>
+        void Initialize();
 
         /// <summary>Instrument preset to a known state.</summary>
         void Reset();

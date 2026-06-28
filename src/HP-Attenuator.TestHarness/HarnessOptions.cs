@@ -67,6 +67,7 @@ namespace HpAttenuator.TestHarness
                     case "--astart": o.Sweep.AttenStartDb = I(Need(args, ++i)); break;
                     case "--astop": o.Sweep.AttenStopDb = I(Need(args, ++i)); break;
                     case "--astep": o.Sweep.AttenStepDb = I(Need(args, ++i)); break;
+                    case "--cal-step": o.Sweep.CalStepDb = I(Need(args, ++i)); break;
                     case "--settle": o.Sweep.SettleMs = I(Need(args, ++i)); break;
                     case "--addr-source": o.AddrSource = Need(args, ++i); break;
                     case "--addr-lo": o.AddrLo = Need(args, ++i); break;

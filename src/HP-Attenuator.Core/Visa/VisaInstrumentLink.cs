@@ -30,6 +30,12 @@ namespace HpAttenuator.Visa
             _session.TerminationCharacterEnabled = true;
         }
 
+        public void Clear()
+        {
+            // GPIB Selected Device Clear. Some listen-only devices ignore it; don't fail.
+            try { _session.Clear(); } catch { /* device may not support clear */ }
+        }
+
         public void Write(string command)
         {
             if (command == null) throw new ArgumentNullException(nameof(command));

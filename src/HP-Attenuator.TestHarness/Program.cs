@@ -129,11 +129,22 @@ namespace HpAttenuator.TestHarness
             var rxLink = Open(opt.AddrReceiver, disposables, 30000);
             var attLink = Open(opt.AddrAttenuator, disposables);
 
+            var source = new Hp8340B(sourceLink);
+            var lo = new Hp8673B(loLink);
             var receiver = new Hp8902A(rxLink) { SettleMilliseconds = 0 };
+
+            // Clear + preset every device on first connect so no stale errors or latched
+            // SRQ from a previous session carry into this run.
+            AnsiConsole.MarkupLine("[grey]Clearing + presetting all instruments...[/]");
+            source.Initialize();
+            lo.Initialize();
+            receiver.Initialize();
+            new Hp11713A(attLink, AttenuatorConfig.Default()).Initialize();
+
             return new Bench
             {
-                Source = new Hp8340B(sourceLink),
-                Lo = new Hp8673B(loLink),
+                Source = source,
+                Lo = lo,
                 Receiver = receiver,
                 MakeAttenuator = cfg => new Hp11713A(attLink, cfg),
                 IsSimulated = false
@@ -155,7 +166,10 @@ namespace HpAttenuator.TestHarness
                 return new SimulatedReceiver(new SimulatedBench());
             }
             AnsiConsole.MarkupLine($"[green]Mode:[/] HARDWARE (8902A @ {opt.AddrReceiver.EscapeMarkup()})");
-            return new Hp8902A(Open(opt.AddrReceiver, disposables, 30000));
+            var rx = new Hp8902A(Open(opt.AddrReceiver, disposables, 30000));
+            AnsiConsole.MarkupLine("[grey]Clearing + presetting 8902A...[/]");
+            rx.Initialize();   // device clear + preset (no stale errors/SRQ)
+            return rx;
         }
 
         // ---- Power-sensor zero / calibrate ---------------------------------
@@ -401,7 +415,21 @@ namespace HpAttenuator.TestHarness
 
                 foreach (double freq in frequencies)
                 {
-                    FreqPointResult r = engine.MeasureFrequency(freq);
+                    // Live per-step progress for short (single/few-frequency) detailed runs.
+                    Action<int, int, AttenPointResult> prog = null;
+                    if (detailed)
+                    {
+                        prog = (i, n, p) =>
+                        {
+                            string body = p.Error != null
+                                ? $"[red]{p.Error.EscapeMarkup()}[/]"
+                                : $"meas {p.MeasuredAttenuationDb,7:0.00} dB  (err {p.ErrorDb:+0.00;-0.00;0.00})";
+                            // No square brackets in the plain text — Spectre parses them as markup.
+                            AnsiConsole.MarkupLine($"  {i,3}/{n}  set {p.CommandedDb,3} dB -> {body}");
+                        };
+                    }
+
+                    FreqPointResult r = engine.MeasureFrequency(freq, prog);
                     measured++;
 
                     foreach (var p in r.Points)
@@ -423,7 +451,8 @@ namespace HpAttenuator.TestHarness
                         }
                     }
 
-                    if (detailed) RenderFrequencyTable(r, opt.ToleranceDb);
+                    // Small detailed runs get a table; large ones already streamed progress.
+                    if (detailed && r.Points.Count <= 15) RenderFrequencyTable(r, opt.ToleranceDb);
                     else RenderFrequencyLine(r, opt.ToleranceDb);
                 }
             }

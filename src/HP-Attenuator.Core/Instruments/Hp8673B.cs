@@ -21,6 +21,13 @@ namespace HpAttenuator.Instruments
         public double MinFrequencyMHz => 2000.0;
         public double MaxFrequencyMHz => 26500.0;
 
+        public void Initialize()
+        {
+            _link.Clear();          // GPIB device clear
+            _link.Write("IP");      // instrument preset
+            _link.Write("RF0");     // RF off until we set up
+        }
+
         public void Preset() => _link.Write("IP");
 
         public void SetFrequencyMHz(double mhz) =>

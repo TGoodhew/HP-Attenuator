@@ -75,8 +75,11 @@ namespace HpAttenuator.Measurement
             return r;
         }
 
-        public FreqPointResult MeasureFrequency(double freqMHz)
+        public FreqPointResult MeasureFrequency(double freqMHz,
+            System.Action<int, int, AttenPointResult> onPoint = null)
         {
+            int total = (_options.AttenStopDb - _options.AttenStartDb) / _options.AttenStepDb + 1;
+            int index = 0;
             var plan = Prepare(freqMHz);
             _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz);
 
@@ -86,10 +89,11 @@ namespace HpAttenuator.Measurement
                 IfMHz = plan.IfMHz, Warning = plan.Warning
             };
 
-            // 3-point range calibration: step down so the 8902A calibrates each RF range.
+            // 3-point range calibration: step down (coarsely) so the 8902A calibrates each
+            // RF range. Uses CalStepDb (e.g. 10 dB), independent of the measurement step.
             if (_options.RangeCalibrate)
             {
-                foreach (int atten in _options.AttenuationSteps())
+                foreach (int atten in _options.CalSteps())
                 {
                     _attenuator.SetAttenuationDb(atten);
                     Settle();
@@ -130,6 +134,7 @@ namespace HpAttenuator.Measurement
                     point.ErrorDb = double.NaN;
                 }
                 result.Points.Add(point);
+                onPoint?.Invoke(++index, total, point);
             }
             return result;
         }

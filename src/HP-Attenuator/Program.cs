@@ -73,6 +73,8 @@ namespace HpAttenuator
             }
 
             _atten = new Hp11713A(_link, Config);
+            try { _atten.Initialize(); }   // device clear + set to a known 0 dB state
+            catch (Exception ex) { AnsiConsole.MarkupLine($"[yellow]Initialize warning:[/] {ex.Message.EscapeMarkup()}"); }
             AnsiConsole.MarkupLine($"Connected to [green]{_link.ResourceName.EscapeMarkup()}[/]" +
                                    (_link.IsSimulated ? " [yellow](simulated)[/]" : string.Empty));
             AnsiConsole.WriteLine();
