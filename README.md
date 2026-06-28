@@ -2,10 +2,15 @@
 
 [![Build & Release](https://github.com/TGoodhew/HP-Attenuator/actions/workflows/release.yml/badge.svg)](https://github.com/TGoodhew/HP-Attenuator/actions/workflows/release.yml)
 
-A small interactive console for driving an **HP/Agilent 11713A Attenuator/Switch
+An interactive console for driving an **HP/Agilent 11713A Attenuator/Switch
 Driver** over GPIB. It turns desired attenuation (in dB) into the 11713A's
 `A`/`B` relay data strings and sends them via **NI-VISA**, with a
 [Spectre.Console](https://spectreconsole.net/) terminal UI.
+
+The repository also ships a **hardware test harness** that characterises the
+attenuator across frequency using a full measurement bench (8340B source, 8673B
+LO, 11793A converter, 8902A measuring receiver). See
+[Test harness](#test-harness) and [docs/TEST-HARNESS.md](docs/TEST-HARNESS.md).
 
 ```
    _   _ ____    _ _ _____ _ _____ _____
@@ -97,30 +102,59 @@ Or run the built executable directly:
 .\src\HP-Attenuator\bin\Debug\HP-Attenuator.exe
 ```
 
+## Test harness
+
+`HP-Attenuator.TestHarness` characterises the attenuator across frequency on a
+real bench, and doubles as the build-verification for the app — it drives the
+attenuator through the **same Core code** the app uses.
+
+Per the request, it steps the **8340B** source across frequency at 0 dBm and, at
+each frequency, sweeps the **11713A** attenuator from 0 to 110 dB and reports the
+**measured** attenuation via the **8902A** measuring receiver (using the
+**11793A** converter and **8673B** LO above 1300 MHz). Because the 8494 (1 dB)
+and 8496 (10 dB) attenuators can be cabled to either port, the harness first
+**identifies** which attenuator is on ATTEN X vs ATTEN Y by measurement.
+
+It runs in **simulation by default** (no bench required) so it can be run after
+every change, and against the real bench with `--hardware`:
+
+```powershell
+# Fast simulation over a representative frequency set (the routine check):
+dotnet run --project src/HP-Attenuator.TestHarness
+
+# Full spec sweep, 1 MHz-18 GHz / 10 MHz / 0-110 dB, on the real bench:
+dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --full
+```
+
+Full details — equipment chain, the direct/converter regimes and LO/IF maths,
+attenuator identification, all command-line options, and the CSV output — are in
+**[docs/TEST-HARNESS.md](docs/TEST-HARNESS.md)**.
+
 ## Project layout
 
 ```
 HP-Attenuator.sln
-src/HP-Attenuator/
-  Program.cs                     Spectre.Console interactive UI
-  Model/
-    Section.cs                   one switchable attenuator section
-    AttenuatorConfig.cs          bank/section wiring + default config
-    CommandBuilder.cs            dB -> A/B data-string solver
-    DeviceState.cs               software shadow of driver state
-  Visa/
-    IInstrumentLink.cs           transport abstraction
-    VisaInstrumentLink.cs        live NI-VISA session (write-only)
-    SimulatedInstrumentLink.cs   in-memory simulator
+src/
+  HP-Attenuator.Core/            class library shared by the app and harness
+    Model/                       Section, AttenuatorConfig, CommandBuilder, DeviceState
+    Visa/                        IInstrumentLink + live (NI-VISA) and simulated links
+    Instruments/                 Hp11713A, Hp8340B, Hp8673B, Hp8902A, MicrowaveConverter,
+                                 instrument interfaces + the simulated bench
+    Measurement/                 sweep engine, attenuator identification, result models
+  HP-Attenuator/                 Spectre.Console interactive 11713A controller (app)
+    Program.cs
+  HP-Attenuator.TestHarness/     bench characterisation + build-verification harness
+    Program.cs, HarnessOptions.cs
 ```
 
 ## Continuous integration & releases
 
 Every push to `main` that touches code triggers the
 [**Build & Release**](.github/workflows/release.yml) GitHub Actions workflow,
-which builds the project in `Release` on a Windows runner, zips the output, and
-publishes a versioned **GitHub Release** (`v1.0.<run-number>`) with the archive
-attached. Grab the newest build from the
+which on a Windows runner builds the solution in `Release`, **runs the test
+harness in simulation** as a build check (normal and swapped wiring), zips the
+app output, and publishes a versioned **GitHub Release** (`v1.0.<run-number>`)
+with the archive attached. Grab the newest build from the
 [Releases page](https://github.com/TGoodhew/HP-Attenuator/releases/latest).
 
 The workflow can also be run on demand from the **Actions** tab

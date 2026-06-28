@@ -26,6 +26,9 @@ packages/
 _ReSharper*/
 *.DotSettings.user
 
+## Test harness output
+harness-results.csv
+
 ## OS
 Thumbs.db
 desktop.ini

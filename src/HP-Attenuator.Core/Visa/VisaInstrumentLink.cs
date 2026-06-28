@@ -5,10 +5,9 @@ using Ivi.Visa;
 namespace HpAttenuator.Visa
 {
     /// <summary>
-    /// Live link to a 11713A over VISA, using the vendor-neutral Ivi.Visa API.
+    /// Live link to an instrument over VISA, using the vendor-neutral Ivi.Visa API.
     /// At runtime this dispatches to the installed VISA.NET provider (NI-VISA).
-    /// The 11713A is a listen-only device, so this link only ever writes; it
-    /// never reads.
+    /// Write-only listen devices (e.g. the 11713A) simply never call <see cref="Read"/>.
     /// </summary>
     public sealed class VisaInstrumentLink : IInstrumentLink
     {
@@ -36,6 +35,19 @@ namespace HpAttenuator.Visa
             if (command == null) throw new ArgumentNullException(nameof(command));
             _session.RawIO.Write(command + "\n");
             _history.Add(command);
+        }
+
+        public string Read()
+        {
+            // Reads up to the termination character (LF) / EOI. Classic HP talkers
+            // (e.g. the 8902A) terminate their ASCII output with CR/LF + EOI.
+            return _session.RawIO.ReadString().Trim();
+        }
+
+        public string Query(string command)
+        {
+            Write(command);
+            return Read();
         }
 
         /// <summary>Lists VISA INSTR resources visible to the resource manager.</summary>

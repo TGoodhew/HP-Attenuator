@@ -7,6 +7,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HP-Attenuator", "src\HP-Attenuator\HP-Attenuator.csproj", "{0E567908-897B-4695-A460-C3FC5FE29081}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HP-Attenuator.Core", "src\HP-Attenuator.Core\HP-Attenuator.Core.csproj", "{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HP-Attenuator.TestHarness", "src\HP-Attenuator.TestHarness\HP-Attenuator.TestHarness.csproj", "{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -29,11 +33,37 @@ Global
 		{0E567908-897B-4695-A460-C3FC5FE29081}.Release|x64.Build.0 = Release|Any CPU
 		{0E567908-897B-4695-A460-C3FC5FE29081}.Release|x86.ActiveCfg = Release|Any CPU
 		{0E567908-897B-4695-A460-C3FC5FE29081}.Release|x86.Build.0 = Release|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Debug|x64.Build.0 = Debug|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Debug|x86.Build.0 = Debug|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Release|x64.ActiveCfg = Release|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Release|x64.Build.0 = Release|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Release|x86.ActiveCfg = Release|Any CPU
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9}.Release|x86.Build.0 = Release|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Debug|x64.Build.0 = Debug|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Debug|x86.Build.0 = Debug|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Release|x64.ActiveCfg = Release|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Release|x64.Build.0 = Release|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Release|x86.ActiveCfg = Release|Any CPU
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{0E567908-897B-4695-A460-C3FC5FE29081} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

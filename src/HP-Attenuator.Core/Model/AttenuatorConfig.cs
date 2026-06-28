@@ -38,25 +38,32 @@ namespace HpAttenuator.Model
         /// 4-section pairing from Table 6-3 of the 11713A manual, giving a combined
         /// 0-121 dB range in 1 dB steps.
         /// </summary>
-        public static AttenuatorConfig Default()
+        public static AttenuatorConfig Default() => Build(xIs8494: true);
+
+        /// <summary>The swapped wiring: the 8496 (10 dB) on ATTEN X and the 8494 (1 dB) on ATTEN Y.</summary>
+        public static AttenuatorConfig Swapped() => Build(xIs8494: false);
+
+        /// <summary>
+        /// Builds a config for the two standard step attenuators. The 8494/8496 can be
+        /// cabled to either 11713A port, so <paramref name="xIs8494"/> selects which
+        /// physical attenuator is on ATTEN X. The relay digits are fixed by the 11713A
+        /// (1-4 = ATTEN X, 5-8 = ATTEN Y); only the dB weights/model swap.
+        /// </summary>
+        public static AttenuatorConfig Build(bool xIs8494)
         {
+            string fineModel = "HP 8494 (0-11 dB)";
+            string coarseModel = "HP 8496 (0-110 dB)";
+            int[] fine = { 1, 2, 4, 4 };
+            int[] coarse = { 10, 20, 40, 40 };
+
+            int[] x = xIs8494 ? fine : coarse;
+            int[] y = xIs8494 ? coarse : fine;
+
             return new AttenuatorConfig(
-                "HP 8494 (0-11 dB)",
-                "HP 8496 (0-110 dB)",
-                new[]
-                {
-                    new Section(1, 1),
-                    new Section(2, 2),
-                    new Section(3, 4),
-                    new Section(4, 4),
-                },
-                new[]
-                {
-                    new Section(5, 10),
-                    new Section(6, 20),
-                    new Section(7, 40),
-                    new Section(8, 40),
-                });
+                xIs8494 ? fineModel : coarseModel,
+                xIs8494 ? coarseModel : fineModel,
+                new[] { new Section(1, x[0]), new Section(2, x[1]), new Section(3, x[2]), new Section(4, x[3]) },
+                new[] { new Section(5, y[0]), new Section(6, y[1]), new Section(7, y[2]), new Section(8, y[3]) });
         }
     }
 }

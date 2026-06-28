@@ -30,6 +30,17 @@ jobs:
       - name: Build (Release)
         run: dotnet build HP-Attenuator.sln -c Release --no-restore
 
+      - name: Test harness (simulation)
+        shell: pwsh
+        run: |
+          $exe = "src/HP-Attenuator.TestHarness/bin/Release/HP-Attenuator.TestHarness.exe"
+          Write-Host "== normal wiring, full sweep =="
+          & $exe --full --out "$env:RUNNER_TEMP/sim-normal.csv"
+          if ($LASTEXITCODE -ne 0) { throw "Harness FAILED (normal wiring), exit $LASTEXITCODE" }
+          Write-Host "== swapped wiring, full sweep =="
+          & $exe --swapped-sim --full --out "$env:RUNNER_TEMP/sim-swapped.csv"
+          if ($LASTEXITCODE -ne 0) { throw "Harness FAILED (swapped wiring), exit $LASTEXITCODE" }
+
       - name: Package
         id: package
         shell: pwsh

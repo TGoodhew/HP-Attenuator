@@ -3,11 +3,9 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net472</TargetFramework>
-    <RootNamespace>HpAttenuator</RootNamespace>
-    <AssemblyName>HP-Attenuator</AssemblyName>
+    <RootNamespace>HpAttenuator.TestHarness</RootNamespace>
+    <AssemblyName>HP-Attenuator.TestHarness</AssemblyName>
     <LangVersion>latest</LangVersion>
-    <!-- NI-VISA native interop resolves the matching bitness; force x64 to match
-         the 64-bit VISA.NET runtime. -->
     <PlatformTarget>x64</PlatformTarget>
     <Nullable>disable</Nullable>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
@@ -15,13 +13,10 @@
 
   <ItemGroup>
     <PackageReference Include="Spectre.Console" Version="0.49.1" />
-    <!-- Provides the .NET Framework 4.7.2 reference assemblies so the project
-         builds with the dotnet SDK without the targeting pack installed. -->
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Shared instrument-control + attenuator logic (also drives Ivi.Visa in). -->
     <ProjectReference Include="..\HP-Attenuator.Core\HP-Attenuator.Core.csproj" />
   </ItemGroup>
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using HpAttenuator.Instruments;
 using HpAttenuator.Model;
 using HpAttenuator.Visa;
 using Spectre.Console;
@@ -12,8 +13,8 @@ namespace HpAttenuator
         private const string DefaultResource = "GPIB0::28::INSTR"; // 11713A factory address = 28
 
         private static readonly AttenuatorConfig Config = AttenuatorConfig.Default();
-        private static readonly DeviceState State = new DeviceState();
         private static IInstrumentLink _link;
+        private static Hp11713A _atten;
 
         private static int Main()
         {
@@ -71,6 +72,7 @@ namespace HpAttenuator
                     break;
             }
 
+            _atten = new Hp11713A(_link, Config);
             AnsiConsole.MarkupLine($"Connected to [green]{_link.ResourceName.EscapeMarkup()}[/]" +
                                    (_link.IsSimulated ? " [yellow](simulated)[/]" : string.Empty));
             AnsiConsole.WriteLine();
@@ -156,14 +158,15 @@ namespace HpAttenuator
             table.AddColumn(new TableColumn("Sections (digit:dB)").NoWrap());
             table.AddColumn(new TableColumn("dB").RightAligned());
 
-            table.AddRow("ATTEN X", Config.XModel.EscapeMarkup(), DescribeBank(Config.X), State.BankDecibels(Config.X).ToString());
-            table.AddRow("ATTEN Y", Config.YModel.EscapeMarkup(), DescribeBank(Config.Y), State.BankDecibels(Config.Y).ToString());
+            var state = _atten.State;
+            table.AddRow("ATTEN X", Config.XModel.EscapeMarkup(), DescribeBank(Config.X), state.BankDecibels(Config.X).ToString());
+            table.AddRow("ATTEN Y", Config.YModel.EscapeMarkup(), DescribeBank(Config.Y), state.BankDecibels(Config.Y).ToString());
 
-            var s9 = State.Switch9 == null ? "[grey]unset[/]" : (State.Switch9.Value ? "[green]A9[/]" : "[blue]B9[/]");
-            var s0 = State.Switch0 == null ? "[grey]unset[/]" : (State.Switch0.Value ? "[green]A0[/]" : "[blue]B0[/]");
+            var s9 = state.Switch9 == null ? "[grey]unset[/]" : (state.Switch9.Value ? "[green]A9[/]" : "[blue]B9[/]");
+            var s0 = state.Switch0 == null ? "[grey]unset[/]" : (state.Switch0.Value ? "[green]A0[/]" : "[blue]B0[/]");
 
             var panel = new Panel(table)
-                .Header($" {_link.ResourceName.EscapeMarkup()}  •  TOTAL = [bold yellow]{State.TotalDecibels(Config)} dB[/]  •  S9={s9}  S0={s0} ")
+                .Header($" {_atten.ResourceName.EscapeMarkup()}  •  TOTAL = [bold yellow]{state.TotalDecibels(Config)} dB[/]  •  S9={s9}  S0={s0} ")
                 .Border(BoxBorder.Heavy);
             AnsiConsole.Write(panel);
         }
@@ -172,7 +175,7 @@ namespace HpAttenuator
         {
             return string.Join("  ", bank.Select(s =>
             {
-                var engaged = State.Engaged.Contains(s.Digit);
+                var engaged = _atten.State.Engaged.Contains(s.Digit);
                 return engaged
                     ? $"[green]{s.Digit}:{s.Decibels}[/]"
                     : $"[grey]{s.Digit}:{s.Decibels}[/]";
@@ -189,21 +192,7 @@ namespace HpAttenuator
                         ? ValidationResult.Success()
                         : ValidationResult.Error($"Out of range 0-{Config.MaxDecibels}")));
 
-            var engaged = CommandBuilder.Solve(Config.AllSections.ToList(), target);
-            if (engaged == null)
-            {
-                AnsiConsole.MarkupLine($"[red]{target} dB is not achievable with this section set.[/]");
-                Pause();
-                return;
-            }
-
-            var engagedSet = new HashSet<int>(engaged);
-            string command = CommandBuilder.BuildString(Config.AllSections, engagedSet);
-            if (Send(command))
-            {
-                State.Engaged.Clear();
-                foreach (var d in engaged) State.Engaged.Add(d);
-            }
+            Execute(() => _atten.SetAttenuationDb(target));
         }
 
         private static void SetBank(string name, IReadOnlyList<Section> bank)
@@ -215,34 +204,20 @@ namespace HpAttenuator
                         ? ValidationResult.Success()
                         : ValidationResult.Error($"Out of range 0-{max}")));
 
-            var engaged = CommandBuilder.Solve(bank, target);
-            if (engaged == null)
-            {
-                AnsiConsole.MarkupLine($"[red]{target} dB is not achievable on ATTEN {name}.[/]");
-                Pause();
-                return;
-            }
-
-            var engagedSet = new HashSet<int>(engaged);
             // Only address this bank's digits; the other bank retains its state.
-            string command = CommandBuilder.BuildString(bank, engagedSet);
-            if (Send(command))
-            {
-                foreach (var s in bank) State.Engaged.Remove(s.Digit);
-                foreach (var d in engaged) State.Engaged.Add(d);
-            }
+            Execute(() => _atten.SetBankDb(bank, target));
         }
 
         private static void ToggleSwitch9()
         {
-            bool next = !(State.Switch9 ?? false);
-            if (Send(CommandBuilder.Switch9(next))) State.Switch9 = next;
+            bool next = !(_atten.State.Switch9 ?? false);
+            Execute(() => _atten.SetSwitch9(next));
         }
 
         private static void ToggleSwitch0()
         {
-            bool next = !(State.Switch0 ?? false);
-            if (Send(CommandBuilder.Switch0(next))) State.Switch0 = next;
+            bool next = !(_atten.State.Switch0 ?? false);
+            Execute(() => _atten.SetSwitch0(next));
         }
 
         private static void SendRaw()
@@ -255,14 +230,23 @@ namespace HpAttenuator
                 if (!AnsiConsole.Confirm($"[yellow]'{command.EscapeMarkup()}' contains characters outside A/B/0-9. Send anyway?[/]", false))
                     return;
             }
-            Send(command.Trim());
-            AnsiConsole.MarkupLine("[grey]Note: raw sends are not reflected in the tracked state above.[/]");
+
+            try
+            {
+                _atten.SendRaw(command.Trim());
+                AnsiConsole.MarkupLine($"[green]→ sent[/] [bold]{command.Trim().EscapeMarkup()}[/]");
+                AnsiConsole.MarkupLine("[grey]Note: raw sends are not reflected in the tracked state above.[/]");
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[red]Write failed:[/] {ex.Message.EscapeMarkup()}");
+            }
             Pause();
         }
 
         private static void ShowHistory()
         {
-            if (_link.History.Count == 0)
+            if (_atten.History.Count == 0)
             {
                 AnsiConsole.MarkupLine("[grey]Nothing sent yet.[/]");
             }
@@ -271,7 +255,7 @@ namespace HpAttenuator
                 var table = new Table().Border(TableBorder.Rounded)
                     .AddColumn("#").AddColumn("Data string");
                 int i = 1;
-                foreach (var cmd in _link.History)
+                foreach (var cmd in _atten.History)
                     table.AddRow((i++).ToString(), cmd.EscapeMarkup());
                 AnsiConsole.Write(table);
             }
@@ -280,19 +264,17 @@ namespace HpAttenuator
 
         // ---- Transport helper ----------------------------------------------
 
-        private static bool Send(string command)
+        private static void Execute(Func<string> action)
         {
             try
             {
-                _link.Write(command);
+                string command = action();
                 AnsiConsole.MarkupLine($"[green]→ sent[/] [bold]{command.EscapeMarkup()}[/]");
-                return true;
             }
             catch (Exception ex)
             {
-                AnsiConsole.MarkupLine($"[red]Write failed:[/] {ex.Message.EscapeMarkup()}");
+                AnsiConsole.MarkupLine($"[red]Command failed:[/] {ex.Message.EscapeMarkup()}");
                 Pause();
-                return false;
             }
         }
 
