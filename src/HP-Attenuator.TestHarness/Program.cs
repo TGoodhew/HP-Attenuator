@@ -37,8 +37,19 @@ namespace HpAttenuator.TestHarness
             {
                 Bench bench = BuildBench(opt, disposables);
 
-                // Settling only matters for real relays/measurement hardware.
-                if (bench.IsSimulated) opt.Sweep.SettleMs = 0;
+                // Settling and range calibration only matter on real hardware.
+                if (bench.IsSimulated) { opt.Sweep.SettleMs = 0; opt.Sweep.RangeCalibrate = false; }
+                if (opt.NoCalPass) opt.Sweep.RangeCalibrate = false;
+
+                if (opt.LoadCal)
+                {
+                    AnsiConsole.MarkupLine("[grey]Loading converter cal factors into the 8902A...[/]");
+                    bench.Receiver.Reset();
+                    bench.Receiver.LoadOffsetCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
+                }
+
+                if (opt.Detect)
+                    return RunDetect(opt, bench);
 
                 AttenuatorConfig config = ResolveAttenuator(opt, bench);
 
@@ -92,7 +103,8 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.MarkupLine("[green]Mode:[/] HARDWARE (NI-VISA)");
             var sourceLink = Open(opt.AddrSource, disposables);
             var loLink = Open(opt.AddrLo, disposables);
-            var rxLink = Open(opt.AddrReceiver, disposables);
+            // The 8902A's settled read can take ~10 s (averaging), so give it headroom.
+            var rxLink = Open(opt.AddrReceiver, disposables, 30000);
             var attLink = Open(opt.AddrAttenuator, disposables);
 
             var receiver = new Hp8902A(rxLink) { SettleMilliseconds = 0 };
@@ -106,9 +118,9 @@ namespace HpAttenuator.TestHarness
             };
         }
 
-        private static IInstrumentLink Open(string resource, List<IDisposable> disposables)
+        private static IInstrumentLink Open(string resource, List<IDisposable> disposables, int timeoutMs = 5000)
         {
-            var link = new VisaInstrumentLink(resource);
+            var link = new VisaInstrumentLink(resource, timeoutMs);
             disposables.Add(link);
             return link;
         }
@@ -149,6 +161,57 @@ namespace HpAttenuator.TestHarness
             return id.Config;
         }
 
+        // ---- Signal-presence check -----------------------------------------
+
+        private static int RunDetect(HarnessOptions opt, Bench bench)
+        {
+            // 0 dB engages no sections, so the attenuator config is irrelevant here.
+            var attenuator = bench.MakeAttenuator(AttenuatorConfig.Default());
+            var engine = new MeasurementEngine(bench.Source, bench.Lo, attenuator, bench.Receiver, opt.Sweep);
+
+            IReadOnlyList<double> freqs = opt.ExplicitFreq
+                ? opt.Sweep.Frequencies().ToList()
+                : HarnessOptions.DetectFrequenciesMHz;
+
+            AnsiConsole.MarkupLine(
+                $"[grey]Signal detect:[/] source {opt.Sweep.SourcePowerDbm:0.#} dBm, attenuator 0 dB. " +
+                "Measures the 8902A RF-frequency reading with the source RF on vs off.");
+            AnsiConsole.WriteLine();
+
+            var table = new Table().Border(TableBorder.Rounded);
+            table.AddColumn(new TableColumn("Freq MHz").RightAligned());
+            table.AddColumn("Regime");
+            table.AddColumn(new TableColumn("LO MHz").RightAligned());
+            table.AddColumn(new TableColumn("8902A reads MHz").RightAligned());
+            table.AddColumn("RF on");
+            table.AddColumn("RF off");
+            table.AddColumn("Signal");
+
+            bool all = true;
+            foreach (double f in freqs)
+            {
+                DetectResult d = engine.DetectSignal(f, opt.DetectThresholdDb);
+                all &= d.Detected;
+                table.AddRow(
+                    $"{d.FreqMHz:0.###}",
+                    d.Regime.ToString(),
+                    d.Regime == MeasurementRegime.Converted ? $"{d.LoMHz:0.##}" : "—",
+                    double.IsNaN(d.MeasuredFreqMHz) ? "—" : $"{d.MeasuredFreqMHz:0.###}",
+                    d.SignalWithRfOn ? "[green]signal[/]" : "[grey]none[/]",
+                    d.SignalWithRfOff ? "[red]signal[/]" : "[grey]none[/]",
+                    d.Detected ? "[green]DETECTED[/]" : "[red]no[/]");
+            }
+            AnsiConsole.Write(table);
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine(all
+                ? "[green]Signal detected through the path at all test frequencies.[/]"
+                : "[red]Signal NOT detected at one or more frequencies — check the path / connections.[/]");
+            AnsiConsole.MarkupLine("[grey]Presence check only. Full absolute/attenuation accuracy needs the 8902A " +
+                                   "cal factors loaded and the sensor calibrated to the 8902A reference output.[/]");
+            return all ? 0 : 1;
+        }
+
         // ---- Sweep + reporting ---------------------------------------------
 
         private static int RunSweep(HarnessOptions opt, MeasurementEngine engine, AttenuatorConfig config)
@@ -166,6 +229,7 @@ namespace HpAttenuator.TestHarness
             bool detailed = frequencies.Count <= 12;
             double worstError = 0;
             int measured = 0;
+            int errorPoints = 0;
             string worstWhere = "";
 
             StreamWriter csvWriter;
@@ -178,7 +242,7 @@ namespace HpAttenuator.TestHarness
 
             using (var csv = csvWriter)
             {
-                csv.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,commanded_db,command,measured_dbm,measured_atten_db,expected_atten_db,error_db");
+                csv.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,commanded_db,command,measured_rel_db,measured_atten_db,expected_atten_db,error_db,error");
 
                 foreach (double freq in frequencies)
                 {
@@ -191,11 +255,13 @@ namespace HpAttenuator.TestHarness
                         {
                             F(r.FreqMHz), r.Regime.ToString(), F(r.LoMHz), F(r.IfMHz),
                             p.CommandedDb.ToString(CultureInfo.InvariantCulture), p.Command,
-                            F(p.MeasuredPowerDbm), F(p.MeasuredAttenuationDb),
-                            F(p.ExpectedAttenuationDb), F(p.ErrorDb)
+                            F(p.MeasuredRelativeDb), F(p.MeasuredAttenuationDb),
+                            F(p.ExpectedAttenuationDb), F(p.ErrorDb),
+                            (p.Error ?? "").Replace(",", ";")
                         }));
 
-                        if (Math.Abs(p.ErrorDb) > worstError)
+                        if (p.Error != null) errorPoints++;
+                        else if (Math.Abs(p.ErrorDb) > worstError)
                         {
                             worstError = Math.Abs(p.ErrorDb);
                             worstWhere = $"{r.FreqMHz:0.###} MHz @ {p.CommandedDb} dB";
@@ -208,12 +274,13 @@ namespace HpAttenuator.TestHarness
             }
 
             AnsiConsole.WriteLine();
-            bool pass = worstError <= opt.ToleranceDb;
+            bool pass = errorPoints == 0 && worstError <= opt.ToleranceDb;
             var summary = new Table().Border(TableBorder.Heavy);
             summary.AddColumn("Result"); summary.AddColumn("");
             summary.AddRow("Attenuator", $"X = {config.XModel}, Y = {config.YModel}".EscapeMarkup());
             summary.AddRow("Frequencies measured", measured.ToString());
             summary.AddRow("Worst |error|", $"{worstError:0.00} dB  ({worstWhere})");
+            if (errorPoints > 0) summary.AddRow("8902A errors", $"[red]{errorPoints} point(s)[/]");
             summary.AddRow("Tolerance", $"±{opt.ToleranceDb:0.#} dB");
             summary.AddRow("CSV", Path.GetFullPath(opt.CsvPath).EscapeMarkup());
             summary.AddRow("Verdict", pass ? "[green]PASS[/]" : "[red]FAIL[/]");
@@ -224,41 +291,47 @@ namespace HpAttenuator.TestHarness
 
         private static void RenderFrequencyTable(FreqPointResult r, double tol)
         {
-            var header = $"{r.FreqMHz:0.###} MHz  [{r.Regime}]" +
+            var header = $"{r.FreqMHz:0.###} MHz  {r.Regime}" +
                          (r.Regime == MeasurementRegime.Converted
-                             ? $"  LO={r.LoMHz:0.##} MHz IF={r.IfMHz:0.##} MHz" : "") +
-                         $"  ref={r.ReferencePowerDbm:0.00} dBm";
+                             ? $"  LO={r.LoMHz:0.##} MHz IF={r.IfMHz:0.##} MHz" : "");
 
             var table = new Table().Border(TableBorder.Rounded).Title(header.EscapeMarkup());
             table.AddColumn(new TableColumn("Set dB").RightAligned());
             table.AddColumn("Cmd");
-            table.AddColumn(new TableColumn("Meas dBm").RightAligned());
+            table.AddColumn(new TableColumn("Meas rel dB").RightAligned());
             table.AddColumn(new TableColumn("Meas att dB").RightAligned());
             table.AddColumn(new TableColumn("Error dB").RightAligned());
 
             foreach (var p in r.Points)
             {
+                if (p.Error != null)
+                {
+                    table.AddRow(p.CommandedDb.ToString(), p.Command.EscapeMarkup(),
+                        "[red]—[/]", "[red]—[/]", $"[red]{p.Error.EscapeMarkup()}[/]");
+                    continue;
+                }
                 string err = $"{p.ErrorDb:+0.00;-0.00;0.00}";
                 string errCell = Math.Abs(p.ErrorDb) <= tol ? $"[green]{err}[/]" : $"[red]{err}[/]";
                 table.AddRow(
                     p.CommandedDb.ToString(),
                     p.Command.EscapeMarkup(),
-                    $"{p.MeasuredPowerDbm:0.00}",
+                    $"{p.MeasuredRelativeDb:0.00}",
                     $"{p.MeasuredAttenuationDb:0.00}",
                     errCell);
             }
             if (!string.IsNullOrEmpty(r.Warning))
-                table.Caption(("⚠ " + r.Warning).EscapeMarkup());
+                table.Caption(("! " + r.Warning).EscapeMarkup());
             AnsiConsole.Write(table);
         }
 
         private static void RenderFrequencyLine(FreqPointResult r, double tol)
         {
-            string flag = r.MaxAbsErrorDb <= tol ? "[green]ok[/]" : "[red]!![/]";
+            bool anyError = r.Points.Exists(p => p.Error != null);
+            string flag = anyError ? "[red]ER[/]" : (r.MaxAbsErrorDb <= tol ? "[green]ok[/]" : "[red]!![/]");
             string warn = string.IsNullOrEmpty(r.Warning) ? "" : " [yellow](LO-below)[/]";
             // No square brackets in the plain text — Spectre would parse them as markup.
             AnsiConsole.MarkupLine(
-                $"{flag} {r.FreqMHz,9:0.###} MHz  {r.Regime,-9}  ref={r.ReferencePowerDbm,7:0.0} dBm  " +
+                $"{flag} {r.FreqMHz,9:0.###} MHz  {r.Regime,-9}  " +
                 $"max|err|={r.MaxAbsErrorDb:0.00} dB{warn}");
         }
 

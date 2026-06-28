@@ -134,15 +134,52 @@ namespace HpAttenuator.Instruments
         }
     }
 
-    /// <summary>Simulated 8902A measuring receiver backed by a <see cref="SimulatedBench"/>.</summary>
+    /// <summary>
+    /// Simulated 8902A measuring receiver backed by a <see cref="SimulatedBench"/>.
+    /// Models the relative Tuned RF Level workflow: a 0 dB reference is captured at
+    /// SetReference and subsequent reads return dB relative to it. Throws
+    /// <see cref="Hp8902AException"/> (96) when no signal is present, mirroring real
+    /// hardware.
+    /// </summary>
     public sealed class SimulatedReceiver : IMeasuringReceiver
     {
         private readonly SimulatedBench _bench;
+        private double _referenceDbm;
+        private bool _haveReference;
+        private double _tunedMHz;
+
         public SimulatedReceiver(SimulatedBench bench) => _bench = bench;
         public string ResourceName => "SIM:8902A";
-        public void PrepareTunedRfLevel() { }
-        public void ConfigureDirect(double rfMHz) { }
-        public void ConfigureConverted(double rfMHz, double loMHz) { }
-        public double ReadLevelDbm() => _bench.MeasuredLevelDbm();
+
+        public void Reset() { _haveReference = false; }
+        public void LoadOffsetCalFactors(double referenceCf, System.Collections.Generic.IReadOnlyList<CalFactor> table) { }
+
+        public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
+        {
+            _tunedMHz = rfMHz;
+            _haveReference = false;
+        }
+
+        public void Calibrate() { }
+
+        public void SetReference()
+        {
+            _referenceDbm = _bench.MeasuredLevelDbm();
+            _haveReference = true;
+        }
+
+        public double ReadRelativeDb()
+        {
+            if (!_bench.SourceRfOn) throw new Hp8902AException(96, Hp8902AException.Describe(96));
+            double level = _bench.MeasuredLevelDbm();
+            double reference = _haveReference ? _referenceDbm : level;
+            return level - reference;   // ≤ 0 as attenuation increases
+        }
+
+        public double ReadSignalFrequencyMHz()
+        {
+            if (!_bench.SourceRfOn) throw new Hp8902AException(96, Hp8902AException.Describe(96));
+            return _tunedMHz;
+        }
     }
 }

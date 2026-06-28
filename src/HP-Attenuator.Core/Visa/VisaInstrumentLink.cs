@@ -18,15 +18,15 @@ namespace HpAttenuator.Visa
         public bool IsSimulated => false;
         public IReadOnlyList<string> History => _history;
 
-        public VisaInstrumentLink(string resourceName)
+        public VisaInstrumentLink(string resourceName, int timeoutMs = 5000)
         {
             ResourceName = resourceName;
             _session = (IMessageBasedSession)GlobalResourceManager.Open(resourceName);
 
-            // Drive into a known terminator/timeout posture. The 11713A acts on the
-            // bytes as they arrive; a trailing newline is harmless and matches the
-            // CR/LF that classic controllers append.
-            _session.TimeoutMilliseconds = 5000;
+            // Drive into a known terminator/timeout posture. The timeout must exceed the
+            // longest measurement (e.g. the 8902A's 10 s averaging), so it is caller-set.
+            // A trailing newline on writes is harmless and matches classic controllers.
+            _session.TimeoutMilliseconds = timeoutMs;
             _session.TerminationCharacterEnabled = true;
         }
 

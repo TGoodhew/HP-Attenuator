@@ -10,6 +10,10 @@ namespace HpAttenuator.TestHarness
     {
         public bool Hardware;        // --hardware : drive the real bench (default: simulation)
         public bool Full;           // --full     : full 1 MHz-18 GHz spec sweep
+        public bool Detect;         // --detect   : signal-presence check only (no attenuation sweep)
+        public double DetectThresholdDb = 10.0;
+        public bool LoadCal;        // --load-cal : load converter cal factors into the 8902A first
+        public bool NoCalPass;      // --no-cal-pass : skip the 3-point range calibration pass
         public bool SwappedSim;     // --swapped-sim : simulate the 8496-on-X wiring
         public bool AskAtten;       // --ask      : prompt for the X/Y attenuator assignment
         public int? XAttenSteps;    // --x-atten 8494|8496 : declare ATTEN X attenuator (skip auto-id)
@@ -39,6 +43,10 @@ namespace HpAttenuator.TestHarness
                     case "-h": case "--help": o.ShowHelp = true; break;
                     case "--hardware": o.Hardware = true; break;
                     case "--full": o.Full = true; break;
+                    case "--detect": o.Detect = true; break;
+                    case "--detect-threshold": o.DetectThresholdDb = D(Need(args, ++i)); break;
+                    case "--load-cal": o.LoadCal = true; break;
+                    case "--no-cal-pass": o.NoCalPass = true; break;
                     case "--swapped-sim": o.SwappedSim = true; break;
                     case "--ask": o.AskAtten = true; break;
                     case "--x-atten": o.XAttenSteps = Need(args, ++i) == "8496" ? 10 : 1; break;
@@ -69,6 +77,9 @@ namespace HpAttenuator.TestHarness
             1310.0, 2000.0, 5000.0, 10000.0, 18000.0   // converter regime + edges
         };
 
+        /// <summary>Default frequencies for --detect: one direct, one through the converter.</summary>
+        public static IReadOnlyList<double> DetectFrequenciesMHz { get; } = new[] { 100.0, 2000.0 };
+
         private static string Need(string[] args, int i)
         {
             if (i >= args.Length) throw new ArgumentException("Missing value for an argument.");
@@ -86,6 +97,10 @@ Usage: HP-Attenuator.TestHarness [options]
 
   (default)            Fast SIMULATION run over a representative frequency set.
   --hardware           Drive the real bench over GPIB (NI-VISA).
+  --detect             Signal-presence check only (8902A RF-freq, RF on vs off);
+                       no sweep. Default freqs 100 + 2000 MHz; no calibration needed.
+  --load-cal           Load the converter cal factors into the 8902A first (hardware).
+  --no-cal-pass        Skip the 8902A 3-point range-calibration pass.
   --full               Full spec sweep: 1 MHz-18 GHz, 10 MHz steps, 0-110 dB.
   --swapped-sim        Simulate the 8496 (10 dB) wired to ATTEN X (to test auto-id).
   --x-atten 8494|8496  Declare which attenuator is on ATTEN X (skip auto-id).

@@ -45,25 +45,23 @@ namespace HpAttenuator.Measurement
             source.SetFrequencyMHz(idFreqMHz);
             source.SetPowerDbm(sourcePowerDbm);
             source.RfOn();
-            receiver.PrepareTunedRfLevel();
-            receiver.ConfigureDirect(idFreqMHz);
+            receiver.Reset();
+            receiver.BeginAttenuationMeasurement(idFreqMHz, MeasurementRegime.Direct, 0);
 
+            // 0 dB reference, then read each bank's full attenuation as relative dB.
             attenuator.SetEngaged(Array.Empty<int>());
             Settle(settleMs);
-            double p0 = receiver.ReadLevelDbm();
+            receiver.SetReference();
 
             attenuator.SetEngaged(BankXDigits);
             Settle(settleMs);
-            double px = receiver.ReadLevelDbm();
+            double fullX = -receiver.ReadRelativeDb();
 
             attenuator.SetEngaged(BankYDigits);
             Settle(settleMs);
-            double py = receiver.ReadLevelDbm();
+            double fullY = -receiver.ReadRelativeDb();
 
             attenuator.SetEngaged(Array.Empty<int>()); // leave at 0 dB
-
-            double fullX = p0 - px;
-            double fullY = p0 - py;
 
             // Compare against the two candidate wirings.
             double errDefault = Sq(fullX - 11) + Sq(fullY - 110); // X = 8494, Y = 8496

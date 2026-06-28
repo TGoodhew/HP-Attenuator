@@ -51,21 +51,44 @@ namespace HpAttenuator.Instruments
         Y
     }
 
-    /// <summary>A tuned measuring receiver (e.g. HP 8902A), optionally via a converter.</summary>
+    /// <summary>
+    /// A tuned measuring receiver (e.g. HP 8902A) measuring attenuation as a relative
+    /// (dB) Tuned RF Level, optionally via a converter. The workflow per frequency is:
+    /// Begin -&gt; (Calibrate range while stepping down) -&gt; SetReference at 0 dB -&gt; read
+    /// each step as dB relative. See the 8902A attenuation procedure.
+    /// </summary>
     public interface IMeasuringReceiver
     {
         string ResourceName { get; }
 
-        /// <summary>Puts the receiver into Tuned RF Level mode and a known state.</summary>
-        void PrepareTunedRfLevel();
+        /// <summary>Instrument preset to a known state.</summary>
+        void Reset();
 
-        /// <summary>Configures a direct (no converter) measurement at the given RF frequency.</summary>
-        void ConfigureDirect(double rfMHz);
+        /// <summary>Loads the Frequency-Offset RF-Power cal-factor table (for the converter path).</summary>
+        void LoadOffsetCalFactors(double referenceCf, IReadOnlyList<CalFactor> table);
 
-        /// <summary>Configures a frequency-offset (converter) measurement: LO frequency + tuned RF.</summary>
-        void ConfigureConverted(double rfMHz, double loMHz);
+        /// <summary>
+        /// Begins a Tuned RF Level relative measurement at the given RF frequency, in the
+        /// direct or converter (frequency-offset, with LO) regime.
+        /// </summary>
+        void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz);
 
-        /// <summary>Triggers a settled measurement and returns the level in dBm.</summary>
-        double ReadLevelDbm();
+        /// <summary>Performs one range-calibration step (CALIBRATE) at the current level.</summary>
+        void Calibrate();
+
+        /// <summary>Sets the 0 dB reference (SET REF) at the current level.</summary>
+        void SetReference();
+
+        /// <summary>
+        /// Triggers a settled measurement and returns the level in dB relative to the
+        /// reference (≤ 0). Throws <see cref="Hp8902AException"/> on an instrument error.
+        /// </summary>
+        double ReadRelativeDb();
+
+        /// <summary>
+        /// Measures the input signal frequency (MHz) — used as a signal-presence check.
+        /// Throws <see cref="Hp8902AException"/> (code 96) when no signal is sensed.
+        /// </summary>
+        double ReadSignalFrequencyMHz();
     }
 }

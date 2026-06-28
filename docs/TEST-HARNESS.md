@@ -16,10 +16,39 @@ For each source frequency it:
 1. Sets the **8340B** source to the frequency at the configured power (default
    0 dBm).
 2. Establishes the measurement regime (direct or via the converter — see below).
-3. Steps the **11713A** attenuator from 0 to 110 dB (default 10 dB steps) and, at
-   each setting, reads the level on the **8902A** measuring receiver.
-4. Reports the **measured attenuation** relative to the 0 dB reading, with the
-   error versus the commanded value.
+3. Configures the **8902A** for a **Tuned RF Level** measurement and, on hardware,
+   runs the **3-point range calibration** (steps the attenuator down, issuing
+   `CALIBRATE` so the receiver calibrates each of its RF ranges).
+4. Takes a **0 dB reference** (`SET REF`) at the lowest attenuation.
+5. Steps the **11713A** attenuator from 0 to 110 dB (default 10 dB steps) and reads
+   each level as **dB relative to the reference** — the manual-recommended method
+   for attenuator measurement (≈±0.015 dB vs ±0.12 dB for absolute).
+6. Reports the **measured attenuation** (the negated relative reading) and the
+   error versus the commanded value. If the 8902A returns an error (see below),
+   the point is flagged.
+
+### 8902A readings and errors
+
+The 8902A returns a 17-character implicit-point value in *fundamental units*; in
+LOG relative mode that is **dB** directly. Any value ≥ 9×10¹⁰ is an **error
+sentinel** of the form `+900000NNNNE+01`, where `NN` is the error code
+(`code = (value − 9×10¹⁰) / 1000`). The driver decodes these and surfaces them —
+e.g. **Error 96 = "no signal sensed"** (the receiver can't tune to a signal),
+**15 = cal-factor error**, **01/02 = input level too high/low**. (The earlier
+"+139.5 dBm" reading was an undecoded Error 96.)
+
+### Calibration factors and reference sync (for absolute / converter accuracy)
+
+Relative attenuation cancels the calibration, but for the converter path and any
+absolute work the 8902A needs the sensor cal factors and a sensor calibration:
+
+- `--load-cal` loads the converter cal-factor table (from the sensor label, S/N
+  2407A00808, 2–18 GHz) into the 8902A's Frequency-Offset RF-Power table
+  (`27.3SP0MZ`, then `37.9SP` / `37.3SP100CF` / `37.3SP<f>MZ<cf>CF` / `37.0SP`).
+- The **sensor reference sync** is a bench step: connect the sensor between the
+  8902A `SENSOR` input and its **50 MHz / 1 mW CALIBRATION RF POWER OUTPUT**, then
+  `ZR` (zero), `C1 T3 SC` (calibrate + save), `C0`. The 11793A itself is passive;
+  its loss is corrected by the cal-factor table.
 
 ## Equipment chain
 
@@ -114,6 +143,9 @@ dotnet run --project src/HP-Attenuator.TestHarness -- --hardware `
 |---|---|
 | *(none)* | Fast **simulation** over a representative frequency set |
 | `--hardware` | Drive the real bench over NI-VISA |
+| `--detect` | Signal-presence check only (8902A RF-freq, source RF on vs off) |
+| `--load-cal` | Load the converter cal factors into the 8902A first (hardware) |
+| `--no-cal-pass` | Skip the 8902A 3-point range-calibration pass |
 | `--full` | Full spec sweep: 1 MHz–18 GHz, 10 MHz steps, 0–110 dB |
 | `--swapped-sim` | Simulate the 8496 wired to ATTEN X (tests auto-id) |
 | `--x-atten 8494\|8496` | Declare which attenuator is on ATTEN X (skip auto-id) |
@@ -138,8 +170,8 @@ VISA defaults: source `GPIB0::20::INSTR`, LO `GPIB0::19::INSTR`, receiver
   frequency × attenuation point:
 
   ```
-  freq_mhz,regime,lo_mhz,if_mhz,commanded_db,command,measured_dbm,
-  measured_atten_db,expected_atten_db,error_db
+  freq_mhz,regime,lo_mhz,if_mhz,commanded_db,command,measured_rel_db,
+  measured_atten_db,expected_atten_db,error_db,error
   ```
 
 The process exit code is **0** on PASS, **1** on FAIL, **2** on error — so it can

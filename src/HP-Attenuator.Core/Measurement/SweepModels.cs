@@ -20,6 +20,9 @@ namespace HpAttenuator.Measurement
         /// <summary>Settle time per attenuator step, in ms (on top of the 8902A's T3 settling).</summary>
         public int SettleMs { get; set; } = 100;
 
+        /// <summary>Run the 8902A 3-point range-calibration pass before measuring (hardware).</summary>
+        public bool RangeCalibrate { get; set; } = true;
+
         public IEnumerable<double> Frequencies()
         {
             int n = (int)System.Math.Round((FreqStopMHz - FreqStartMHz) / FreqStepMHz) + 1;
@@ -46,10 +49,26 @@ namespace HpAttenuator.Measurement
     {
         public int CommandedDb { get; set; }
         public string Command { get; set; }
-        public double MeasuredPowerDbm { get; set; }
-        public double MeasuredAttenuationDb { get; set; }
+        public double MeasuredRelativeDb { get; set; }   // 8902A reading, dB rel to 0 dB ref (≤ 0)
+        public double MeasuredAttenuationDb { get; set; } // = -MeasuredRelativeDb
         public double ExpectedAttenuationDb { get; set; }
         public double ErrorDb { get; set; }
+        public string Error { get; set; }                 // set if the 8902A reported an error
+    }
+
+    /// <summary>Result of a signal-presence check at one frequency.</summary>
+    public sealed class DetectResult
+    {
+        public double FreqMHz { get; set; }
+        public MeasurementRegime Regime { get; set; }
+        public double LoMHz { get; set; }
+        public double IfMHz { get; set; }
+        public double MeasuredFreqMHz { get; set; } = double.NaN; // 8902A M5 with RF on
+        public bool SignalWithRfOn { get; set; }
+        public bool SignalWithRfOff { get; set; }
+        public bool Detected { get; set; }
+        public string Warning { get; set; }
+        public string Note { get; set; }
     }
 
     /// <summary>All attenuator measurements at one frequency.</summary>
