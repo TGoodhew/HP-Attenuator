@@ -18,20 +18,14 @@
     <!-- Provides the .NET Framework 4.7.2 reference assemblies so the project
          builds with the dotnet SDK without the targeting pack installed. -->
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
-  </ItemGroup>
-
-  <!-- NI-VISA.NET assemblies. These HintPaths point at the locally-installed
-       NI-VISA (VISA.NET Shared Components + NI VISA.NET). Adjust the version
-       folders if your installed VISA.NET version differs. See README. -->
-  <ItemGroup>
-    <Reference Include="Ivi.Visa">
-      <HintPath>C:\Program Files\IVI Foundation\VISA\Microsoft.NET\Framework64\v4.0.30319\VISA.NET Shared Components 8.0.2\Ivi.Visa.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="NationalInstruments.Visa">
-      <HintPath>C:\Program Files\IVI Foundation\VISA\Microsoft.NET\Framework64\v4.0.30319\NI VISA.NET 26.0\NationalInstruments.Visa.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
+    <!-- IVI VISA.NET shared component (the vendor-neutral Ivi.Visa API). This
+         restores from NuGet so the project builds with no local NI-VISA install
+         (e.g. on CI). At runtime, GlobalResourceManager dispatches to the
+         installed VISA.NET provider (NI-VISA), and the IVI publisher policy in
+         the GAC redirects this reference to the machine's installed Ivi.Visa.
+         A working NI-VISA installation is therefore still required to talk to
+         real hardware. -->
+    <PackageReference Include="Kelary.Ivi.Visa" Version="7.2.0" />
   </ItemGroup>
 
 </Project>

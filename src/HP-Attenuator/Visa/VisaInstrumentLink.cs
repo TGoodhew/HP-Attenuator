@@ -1,17 +1,17 @@
 using System;
 using System.Collections.Generic;
 using Ivi.Visa;
-using NationalInstruments.Visa;
 
 namespace HpAttenuator.Visa
 {
     /// <summary>
-    /// Live link to a 11713A over NI-VISA. The 11713A is a listen-only device, so
-    /// this link only ever writes; it never reads.
+    /// Live link to a 11713A over VISA, using the vendor-neutral Ivi.Visa API.
+    /// At runtime this dispatches to the installed VISA.NET provider (NI-VISA).
+    /// The 11713A is a listen-only device, so this link only ever writes; it
+    /// never reads.
     /// </summary>
     public sealed class VisaInstrumentLink : IInstrumentLink
     {
-        private readonly ResourceManager _resourceManager;
         private readonly IMessageBasedSession _session;
         private readonly List<string> _history = new List<string>();
 
@@ -22,8 +22,7 @@ namespace HpAttenuator.Visa
         public VisaInstrumentLink(string resourceName)
         {
             ResourceName = resourceName;
-            _resourceManager = new ResourceManager();
-            _session = (IMessageBasedSession)_resourceManager.Open(resourceName);
+            _session = (IMessageBasedSession)GlobalResourceManager.Open(resourceName);
 
             // Drive into a known terminator/timeout posture. The 11713A acts on the
             // bytes as they arrive; a trailing newline is harmless and matches the
@@ -42,23 +41,19 @@ namespace HpAttenuator.Visa
         /// <summary>Lists VISA INSTR resources visible to the resource manager.</summary>
         public static IEnumerable<string> FindResources()
         {
-            using (var rm = new ResourceManager())
+            try
             {
-                try
-                {
-                    return new List<string>(rm.Find("?*INSTR"));
-                }
-                catch (Exception)
-                {
-                    return Array.Empty<string>();
-                }
+                return new List<string>(GlobalResourceManager.Find("?*INSTR"));
+            }
+            catch (Exception)
+            {
+                return Array.Empty<string>();
             }
         }
 
         public void Dispose()
         {
             try { _session?.Dispose(); } catch { /* ignore */ }
-            try { _resourceManager?.Dispose(); } catch { /* ignore */ }
         }
     }
 }

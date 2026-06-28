@@ -1,0 +1,66 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore HP-Attenuator.sln
+
+      - name: Build (Release)
+        run: dotnet build HP-Attenuator.sln -c Release --no-restore
+
+      - name: Package
+        id: package
+        shell: pwsh
+        run: |
+          $version = "1.0.${{ github.run_number }}"
+          $out = "dist"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $zip = "$out/HP-Attenuator-v$version.zip"
+          Compress-Archive -Path "src/HP-Attenuator/bin/Release/*" -DestinationPath $zip -Force
+          "version=$version"          >> $env:GITHUB_OUTPUT
+          "zip=$zip"                  >> $env:GITHUB_OUTPUT
+          Write-Host "Packaged $zip"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HP-Attenuator-v${{ steps.package.outputs.version }}
+          path: ${{ steps.package.outputs.zip }}
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.package.outputs.version }}
+          name: HP-Attenuator v${{ steps.package.outputs.version }}
+          body: |
+            Automated release built from `${{ github.sha }}`.
+
+            **Contents:** self-contained .NET Framework 4.7.2 build of the
+            HP-Attenuator 11713A controller (`HP-Attenuator.exe` + dependencies).
+
+            > Requires NI-VISA to be installed to talk to real GPIB hardware;
+            > the built-in simulated driver needs no install.
+          files: ${{ steps.package.outputs.zip }}
+          make_latest: true

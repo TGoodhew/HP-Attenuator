@@ -1,5 +1,7 @@
 # HP-Attenuator
 
+[![Build & Release](https://github.com/TGoodhew/HP-Attenuator/actions/workflows/release.yml/badge.svg)](https://github.com/TGoodhew/HP-Attenuator/actions/workflows/release.yml)
+
 A small interactive console for driving an **HP/Agilent 11713A Attenuator/Switch
 Driver** over GPIB. It turns desired attenuation (in dB) into the 11713A's
 `A`/`B` relay data strings and sends them via **NI-VISA**, with a
@@ -62,28 +64,25 @@ ATTEN X = digits **1–4**, ATTEN Y = digits **5–8**, independent switches on
 
 ## Requirements
 
-- **.NET Framework 4.7.2** (the project targets `net472`)
-- **NI-VISA** with **VISA.NET** installed (this repo references NI VISA.NET 26.0
-  and VISA.NET Shared Components 8.0.2)
-- A GPIB interface and a 11713A — or just use the simulator
+**To build** (no instrument or VISA install needed):
 
-The project builds with the **.NET SDK** (`dotnet build`); the .NET Framework
-reference assemblies are pulled in via the
-`Microsoft.NETFramework.ReferenceAssemblies` NuGet package, so no targeting pack
-install is required.
+- The **.NET SDK** (`dotnet build`). All dependencies restore from NuGet:
+  - [`Spectre.Console`](https://www.nuget.org/packages/Spectre.Console) — terminal UI
+  - [`Kelary.Ivi.Visa`](https://www.nuget.org/packages/Kelary.Ivi.Visa) — the
+    vendor-neutral `Ivi.Visa` VISA.NET API
+  - [`Microsoft.NETFramework.ReferenceAssemblies`](https://www.nuget.org/packages/Microsoft.NETFramework.ReferenceAssemblies)
+    — the .NET Framework 4.7.2 reference assemblies, so no targeting pack
+    install is required
 
-### VISA.NET reference paths
+**To run against real hardware:**
 
-[`HP-Attenuator.csproj`](src/HP-Attenuator/HP-Attenuator.csproj) references the
-VISA.NET assemblies by absolute path:
-
-```
-C:\Program Files\IVI Foundation\VISA\Microsoft.NET\Framework64\v4.0.30319\VISA.NET Shared Components 8.0.2\Ivi.Visa.dll
-C:\Program Files\IVI Foundation\VISA\Microsoft.NET\Framework64\v4.0.30319\NI VISA.NET 26.0\NationalInstruments.Visa.dll
-```
-
-If your installed VISA.NET version differs, update those `HintPath` version
-folders.
+- **.NET Framework 4.7.2** runtime (the project targets `net472`)
+- **NI-VISA** installed. The app talks to the standard `Ivi.Visa` API; at
+  runtime `GlobalResourceManager` dispatches to the installed VISA.NET provider
+  (NI-VISA), and the IVI publisher policy in the GAC redirects the `Ivi.Visa`
+  reference to the machine's installed version.
+- A GPIB interface and a 11713A — or just use the built-in **simulator**, which
+  needs none of the above.
 
 ## Build & run
 
@@ -114,6 +113,18 @@ src/HP-Attenuator/
     VisaInstrumentLink.cs        live NI-VISA session (write-only)
     SimulatedInstrumentLink.cs   in-memory simulator
 ```
+
+## Continuous integration & releases
+
+Every push to `main` that touches code triggers the
+[**Build & Release**](.github/workflows/release.yml) GitHub Actions workflow,
+which builds the project in `Release` on a Windows runner, zips the output, and
+publishes a versioned **GitHub Release** (`v1.0.<run-number>`) with the archive
+attached. Grab the newest build from the
+[Releases page](https://github.com/TGoodhew/HP-Attenuator/releases/latest).
+
+The workflow can also be run on demand from the **Actions** tab
+(*workflow_dispatch*).
 
 ## License
 
