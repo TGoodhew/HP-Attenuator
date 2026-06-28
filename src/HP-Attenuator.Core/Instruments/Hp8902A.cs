@@ -23,6 +23,12 @@ namespace HpAttenuator.Instruments
         /// <summary>Settle delay after CALIBRATE / SET REF, ms. The settled read uses T3.</summary>
         public int SettleMilliseconds { get; set; } = 0;
 
+        /// <summary>Delay after ZERO before reading back, ms.</summary>
+        public int ZeroSettleMs { get; set; } = 5000;
+
+        /// <summary>Delay after CALIBRATE-on before reading the reference, ms.</summary>
+        public int CalSettleMs { get; set; } = 3000;
+
         public Hp8902A(IInstrumentLink link) => _link = link ?? throw new ArgumentNullException(nameof(link));
 
         public string ResourceName => _link.ResourceName;
@@ -39,6 +45,52 @@ namespace HpAttenuator.Instruments
             foreach (var c in table)
                 _link.Write("37.3SP" + Fmt(c.FreqMHz) + "MZ" + Fmt(c.Cf) + "CF");
             _link.Write("37.0SP");                                  // automatic cal-factor selection
+        }
+
+        public void SelectRfPower() => _link.Write("M4");
+
+        public void LoadCalFactors(double referenceCf, IReadOnlyList<CalFactor> table)
+        {
+            _link.Write("M4");        // RF Power
+            _link.Write("27.0SP");    // normal (not offset) mode -> 37.x hits the normal table
+            _link.Write("37.9SP");    // clear
+            _link.Write("37.3SP" + Fmt(referenceCf) + "CF");        // REF CF (50 MHz)
+            foreach (var c in table)
+                _link.Write("37.3SP" + Fmt(c.FreqMHz) + "MZ" + Fmt(c.Cf) + "CF");
+            _link.Write("37.0SP");    // automatic cal-factor selection
+        }
+
+        public double ZeroSensor()
+        {
+            _link.Write("M4");        // RF Power
+            _link.Write("C0");        // calibrator off — no reference power while zeroing
+            _link.Write("ZR");        // zero the sensor
+            if (ZeroSettleMs > 0) Thread.Sleep(ZeroSettleMs);
+            return ReadMeasurement(); // watts, ~0
+        }
+
+        public double CalibrateSensor()
+        {
+            _link.Write("M4");        // ensure RF Power mode (continues from the zero step)
+            _link.Write("C1");        // calibrator on: 50 MHz / 1 mW reference
+            if (CalSettleMs > 0) Thread.Sleep(CalSettleMs);
+
+            // Settled read with the calibrator on (manual: C1 T3 SC). If the reference
+            // isn't ~1 mW (0 dBm), the sensor is not on the CALIBRATION RF POWER OUTPUT;
+            // do NOT save — saving here would corrupt the sensor cal.
+            double pre = ReadMeasurement();
+            double preDbm = Rf.WattsToDbm(pre);
+            if (preDbm < -10.0)
+            {
+                _link.Write("C0");
+                throw new Hp8902AException(18,
+                    $"reference reads {preDbm:0.0} dBm, not ~0 dBm — {Hp8902AException.Describe(18)}");
+            }
+
+            _link.Write("SC");        // save cal — scales the reference to read 1.000 mW
+            double reference = ReadMeasurement();
+            _link.Write("C0");        // calibrator off
+            return reference;         // watts, ≈ 1e-3
         }
 
         public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)

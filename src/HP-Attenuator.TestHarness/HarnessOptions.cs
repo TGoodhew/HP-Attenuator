@@ -14,6 +14,9 @@ namespace HpAttenuator.TestHarness
         public double DetectThresholdDb = 10.0;
         public bool LoadCal;        // --load-cal : load converter cal factors into the 8902A first
         public bool NoCalPass;      // --no-cal-pass : skip the 3-point range calibration pass
+        public bool SensorCal;      // --sensor-cal : interactive zero + (prompt to connect) + calibrate
+        public bool SensorZero;     // --sensor-zero : upload cal factors + zero the power sensor
+        public bool SensorCalibrate;// --sensor-calibrate : calibrate the sensor vs the 50 MHz/1 mW ref
         public bool SwappedSim;     // --swapped-sim : simulate the 8496-on-X wiring
         public bool AskAtten;       // --ask      : prompt for the X/Y attenuator assignment
         public int? XAttenSteps;    // --x-atten 8494|8496 : declare ATTEN X attenuator (skip auto-id)
@@ -47,6 +50,9 @@ namespace HpAttenuator.TestHarness
                     case "--detect-threshold": o.DetectThresholdDb = D(Need(args, ++i)); break;
                     case "--load-cal": o.LoadCal = true; break;
                     case "--no-cal-pass": o.NoCalPass = true; break;
+                    case "--sensor-cal": o.SensorCal = true; break;
+                    case "--sensor-zero": o.SensorZero = true; break;
+                    case "--sensor-calibrate": o.SensorCalibrate = true; break;
                     case "--swapped-sim": o.SwappedSim = true; break;
                     case "--ask": o.AskAtten = true; break;
                     case "--x-atten": o.XAttenSteps = Need(args, ++i) == "8496" ? 10 : 1; break;
@@ -101,6 +107,10 @@ Usage: HP-Attenuator.TestHarness [options]
                        no sweep. Default freqs 100 + 2000 MHz; no calibration needed.
   --load-cal           Load the converter cal factors into the 8902A first (hardware).
   --no-cal-pass        Skip the 8902A 3-point range-calibration pass.
+  --sensor-cal         Interactive: upload cal factors + zero, prompt you to attach the
+                       sensor to the CAL output, then calibrate. (Run this one yourself.)
+  --sensor-zero        Upload cal factors and ZERO the 8902A power sensor, then stop.
+  --sensor-calibrate   Calibrate the sensor against the 50 MHz/1 mW reference output.
   --full               Full spec sweep: 1 MHz-18 GHz, 10 MHz steps, 0-110 dB.
   --swapped-sim        Simulate the 8496 (10 dB) wired to ATTEN X (to test auto-id).
   --x-atten 8494|8496  Declare which attenuator is on ATTEN X (skip auto-id).

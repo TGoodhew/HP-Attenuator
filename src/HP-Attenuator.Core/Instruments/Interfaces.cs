@@ -67,6 +67,21 @@ namespace HpAttenuator.Instruments
         /// <summary>Loads the Frequency-Offset RF-Power cal-factor table (for the converter path).</summary>
         void LoadOffsetCalFactors(double referenceCf, IReadOnlyList<CalFactor> table);
 
+        /// <summary>Selects the RF Power (power-sensor) measurement.</summary>
+        void SelectRfPower();
+
+        /// <summary>Loads the normal-mode RF-Power cal-factor table for the sensor.</summary>
+        void LoadCalFactors(double referenceCf, IReadOnlyList<CalFactor> table);
+
+        /// <summary>Zeroes the power sensor (calibrator off). Returns the zeroed reading in watts.</summary>
+        double ZeroSensor();
+
+        /// <summary>
+        /// Calibrates the sensor against the 50 MHz / 1 mW reference (C1 → settle → SC → C0).
+        /// Returns the reference power read back in watts (≈ 1e-3 W = 0 dBm).
+        /// </summary>
+        double CalibrateSensor();
+
         /// <summary>
         /// Begins a Tuned RF Level relative measurement at the given RF frequency, in the
         /// direct or converter (frequency-offset, with LO) regime.

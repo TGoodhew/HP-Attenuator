@@ -35,6 +35,14 @@ namespace HpAttenuator.TestHarness
             var disposables = new List<IDisposable>();
             try
             {
+                // The sensor cal steps only need the 8902A — don't open the whole bench.
+                if (opt.SensorCal || opt.SensorZero || opt.SensorCalibrate)
+                {
+                    var receiver = BuildReceiverOnly(opt, disposables);
+                    if (opt.SensorCal) return RunSensorCalInteractive(receiver);
+                    return opt.SensorZero ? RunSensorZero(receiver) : RunSensorCalibrate(receiver);
+                }
+
                 Bench bench = BuildBench(opt, disposables);
 
                 // Settling and range calibration only matter on real hardware.
@@ -123,6 +131,131 @@ namespace HpAttenuator.TestHarness
             var link = new VisaInstrumentLink(resource, timeoutMs);
             disposables.Add(link);
             return link;
+        }
+
+        private static IMeasuringReceiver BuildReceiverOnly(HarnessOptions opt, List<IDisposable> disposables)
+        {
+            if (!opt.Hardware)
+            {
+                AnsiConsole.MarkupLine("[yellow]Mode:[/] SIMULATION");
+                return new SimulatedReceiver(new SimulatedBench());
+            }
+            AnsiConsole.MarkupLine($"[green]Mode:[/] HARDWARE (8902A @ {opt.AddrReceiver.EscapeMarkup()})");
+            return new Hp8902A(Open(opt.AddrReceiver, disposables, 30000));
+        }
+
+        // ---- Power-sensor zero / calibrate ---------------------------------
+
+        /// <summary>
+        /// Full interactive sensor setup. The calibrate step physically requires a human to
+        /// move the sensor onto the 8902A CALIBRATION RF POWER OUTPUT, so this pauses and
+        /// waits for the operator before calibrating.
+        /// </summary>
+        private static int RunSensorCalInteractive(IMeasuringReceiver receiver)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold]8902A power-sensor setup[/]");
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold]Step 1 of 2 — zero[/]  (the sensor must see NO RF; do NOT put it on the");
+            AnsiConsole.MarkupLine("CAL output yet — leave it on the source-under-test with RF off, or disconnected).");
+            AnsiConsole.Markup("Press [green]Enter[/] to upload cal factors and zero the sensor...");
+            Console.ReadLine();
+            try
+            {
+                receiver.Reset();
+                receiver.SelectRfPower();
+                receiver.LoadCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
+                AnsiConsole.MarkupLine($"  [green]✓[/] Cal factors uploaded (REF CF {ConverterCalFactors.ReferenceCf:0}% + " +
+                                       $"{ConverterCalFactors.Default.Count} entries)");
+                double zeroW = receiver.ZeroSensor();
+                AnsiConsole.MarkupLine($"  [green]✓[/] Sensor zeroed — residual {zeroW * 1e9:0.0} nW");
+            }
+            catch (Hp8902AException ex)
+            {
+                AnsiConsole.MarkupLine($"  [red]✗ {ex.Message.EscapeMarkup()}[/]");
+                return 1;
+            }
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold yellow]Step 2 of 2 — calibrate[/]");
+            AnsiConsole.MarkupLine("Now connect the sensor to the 8902A [bold]CALIBRATION RF POWER OUTPUT[/] " +
+                                   "(50 MHz / 1 mW).");
+            AnsiConsole.Markup("Press [green]Enter[/] once it is connected (or type 'q' to abort)... ");
+            string reply = Console.ReadLine();
+            if (reply != null && reply.Trim().Equals("q", StringComparison.OrdinalIgnoreCase))
+            {
+                AnsiConsole.MarkupLine("[grey]Aborted — sensor not calibrated.[/]");
+                return 1;
+            }
+
+            try
+            {
+                double refW = receiver.CalibrateSensor();
+                double dbm = Rf.WattsToDbm(refW);
+                AnsiConsole.MarkupLine($"  [green]✓[/] Reference reads {refW * 1e3:0.000} mW ({dbm:+0.00;-0.00;0.00} dBm) — cal saved");
+            }
+            catch (Hp8902AException ex)
+            {
+                AnsiConsole.MarkupLine($"  [red]✗ {ex.Message.EscapeMarkup()}[/]");
+                AnsiConsole.MarkupLine("  [yellow](The sensor isn't seeing the 1 mW reference — check it is on the " +
+                                       "CALIBRATION RF POWER OUTPUT, then re-run.)[/]");
+                return 1;
+            }
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold green]Sensor zeroed and calibrated. Ready for power measurements.[/]");
+            return 0;
+        }
+
+        private static int RunSensorZero(IMeasuringReceiver receiver)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold]Sensor setup — upload cal factors + zero[/]");
+            try
+            {
+                receiver.Reset();
+                AnsiConsole.MarkupLine("  [grey]Instrument preset (IP)[/]");
+                receiver.SelectRfPower();
+                AnsiConsole.MarkupLine("  [grey]RF Power mode (M4)[/]");
+                receiver.LoadCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
+                AnsiConsole.MarkupLine($"  [green]✓[/] Cal factors uploaded — REF CF {ConverterCalFactors.ReferenceCf:0}% + " +
+                                       $"{ConverterCalFactors.Default.Count} entries (2–18 GHz)");
+                AnsiConsole.MarkupLine("  [grey]Zeroing sensor (calibrator off, ZR)...[/]");
+                double zeroW = receiver.ZeroSensor();
+                AnsiConsole.MarkupLine($"  [green]✓[/] Sensor zeroed — residual {zeroW * 1e9:0.0} nW");
+            }
+            catch (Hp8902AException ex)
+            {
+                AnsiConsole.MarkupLine($"  [red]✗ {ex.Message.EscapeMarkup()}[/]");
+                return 1;
+            }
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold yellow]Next:[/] connect the sensor to the 8902A CALIBRATION RF POWER OUTPUT, " +
+                                   "then run [bold]--sensor-calibrate[/].");
+            return 0;
+        }
+
+        private static int RunSensorCalibrate(IMeasuringReceiver receiver)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold]Sensor calibrate — against 50 MHz / 1 mW reference[/]");
+            try
+            {
+                AnsiConsole.MarkupLine("  [grey]Calibrating (C1 → settle → SC → C0)...[/]");
+                double refW = receiver.CalibrateSensor();
+                double dbm = Rf.WattsToDbm(refW);
+                AnsiConsole.MarkupLine($"  [green]✓[/] Reference reads {refW * 1e3:0.000} mW ({dbm:+0.00;-0.00;0.00} dBm) — cal saved");
+            }
+            catch (Hp8902AException ex)
+            {
+                AnsiConsole.MarkupLine($"  [red]✗ {ex.Message.EscapeMarkup()}[/]");
+                AnsiConsole.MarkupLine("  [yellow](Is the sensor connected to the CALIBRATION RF POWER OUTPUT?)[/]");
+                return 1;
+            }
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold green]Sensor zero + calibration complete.[/]");
+            return 0;
         }
 
         // ---- Attenuator identification -------------------------------------

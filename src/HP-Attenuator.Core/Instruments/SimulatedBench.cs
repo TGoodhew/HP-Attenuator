@@ -153,6 +153,10 @@ namespace HpAttenuator.Instruments
 
         public void Reset() { _haveReference = false; }
         public void LoadOffsetCalFactors(double referenceCf, System.Collections.Generic.IReadOnlyList<CalFactor> table) { }
+        public void SelectRfPower() { }
+        public void LoadCalFactors(double referenceCf, System.Collections.Generic.IReadOnlyList<CalFactor> table) { }
+        public double ZeroSensor() => 2e-10;     // a near-zero residual, watts
+        public double CalibrateSensor() => 1.0e-3; // 1.000 mW reference, watts
 
         public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
         {
