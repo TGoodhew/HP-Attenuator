@@ -37,6 +37,23 @@ e.g. **Error 96 = "no signal sensed"** (the receiver can't tune to a signal),
 **15 = cal-factor error**, **01/02 = input level too high/low**. (The earlier
 "+139.5 dBm" reading was an undecoded Error 96.)
 
+### Mandatory power-sensor calibration (hardware)
+
+A 8902A Tuned RF Level measurement requires a calibrated RF Power sensor first
+(Operation manual, p.3-95). So **every `--hardware` measurement run begins with an
+interactive sensor calibration** that you cannot skip without `--skip-sensor-cal`:
+
+1. It uploads the cal factors and **zeroes** the sensor (sensor sees no RF — not on
+   the CAL output yet).
+2. It **pauses and prompts you to connect the sensor to the `CALIBRATION RF POWER
+   OUTPUT`** (50 MHz / 1 mW) and waits for you.
+3. It **calibrates** and verifies the reference reads ~0 dBm (Error 18 and abort if
+   the sensor isn't on the output — it will not save a bad cal).
+4. It prompts you to restore the measurement connections, then runs the sweep.
+
+This is built into the harness because the connect step is physical — it must ask
+the operator. The standalone `--sensor-cal` runs just this flow.
+
 ### Calibration factors and reference sync (for absolute / converter accuracy)
 
 Relative attenuation cancels the calibration, but for the converter path and any

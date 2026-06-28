@@ -59,6 +59,20 @@ namespace HpAttenuator.TestHarness
                 if (opt.Detect)
                     return RunDetect(opt, bench);
 
+                // Mandatory: the 8902A Tuned RF Level measurement requires a calibrated
+                // power sensor first. This pauses for the operator to use the CAL output.
+                if (!bench.IsSimulated && !opt.SkipSensorCal)
+                {
+                    if (!InteractiveSensorCalibrate(bench.Receiver))
+                    {
+                        AnsiConsole.MarkupLine("[red]Sensor not calibrated — aborting (measurement needs it).[/]");
+                        return 1;
+                    }
+                    AnsiConsole.MarkupLine("Restore the measurement connections (sensor / converter IF as needed), " +
+                                           "then press [green]Enter[/] to start the sweep...");
+                    Console.ReadLine();
+                }
+
                 AttenuatorConfig config = ResolveAttenuator(opt, bench);
 
                 // (Re)build the attenuator with the resolved wiring so dB maps to the
@@ -152,9 +166,17 @@ namespace HpAttenuator.TestHarness
         /// waits for the operator before calibrating.
         /// </summary>
         private static int RunSensorCalInteractive(IMeasuringReceiver receiver)
+            => InteractiveSensorCalibrate(receiver) ? 0 : 1;
+
+        /// <summary>
+        /// Mandatory before any 8902A measurement: zero the sensor, prompt the operator to
+        /// connect it to the CALIBRATION RF POWER OUTPUT, calibrate, and verify ~0 dBm.
+        /// Returns true on success. The connect step is physical, so it pauses for the human.
+        /// </summary>
+        private static bool InteractiveSensorCalibrate(IMeasuringReceiver receiver)
         {
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[bold]8902A power-sensor setup[/]");
+            AnsiConsole.MarkupLine("[bold]8902A power-sensor setup[/] [grey](required before measuring)[/]");
 
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine("[bold]Step 1 of 2 — zero[/]  (the sensor must see NO RF; do NOT put it on the");
@@ -174,7 +196,7 @@ namespace HpAttenuator.TestHarness
             catch (Hp8902AException ex)
             {
                 AnsiConsole.MarkupLine($"  [red]✗ {ex.Message.EscapeMarkup()}[/]");
-                return 1;
+                return false;
             }
 
             AnsiConsole.WriteLine();
@@ -186,7 +208,7 @@ namespace HpAttenuator.TestHarness
             if (reply != null && reply.Trim().Equals("q", StringComparison.OrdinalIgnoreCase))
             {
                 AnsiConsole.MarkupLine("[grey]Aborted — sensor not calibrated.[/]");
-                return 1;
+                return false;
             }
 
             try
@@ -200,12 +222,12 @@ namespace HpAttenuator.TestHarness
                 AnsiConsole.MarkupLine($"  [red]✗ {ex.Message.EscapeMarkup()}[/]");
                 AnsiConsole.MarkupLine("  [yellow](The sensor isn't seeing the 1 mW reference — check it is on the " +
                                        "CALIBRATION RF POWER OUTPUT, then re-run.)[/]");
-                return 1;
+                return false;
             }
 
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[bold green]Sensor zeroed and calibrated. Ready for power measurements.[/]");
-            return 0;
+            AnsiConsole.MarkupLine("[bold green]Sensor zeroed and calibrated.[/]");
+            return true;
         }
 
         private static int RunSensorZero(IMeasuringReceiver receiver)
