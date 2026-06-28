@@ -1,0 +1,32 @@
+## .NET / Visual Studio
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.userprefs
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+build/
+artifacts/
+
+## NuGet
+*.nupkg
+packages/
+.nuget/
+
+## Rider / ReSharper
+.idea/
+_ReSharper*/
+*.DotSettings.user
+
+## OS
+Thumbs.db
+desktop.ini
+.DS_Store
