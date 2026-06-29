@@ -16,6 +16,7 @@ namespace HpAttenuator.TestHarness
         public double RfPowerFreqMHz = 5000.0;  // --freq  : frequency for --rf-power / --atten-sweep (5 GHz)
         public int RfPowerAttenDb = 0;          // --atten : attenuation for --rf-power (default 0 dB)
         public bool AttenSweep;     // --atten-sweep : Test 2 — 1 dB relative attenuation sweep at --freq
+        public bool CalDebug;       // --cal-debug : observe the 8902A status byte vs level (no CALIBRATE)
         public bool ExplicitAstop;  // user gave --astop (don't auto-fill the attenuator max)
         public bool ExplicitAstep;  // user gave --astep (don't force 1 dB steps)
         public bool LoadCal;        // --load-cal : load converter cal factors into the 8902A first
@@ -59,6 +60,7 @@ namespace HpAttenuator.TestHarness
                     case "--detect-threshold": o.DetectThresholdDb = D(Need(args, ++i)); break;
                     case "--rf-power": o.RfPower = true; break;
                     case "--atten-sweep": o.AttenSweep = true; break;
+                    case "--cal-debug": o.CalDebug = true; break;
                     case "--freq": o.RfPowerFreqMHz = D(Need(args, ++i)); break;
                     case "--atten": o.RfPowerAttenDb = I(Need(args, ++i)); break;
                     case "--load-cal": o.LoadCal = true; break;

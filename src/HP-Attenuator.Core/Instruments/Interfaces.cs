@@ -125,6 +125,9 @@ namespace HpAttenuator.Instruments
         /// </summary>
         bool RecalRequested();
 
+        /// <summary>Raw serial-poll status byte, for diagnostics. Returns -1 if not applicable.</summary>
+        int PollStatusByte();
+
         /// <summary>Performs one range-calibration step (CALIBRATE) at the current level.</summary>
         void Calibrate();
 

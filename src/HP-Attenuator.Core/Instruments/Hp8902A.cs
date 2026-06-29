@@ -175,6 +175,8 @@ namespace HpAttenuator.Instruments
 
         public bool RecalRequested() => (_link.SerialPoll() & RecalStatusBit) != 0;
 
+        public int PollStatusByte() => _link.SerialPoll();
+
         public void Calibrate()
         {
             _link.Write("C1");

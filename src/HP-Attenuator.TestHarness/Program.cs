@@ -61,6 +61,11 @@ namespace HpAttenuator.TestHarness
                 if (opt.Detect)
                     return RunDetect(opt, bench);
 
+                // Diagnostic: observe the 8902A status byte vs level (no CALIBRATE, no sensor
+                // cal needed — Tuned RF Level uses the RF input). Used to fix RECAL gating.
+                if (opt.CalDebug)
+                    return RunCalDebug(opt, bench);
+
                 // Mandatory: the 8902A Tuned RF Level measurement requires a calibrated
                 // power sensor first. This pauses for the operator to use the CAL output.
                 if (!bench.IsSimulated && !opt.SkipSensorCal)
@@ -399,6 +404,86 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.MarkupLine("[grey]Presence check only. Full absolute/attenuation accuracy needs the 8902A " +
                                    "cal factors loaded and the sensor calibrated to the 8902A reference output.[/]");
             return all ? 0 : 1;
+        }
+
+        // ---- Cal-debug: observe the 8902A status byte vs level -------------
+
+        /// <summary>
+        /// Steps the attenuation and prints the 8902A serial-poll status byte and a Tuned RF
+        /// Level read at each level, WITHOUT issuing CALIBRATE (so it cannot trigger Error
+        /// 35). Reveals how the RECAL/UNCAL status bit tracks the level and where reads floor
+        /// out — the ground truth needed to gate the range calibration correctly.
+        /// </summary>
+        private static int RunCalDebug(HarnessOptions opt, Bench bench)
+        {
+            double freq = opt.RfPowerFreqMHz;
+            var plan = MicrowaveConverter.Plan(freq, bench.Lo.MinFrequencyMHz, bench.Lo.MaxFrequencyMHz);
+
+            bench.Source.SetFrequencyMHz(freq);
+            bench.Source.SetPowerDbm(opt.Sweep.SourcePowerDbm);
+            bench.Source.RfOn();
+            if (plan.Regime == MeasurementRegime.Converted)
+            {
+                bench.Lo.SetFrequencyMHz(plan.LoMHz);
+                bench.Lo.SetPowerDbm(opt.Sweep.LoPowerDbm);
+                bench.Lo.RfOn();
+            }
+            else bench.Lo.RfOff();
+
+            var attenuator = bench.MakeAttenuator(AttenuatorConfig.Default());
+            var rx = bench.Receiver;
+
+            rx.BeginAttenuationMeasurement(freq, plan.Regime, plan.LoMHz);
+            rx.BeginRangeCalibration();   // enable RECAL/UNCAL status bit + free-run
+
+            AnsiConsole.MarkupLine(
+                $"[grey]Cal-debug:[/] {freq:0.###} MHz {plan.Regime}" +
+                (plan.Regime == MeasurementRegime.Converted ? $" (LO {plan.LoMHz:0.##} MHz)" : "") +
+                $", source {opt.Sweep.SourcePowerDbm:0.#} dBm. Steps attenuation and reads the 8902A " +
+                "serial-poll status byte. [bold]No CALIBRATE is issued.[/]");
+            AnsiConsole.MarkupLine("[grey]Status bits: 0x01 DataReady  0x02 HP-IB-err  0x04 InstrErr  " +
+                                   "0x10 OffsetChg  0x20 RECAL/UNCAL  0x40 SRQ[/]");
+            AnsiConsole.WriteLine();
+
+            int settle = Math.Max(opt.Sweep.SettleMs, 300);
+            attenuator.SetAttenuationDb(0);
+            System.Threading.Thread.Sleep(settle);
+            int sbInit = rx.PollStatusByte();
+            rx.SetReference();
+            int sbRef = rx.PollStatusByte();
+            AnsiConsole.MarkupLine($"[grey]After setup @0 dB: SB=0x{sbInit:X2}; after SET REF: SB=0x{sbRef:X2}[/]");
+            AnsiConsole.WriteLine();
+
+            var table = new Table().Border(TableBorder.Rounded);
+            table.AddColumn(new TableColumn("Atten dB").RightAligned());
+            table.AddColumn("SB before");
+            table.AddColumn("RECAL?");
+            table.AddColumn(new TableColumn("Read rel dB").RightAligned());
+            table.AddColumn("SB after");
+
+            for (int atten = 0; atten <= 120; atten += 10)
+            {
+                attenuator.SetAttenuationDb(atten);
+                System.Threading.Thread.Sleep(settle);
+                int sb1 = rx.PollStatusByte();
+
+                string read;
+                try { read = rx.ReadRelativeDb().ToString("0.00", CultureInfo.InvariantCulture); }
+                catch (Hp8902AException ex) { read = $"Err {ex.Code}"; try { rx.ClearError(); } catch { } }
+                catch (Exception ex) { read = ex.GetType().Name; try { rx.ClearError(); } catch { } }
+
+                int sb2 = rx.PollStatusByte();
+                bool recal = (sb1 & 0x20) != 0;
+                table.AddRow($"{atten}", $"0x{sb1:X2}", recal ? "[yellow]yes[/]" : "no",
+                             read.EscapeMarkup(), $"0x{sb2:X2}");
+            }
+            AnsiConsole.Write(table);
+            attenuator.SetAttenuationDb(0);
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Send me this table: it shows whether the RECAL bit (0x20) tracks the " +
+                                   "level and where reads floor out, so the range-cal gating can be fixed.[/]");
+            return 0;
         }
 
         // ---- Test 1: single-point RF power readback ------------------------
