@@ -1,0 +1,23 @@
+attenuator,set_db,command,measured_atten_db,error_db,error
+HP 8494 (0-11 dB),1,A1B2345678,1.014,0.014,
+HP 8494 (0-11 dB),2,A2B1345678,2.042,0.042,
+HP 8494 (0-11 dB),3,A12B345678,3.044,0.044,
+HP 8494 (0-11 dB),4,A3B1245678,4.006,0.006,
+HP 8494 (0-11 dB),5,A13B245678,5.01,0.01,
+HP 8494 (0-11 dB),6,A23B145678,6.019,0.019,
+HP 8494 (0-11 dB),7,A123B45678,7.02,0.02,
+HP 8494 (0-11 dB),8,A34B125678,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8494 (0-11 dB),9,A134B25678,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8494 (0-11 dB),10,A234B15678,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8494 (0-11 dB),11,A1234B5678,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8496 (0-110 dB),10,A5B1234678,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8496 (0-110 dB),20,A6B1234578,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8496 (0-110 dB),30,A56B123478,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x00]
+HP 8496 (0-110 dB),40,A7B1234568,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x00]
+HP 8496 (0-110 dB),50,A57B123468,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x00]
+HP 8496 (0-110 dB),60,A67B123458,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x00]
+HP 8496 (0-110 dB),70,A567B12348,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x00]
+HP 8496 (0-110 dB),80,A78B123456,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x00]
+HP 8496 (0-110 dB),90,A578B12346,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x00]
+HP 8496 (0-110 dB),100,A678B12345,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x00]
+HP 8496 (0-110 dB),110,A5678B1234,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x00]

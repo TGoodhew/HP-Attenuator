@@ -1,0 +1,23 @@
+attenuator,set_db,command,measured_atten_db,error_db,error
+HP 8494 (0-11 dB),1,A1B2345678,0.997,-0.003,
+HP 8494 (0-11 dB),2,A2B1345678,2.01,0.01,
+HP 8494 (0-11 dB),3,A12B345678,3.004,0.004,
+HP 8494 (0-11 dB),4,A3B1245678,3.982,-0.018,
+HP 8494 (0-11 dB),5,A13B245678,4.984,-0.016,
+HP 8494 (0-11 dB),6,A23B145678,5.979,-0.021,
+HP 8494 (0-11 dB),7,A123B45678,6.978,-0.022,
+HP 8494 (0-11 dB),8,A34B125678,7.938,-0.062,
+HP 8494 (0-11 dB),9,A134B25678,8.944,-0.056,
+HP 8494 (0-11 dB),10,A234B15678,9.966,-0.034,
+HP 8494 (0-11 dB),11,A1234B5678,10.981,-0.019,
+HP 8496 (0-110 dB),10,A5B1234678,9.857,-0.143,
+HP 8496 (0-110 dB),20,A6B1234578,19.828,-0.172,
+HP 8496 (0-110 dB),30,A56B123478,29.754,-0.246,
+HP 8496 (0-110 dB),40,A7B1234568,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8496 (0-110 dB),50,A57B123468,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8496 (0-110 dB),60,A67B123458,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8496 (0-110 dB),70,A567B12348,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8496 (0-110 dB),80,A78B123456,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8496 (0-110 dB),90,A578B12346,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x41]
+HP 8496 (0-110 dB),100,A678B12345,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x00]
+HP 8496 (0-110 dB),110,A5678B1234,NaN,NaN,8902A Error 96: No input signal sensed (cannot tune to a signal) [SB=0x00]

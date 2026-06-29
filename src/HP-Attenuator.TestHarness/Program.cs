@@ -68,6 +68,11 @@ namespace HpAttenuator.TestHarness
                 if (opt.CalDebug)
                     return RunCalDebug(opt, bench);
 
+                // Diagnostic: force one Tuned RF Level CALIBRATE and trace it, to confirm
+                // Error 35 is a reference-level (sensor-range) issue. No sensor cal prompt.
+                if (opt.CalProbe)
+                    return RunCalProbe(opt, bench);
+
                 // Mandatory: the 8902A Tuned RF Level measurement requires a calibrated
                 // power sensor first. This pauses for the operator to use the CAL output.
                 if (!bench.IsSimulated && !opt.SkipSensorCal)
@@ -497,6 +502,89 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.MarkupLine("[grey]Send me this table: it shows whether the RECAL bit (0x20) tracks the " +
                                    "level and where reads floor out, so the range-cal gating can be fixed.[/]");
             return 0;
+        }
+
+        // ---- Cal-probe: force one CALIBRATE and trace it ------------------
+
+        /// <summary>
+        /// Sets up Tuned RF Level at 0 dB, takes SET REF, then forces a single CALIBRATE and
+        /// reports the result — distinguishing Error 35 (reference level outside the power
+        /// sensor's range) from Error 31/33 (sensor not zeroed/calibrated). Traces every
+        /// 8902A command with its status byte. No sensor-cal prompt, so it runs unattended.
+        /// </summary>
+        private static int RunCalProbe(HarnessOptions opt, Bench bench)
+        {
+            Hp8902A.DebugLog = s => AnsiConsole.MarkupLine($"[grey]  {s.EscapeMarkup()}[/]");
+
+            double freq = opt.RfPowerFreqMHz;
+            var plan = MicrowaveConverter.Plan(freq, bench.Lo.MinFrequencyMHz, bench.Lo.MaxFrequencyMHz);
+
+            bench.Source.SetFrequencyMHz(freq);
+            bench.Source.SetPowerDbm(opt.Sweep.SourcePowerDbm);
+            bench.Source.RfOn();
+            if (plan.Regime == MeasurementRegime.Converted)
+            {
+                bench.Lo.SetFrequencyMHz(plan.LoMHz);
+                bench.Lo.SetPowerDbm(opt.Sweep.LoPowerDbm);
+                bench.Lo.RfOn();
+            }
+            else bench.Lo.RfOff();
+
+            var attenuator = bench.MakeAttenuator(AttenuatorConfig.Default());
+            var rx = bench.Receiver;
+
+            AnsiConsole.MarkupLine(
+                $"[grey]Cal-probe:[/] {freq:0.###} MHz {plan.Regime}, source {opt.Sweep.SourcePowerDbm:0.#} dBm. " +
+                "Forces one Tuned RF Level CALIBRATE at 0 dB and traces it.");
+            AnsiConsole.MarkupLine("[grey]Error 35 = reference outside the power-sensor range (raise power); " +
+                                   "Error 31/33 = sensor not zeroed/calibrated.[/]");
+            AnsiConsole.WriteLine();
+
+            rx.BeginAttenuationMeasurement(freq, plan.Regime, plan.LoMHz);
+            rx.BeginRangeCalibration();
+            attenuator.SetEngaged(System.Array.Empty<int>());     // 0 dB
+            System.Threading.Thread.Sleep(Math.Max(opt.Sweep.SettleMs, 500));
+            rx.SetReference();
+
+            // Step down and force a CALIBRATE at each level to find where Error 35 first
+            // appears (the manual: as the level drops past the power-sensor's range the
+            // recalibration fails with a "level error").
+            int settle = Math.Max(opt.Sweep.SettleMs, 500);
+            int firstError = -1;
+            foreach (int atten in new[] { 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110 })
+            {
+                attenuator.SetAttenuationDb(atten);
+                System.Threading.Thread.Sleep(settle);
+                int sbBefore = SafePoll(rx);
+                AnsiConsole.MarkupLine($"[grey]CALIBRATE @ {atten} dB (SB before=0x{sbBefore:X2})...[/]");
+                rx.Calibrate();
+                int sbAfter = SafePoll(rx);
+
+                string read;
+                int code = 0;
+                try { read = rx.ReadRelativeDb().ToString("0.00", CultureInfo.InvariantCulture) + " dB"; }
+                catch (Hp8902AException ex) { read = $"Error {ex.Code}"; code = ex.Code; try { rx.ClearError(); } catch { } }
+                catch (Exception ex) { read = ex.GetType().Name; try { rx.ClearError(); } catch { } }
+
+                bool instrErr = (sbAfter & 0x04) != 0;
+                string flag = (code == 35 || instrErr) ? " [red]<-- ERROR 35 / instr-error[/]" : "";
+                AnsiConsole.MarkupLine($"   SB after=0x{sbAfter:X2}, read {read.EscapeMarkup()}{flag}");
+
+                if (firstError < 0 && (code == 35 || code == 34 || instrErr)) { firstError = atten; break; }
+            }
+
+            AnsiConsole.WriteLine();
+            if (firstError < 0)
+                AnsiConsole.MarkupLine("[green]No Error 35 across the probed range — CALIBRATE succeeded at every level.[/]");
+            else
+                AnsiConsole.MarkupLine($"[yellow]CALIBRATE first failed at {firstError} dB — recalibration past this level is " +
+                                       "outside the sensor's range. The fix: range-cal only down to here, then stop (catch it).[/]");
+            return firstError < 0 ? 0 : 1;
+        }
+
+        private static int SafePoll(IMeasuringReceiver rx)
+        {
+            try { return rx.PollStatusByte(); } catch { return 0; }
         }
 
         // ---- Test 3: per-attenuator individual settings -------------------

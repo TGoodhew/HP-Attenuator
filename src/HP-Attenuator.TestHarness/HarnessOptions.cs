@@ -19,6 +19,7 @@ namespace HpAttenuator.TestHarness
         public bool PerAtten;       // --per-atten : Test 3 — exercise each attenuator's settings individually
         public bool CalDebug;       // --cal-debug : observe the 8902A status byte vs level (no CALIBRATE)
         public bool Debug;          // --debug : trace every 8902A command + status byte (find Error 35)
+        public bool CalProbe;       // --cal-probe : force one Tuned RF Level CALIBRATE and trace it (hunt Error 35)
         public bool ExplicitAstop;  // user gave --astop (don't auto-fill the attenuator max)
         public bool ExplicitAstep;  // user gave --astep (don't force 1 dB steps)
         public bool LoadCal;        // --load-cal : load converter cal factors into the 8902A first
@@ -69,6 +70,7 @@ namespace HpAttenuator.TestHarness
                     case "--per-atten": o.PerAtten = true; break;
                     case "--cal-debug": o.CalDebug = true; break;
                     case "--debug": o.Debug = true; break;
+                    case "--cal-probe": o.CalProbe = true; break;
                     case "--freq": o.RfPowerFreqMHz = D(Need(args, ++i)); break;
                     case "--atten": o.RfPowerAttenDb = I(Need(args, ++i)); break;
                     case "--load-cal": o.LoadCal = true; break;
