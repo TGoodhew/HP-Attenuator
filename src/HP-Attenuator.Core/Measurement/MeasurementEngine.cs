@@ -127,31 +127,23 @@ namespace HpAttenuator.Measurement
                 IfMHz = plan.IfMHz, Warning = plan.Warning
             };
 
-            // Range calibration: step the level down (coarsely, CalStepDb) so the 8902A can
-            // calibrate each of its RF ranges. Per the 8902A procedure you CALIBRATE only
-            // when the receiver asks (RECAL annunciator / status bit) — calibrating a range
-            // that doesn't need it raises Error 35 ("level error during calibration"). We
-            // poll RECAL via serial poll and calibrate only when set; if a CALIBRATE doesn't
-            // clear it, that range can't be calibrated at this level (UNCAL), so we stop.
+            // Establish the 0 dB reference. Taking SET REF at the start attenuation also
+            // clears the initial RECAL/UNCAL condition (verified on hardware via --cal-debug:
+            // status byte 0x61 -> 0x00), and the receiver then tracks the level down with no
+            // further calibration. The old "step down and CALIBRATE each range" pass is both
+            // unnecessary here and the cause of Error 35 — issuing CALIBRATE at a level the
+            // receiver isn't asking to calibrate is a "level error during calibration". So we
+            // enable the RECAL status, take SET REF, and only CALIBRATE if it STILL asks
+            // afterwards (per cal-debug it does not).
             if (_options.RangeCalibrate)
-            {
-                _receiver.BeginRangeCalibration();
-                double calFloorAtten = _options.SourcePowerDbm + 100.0; // hard floor: level >= -100 dBm
-                foreach (int atten in _options.CalSteps())
-                {
-                    if (atten > calFloorAtten) break;
-                    _attenuator.SetAttenuationDb(atten);
-                    Settle();
-                    if (!_receiver.RecalRequested()) continue;   // range already calibrated — don't touch it
-                    _receiver.Calibrate();
-                    if (_receiver.RecalRequested()) break;       // still UNCAL after calibrating — reached the floor
-                }
-            }
+                _receiver.BeginRangeCalibration();   // enable RECAL/UNCAL status (+ free-run)
 
-            // Zero-dB reference at the lowest attenuation (strongest level).
             _attenuator.SetAttenuationDb(_options.AttenStartDb);
             Settle();
             _receiver.SetReference();
+
+            if (_options.RangeCalibrate && _receiver.RecalRequested())
+                _receiver.Calibrate();               // only if the receiver is still asking
 
             // The 8902A SET REF can leave a small residual offset, so we also normalise in
             // software: the reading at the start attenuation defines 0 dB and every reading
