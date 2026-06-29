@@ -59,9 +59,17 @@ the operator. The standalone `--sensor-cal` runs just this flow.
 Relative attenuation cancels the calibration, but for the converter path and any
 absolute work the 8902A needs the sensor cal factors and a sensor calibration:
 
-- `--load-cal` loads the converter cal-factor table (from the sensor label, S/N
-  2407A00808, 2–18 GHz) into the 8902A's Frequency-Offset RF-Power table
-  (`27.3SP0MZ`, then `37.9SP` / `37.3SP100CF` / `37.3SP<f>MZ<cf>CF` / `37.0SP`).
+- `--load-cal` loads the converter cal factors (from the sensor label, S/N
+  2407A00808, 2–18 GHz) into **both** of the 8902A's RF-Power cal-factor tables —
+  Normal and Frequency-Offset — which are **both** required for RF-Power
+  measurements (8902A Microwave Product Note). The sequence clears all cal-factor
+  storage **once** (`37.9SP` clears *both* tables), loads the Normal table
+  (`27.0SP`, then `37.3SP100CF` / `37.3SP<f>MZ<cf>CF` / `37.0SP`), then enters
+  Frequency-Offset mode (`27.1SP` — *not* `27.3SP<LO>MZ`, which enables the
+  external LO for a measurement) and loads the offset table the same way. Loading
+  more than once re-clears a filled table and yields **Error 15** at measurement.
+  This load happens automatically as part of the mandatory sensor cal, so
+  `--load-cal` is only needed with `--skip-sensor-cal`.
 - The **sensor reference sync** is a bench step: connect the sensor between the
   8902A `SENSOR` input and its **50 MHz / 1 mW CALIBRATION RF POWER OUTPUT**, then
   `ZR` (zero), `C1 T3 SC` (calibrate + save), `C0`. The 11793A itself is passive;

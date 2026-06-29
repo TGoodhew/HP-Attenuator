@@ -55,7 +55,7 @@ namespace HpAttenuator.TestHarness
                 {
                     AnsiConsole.MarkupLine("[grey]Loading converter cal factors into the 8902A...[/]");
                     bench.Receiver.Reset();
-                    bench.Receiver.LoadOffsetCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
+                    bench.Receiver.LoadCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
                 }
 
                 if (opt.Detect)
@@ -390,13 +390,10 @@ namespace HpAttenuator.TestHarness
 
         private static int RunRfPower(HarnessOptions opt, Bench bench)
         {
-            // Absolute power needs the converter/sensor cal-factor table; load it (the
-            // offset table is used for the >1.3 GHz converter path — e.g. 5 GHz).
-            if (!bench.IsSimulated)
-            {
-                AnsiConsole.MarkupLine("[grey]Loading converter cal factors into the 8902A...[/]");
-                bench.Receiver.LoadOffsetCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
-            }
+            // Cal factors (both Normal + Frequency-Offset tables) are loaded exactly once,
+            // by the mandatory sensor-cal step that runs before this. Loading them again
+            // here would re-clear the offset table (37.9SP clears all) -> 8902A Error 15.
+            // (Use --load-cal with --skip-sensor-cal if you bypass the sensor cal.)
 
             // 0 dB (default) engages no sections, so the attenuator wiring is irrelevant.
             var attenuator = bench.MakeAttenuator(AttenuatorConfig.Default());

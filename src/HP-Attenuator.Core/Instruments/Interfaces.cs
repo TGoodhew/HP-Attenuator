@@ -74,13 +74,13 @@ namespace HpAttenuator.Instruments
         /// <summary>Instrument preset to a known state.</summary>
         void Reset();
 
-        /// <summary>Loads the Frequency-Offset RF-Power cal-factor table (for the converter path).</summary>
-        void LoadOffsetCalFactors(double referenceCf, IReadOnlyList<CalFactor> table);
-
         /// <summary>Selects the RF Power (power-sensor) measurement.</summary>
         void SelectRfPower();
 
-        /// <summary>Loads the normal-mode RF-Power cal-factor table for the sensor.</summary>
+        /// <summary>
+        /// Loads BOTH RF-Power cal-factor tables (Normal + Frequency-Offset) in a single
+        /// pass. Must be called exactly once — it clears all cal-factor storage first.
+        /// </summary>
         void LoadCalFactors(double referenceCf, IReadOnlyList<CalFactor> table);
 
         /// <summary>Zeroes the power sensor (calibrator off). Returns the zeroed reading in watts.</summary>

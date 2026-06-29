@@ -43,29 +43,44 @@ namespace HpAttenuator.Instruments
 
         public void Reset() => _link.Write("IP");
 
-        public void LoadOffsetCalFactors(double referenceCf, IReadOnlyList<CalFactor> table)
+        public void SelectRfPower() => _link.Write("M4");
+
+        /// <summary>
+        /// Loads BOTH cal-factor tables the 8902A needs for RF Power measurements — the
+        /// Normal table (direct, incl. the 50 MHz sensor-cal reference) and the
+        /// Frequency-Offset table (converter path) — in a single pass.
+        /// <para>
+        /// <c>37.9SP</c> clears ALL cal-factor storage, so this clears <b>once</b> and
+        /// then fills both tables. Loading more than once — or mixing this with a separate
+        /// offset load — re-clears a table you just filled and leaves the offset table
+        /// empty, which the receiver reports as Error 15 at measurement time.
+        /// </para>
+        /// Per the 8902A Microwave Product Note: clear (37.9SP), enter REF CF + per-freq
+        /// CFs in Normal mode, then <c>27.1SP</c> (enter Frequency-Offset mode) and repeat
+        /// for the offset table. Note 27.1SP — NOT 27.3SP&lt;LO&gt;MZ, which enables the
+        /// external LO for a measurement and does not select the offset table for editing.
+        /// Leaves the receiver in Normal mode, ready for the sensor zero/calibrate.
+        /// </summary>
+        public void LoadCalFactors(double referenceCf, IReadOnlyList<CalFactor> table)
         {
-            // The 37.x table must be edited in Frequency-Offset mode so it hits the
-            // offset RF-Power table (27.3SP0MZ = enter offset mode, 0 MHz offset).
-            _link.Write("27.3SP0MZ");
-            _link.Write("37.9SP");                                  // clear offset table
+            _link.Write("M4");        // RF Power
+            _link.Write("37.9SP");    // clear ALL cal-factor storage (both tables) — once
+
+            _link.Write("27.0SP");    // Normal mode -> 37.x entries target the Normal table
+            WriteCalFactorTable(referenceCf, table);
+
+            _link.Write("27.1SP");    // enter Frequency-Offset mode -> 37.x targets the Offset table
+            WriteCalFactorTable(referenceCf, table);
+
+            _link.Write("27.0SP");    // back to Normal mode for the sensor zero/calibrate
+        }
+
+        private void WriteCalFactorTable(double referenceCf, IReadOnlyList<CalFactor> table)
+        {
             _link.Write("37.3SP" + Fmt(referenceCf) + "CF");        // REF CF (50 MHz)
             foreach (var c in table)
                 _link.Write("37.3SP" + Fmt(c.FreqMHz) + "MZ" + Fmt(c.Cf) + "CF");
             _link.Write("37.0SP");                                  // automatic cal-factor selection
-        }
-
-        public void SelectRfPower() => _link.Write("M4");
-
-        public void LoadCalFactors(double referenceCf, IReadOnlyList<CalFactor> table)
-        {
-            _link.Write("M4");        // RF Power
-            _link.Write("27.0SP");    // normal (not offset) mode -> 37.x hits the normal table
-            _link.Write("37.9SP");    // clear
-            _link.Write("37.3SP" + Fmt(referenceCf) + "CF");        // REF CF (50 MHz)
-            foreach (var c in table)
-                _link.Write("37.3SP" + Fmt(c.FreqMHz) + "MZ" + Fmt(c.Cf) + "CF");
-            _link.Write("37.0SP");    // automatic cal-factor selection
         }
 
         public double ZeroSensor()
