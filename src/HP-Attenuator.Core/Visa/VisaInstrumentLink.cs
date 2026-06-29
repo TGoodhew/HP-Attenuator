@@ -67,6 +67,12 @@ namespace HpAttenuator.Visa
             return Read();
         }
 
+        public byte SerialPoll()
+        {
+            // GPIB serial poll: returns the device's status byte without a data transfer.
+            return (byte)_session.ReadStatusByte();
+        }
+
         /// <summary>Lists VISA INSTR resources visible to the resource manager.</summary>
         public static IEnumerable<string> FindResources()
         {

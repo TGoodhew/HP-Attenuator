@@ -160,6 +160,21 @@ namespace HpAttenuator.Instruments
             return Rf.WattsToDbm(ReadMeasurement());
         }
 
+        /// <summary>RECAL/UNCAL condition weight in the 8902A status byte (Special Function 22).</summary>
+        private const byte RecalStatusBit = 0x20;   // 32 = "Recal or Uncal"
+
+        public void BeginRangeCalibration()
+        {
+            // Enable Data Ready (1) + Recal/Uncal (32) in the status byte so a serial poll
+            // reflects when a range needs calibrating (SF 22.NN sums the weighted conditions).
+            _link.Write("22.33SP");
+            // Free-run trigger so the receiver keeps measuring (and updating RECAL) as the
+            // attenuator steps down, rather than waiting for a settled trigger.
+            _link.Write("T0");
+        }
+
+        public bool RecalRequested() => (_link.SerialPoll() & RecalStatusBit) != 0;
+
         public void Calibrate()
         {
             _link.Write("C1");

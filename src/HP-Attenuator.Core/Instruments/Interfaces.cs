@@ -111,6 +111,20 @@ namespace HpAttenuator.Instruments
         /// </summary>
         double ReadRfPowerDbm();
 
+        /// <summary>
+        /// Prepares for the range-calibration pass: enables the RECAL/UNCAL status
+        /// condition (so <see cref="RecalRequested"/> can poll it) and puts the receiver
+        /// in free-run so that state tracks the live level as the attenuator steps down.
+        /// </summary>
+        void BeginRangeCalibration();
+
+        /// <summary>
+        /// True if the receiver is asking for a range calibration (8902A RECAL/UNCAL).
+        /// Read by a serial poll; only CALIBRATE when this is set, per the 8902A
+        /// procedure — calibrating a range that doesn't need it raises Error 35.
+        /// </summary>
+        bool RecalRequested();
+
         /// <summary>Performs one range-calibration step (CALIBRATE) at the current level.</summary>
         void Calibrate();
 

@@ -143,8 +143,10 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.MarkupLine("[green]Mode:[/] HARDWARE (NI-VISA)");
             var sourceLink = Open(opt.AddrSource, disposables);
             var loLink = Open(opt.AddrLo, disposables);
-            // The 8902A's settled read can take ~10 s (averaging), so give it headroom.
-            var rxLink = Open(opt.AddrReceiver, disposables, 30000);
+            // The 8902A's deepest settled read is <10 s; 15 s gives headroom while letting
+            // genuinely unmeasurable points (below the receiver floor) fail fast instead of
+            // stalling 30 s each at the bottom of a deep sweep.
+            var rxLink = Open(opt.AddrReceiver, disposables, 15000);
             var attLink = Open(opt.AddrAttenuator, disposables);
 
             var source = new Hp8340B(sourceLink);

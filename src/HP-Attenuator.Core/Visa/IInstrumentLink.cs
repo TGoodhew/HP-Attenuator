@@ -24,6 +24,12 @@ namespace HpAttenuator.Visa
         /// <summary>Writes a command then reads the response (for query instruments).</summary>
         string Query(string command);
 
+        /// <summary>
+        /// Performs a GPIB serial poll and returns the instrument's status byte. Used to
+        /// read condition bits (e.g. the 8902A RECAL/UNCAL bit) without a data transfer.
+        /// </summary>
+        byte SerialPoll();
+
         /// <summary>The commands sent so far, most recent last.</summary>
         IReadOnlyList<string> History { get; }
     }

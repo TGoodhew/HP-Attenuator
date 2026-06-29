@@ -124,19 +124,24 @@ namespace HpAttenuator.Measurement
                 IfMHz = plan.IfMHz, Warning = plan.Warning
             };
 
-            // 3-point range calibration: step down (coarsely) so the 8902A calibrates each
-            // RF range. Uses CalStepDb (e.g. 10 dB), independent of the measurement step.
-            // Don't calibrate below ~-100 dBm — the receiver can't calibrate near its floor
-            // and trying corrupts the cal (8902A Error 33).
+            // Range calibration: step the level down (coarsely, CalStepDb) so the 8902A can
+            // calibrate each of its RF ranges. Per the 8902A procedure you CALIBRATE only
+            // when the receiver asks (RECAL annunciator / status bit) — calibrating a range
+            // that doesn't need it raises Error 35 ("level error during calibration"). We
+            // poll RECAL via serial poll and calibrate only when set; if a CALIBRATE doesn't
+            // clear it, that range can't be calibrated at this level (UNCAL), so we stop.
             if (_options.RangeCalibrate)
             {
-                double calFloorAtten = _options.SourcePowerDbm + 100.0; // level stays >= -100 dBm
+                _receiver.BeginRangeCalibration();
+                double calFloorAtten = _options.SourcePowerDbm + 100.0; // hard floor: level >= -100 dBm
                 foreach (int atten in _options.CalSteps())
                 {
                     if (atten > calFloorAtten) break;
                     _attenuator.SetAttenuationDb(atten);
                     Settle();
+                    if (!_receiver.RecalRequested()) continue;   // range already calibrated — don't touch it
                     _receiver.Calibrate();
+                    if (_receiver.RecalRequested()) break;       // still UNCAL after calibrating — reached the floor
                 }
             }
 

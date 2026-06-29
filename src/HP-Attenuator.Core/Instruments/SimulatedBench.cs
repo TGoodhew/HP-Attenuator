@@ -179,6 +179,8 @@ namespace HpAttenuator.Instruments
             return _bench.MeasuredLevelDbm();   // absolute level: source - attenuation - path loss
         }
 
+        public void BeginRangeCalibration() { }
+        public bool RecalRequested() => false; // simulated receiver never needs range calibration
         public void Calibrate() { }
         public void ClearError() { }
 
