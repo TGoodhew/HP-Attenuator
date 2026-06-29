@@ -12,6 +12,9 @@ namespace HpAttenuator.TestHarness
         public bool Full;           // --full     : full 1 MHz-18 GHz spec sweep
         public bool Detect;         // --detect   : signal-presence check only (no attenuation sweep)
         public double DetectThresholdDb = 10.0;
+        public bool RfPower;        // --rf-power : Test 1 — single-point absolute RF power readback
+        public double RfPowerFreqMHz = 5000.0;  // --freq  : frequency for --rf-power (default 5 GHz)
+        public int RfPowerAttenDb = 0;          // --atten : attenuation for --rf-power (default 0 dB)
         public bool LoadCal;        // --load-cal : load converter cal factors into the 8902A first
         public bool NoCalPass;      // --no-cal-pass : skip the 3-point range calibration pass
         public bool SensorCal;      // --sensor-cal : interactive zero + (prompt to connect) + calibrate
@@ -51,6 +54,9 @@ namespace HpAttenuator.TestHarness
                     case "--full": o.Full = true; break;
                     case "--detect": o.Detect = true; break;
                     case "--detect-threshold": o.DetectThresholdDb = D(Need(args, ++i)); break;
+                    case "--rf-power": o.RfPower = true; break;
+                    case "--freq": o.RfPowerFreqMHz = D(Need(args, ++i)); break;
+                    case "--atten": o.RfPowerAttenDb = I(Need(args, ++i)); break;
                     case "--load-cal": o.LoadCal = true; break;
                     case "--no-cal-pass": o.NoCalPass = true; break;
                     case "--sensor-cal": o.SensorCal = true; break;
@@ -115,6 +121,11 @@ Usage: HP-Attenuator.TestHarness [options]
   --no-beep            Silence the short beep emitted on every instrument command.
   --detect             Signal-presence check only (8902A RF-freq, RF on vs off);
                        no sweep. Default freqs 100 + 2000 MHz; no calibration needed.
+  --rf-power           Test 1: single-point absolute RF power readback. Sets the
+                       attenuator to 0 dB (or --atten), sources --freq at --power, and
+                       reads absolute power (dBm) via the 8902A RF Power measurement.
+  --freq MHz           Frequency for --rf-power (default 5000 = 5 GHz).
+  --atten dB           Attenuation for --rf-power (default 0).
   --load-cal           Load the converter cal factors into the 8902A first (hardware).
   --no-cal-pass        Skip the 8902A 3-point range-calibration pass.
   --sensor-cal         Interactive: upload cal factors + zero, prompt you to attach the

@@ -81,6 +81,24 @@ namespace HpAttenuator.Measurement
         public string Note { get; set; }
     }
 
+    /// <summary>Result of a single-point absolute RF power readback (Test 1).</summary>
+    public sealed class RfPowerResult
+    {
+        public double FreqMHz { get; set; }
+        public MeasurementRegime Regime { get; set; }
+        public double LoMHz { get; set; }
+        public double IfMHz { get; set; }
+        public double SourcePowerDbm { get; set; }
+        public int AttenuationDb { get; set; }
+        public double MeasuredPowerDbm { get; set; } = double.NaN;
+
+        /// <summary>source − attenuation − measured: the path/insertion loss implied by the reading.</summary>
+        public double ImpliedPathLossDb { get; set; } = double.NaN;
+
+        public string Warning { get; set; }
+        public string Error { get; set; }    // set if the 8902A reported an error
+    }
+
     /// <summary>All attenuator measurements at one frequency.</summary>
     public sealed class FreqPointResult
     {

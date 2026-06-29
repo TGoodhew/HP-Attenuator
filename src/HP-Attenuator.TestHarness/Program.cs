@@ -71,9 +71,12 @@ namespace HpAttenuator.TestHarness
                         return 1;
                     }
                     AnsiConsole.MarkupLine("Restore the measurement connections (sensor / converter IF as needed), " +
-                                           "then press [green]Enter[/] to start the sweep...");
+                                           "then press [green]Enter[/] to start the measurement...");
                     Console.ReadLine();
                 }
+
+                if (opt.RfPower)
+                    return RunRfPower(opt, bench);
 
                 AttenuatorConfig config = ResolveAttenuator(opt, bench);
 
@@ -381,6 +384,64 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.MarkupLine("[grey]Presence check only. Full absolute/attenuation accuracy needs the 8902A " +
                                    "cal factors loaded and the sensor calibrated to the 8902A reference output.[/]");
             return all ? 0 : 1;
+        }
+
+        // ---- Test 1: single-point RF power readback ------------------------
+
+        private static int RunRfPower(HarnessOptions opt, Bench bench)
+        {
+            // Absolute power needs the converter/sensor cal-factor table; load it (the
+            // offset table is used for the >1.3 GHz converter path — e.g. 5 GHz).
+            if (!bench.IsSimulated)
+            {
+                AnsiConsole.MarkupLine("[grey]Loading converter cal factors into the 8902A...[/]");
+                bench.Receiver.LoadOffsetCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
+            }
+
+            // 0 dB (default) engages no sections, so the attenuator wiring is irrelevant.
+            var attenuator = bench.MakeAttenuator(AttenuatorConfig.Default());
+            var engine = new MeasurementEngine(bench.Source, bench.Lo, attenuator, bench.Receiver, opt.Sweep);
+
+            AnsiConsole.MarkupLine(
+                $"[grey]RF power readback (Test 1):[/] source {opt.Sweep.SourcePowerDbm:0.#} dBm @ " +
+                $"{opt.RfPowerFreqMHz:0.###} MHz, attenuator {opt.RfPowerAttenDb} dB.");
+            AnsiConsole.WriteLine();
+
+            RfPowerResult r = engine.MeasureRfPower(opt.RfPowerFreqMHz, opt.RfPowerAttenDb);
+
+            var table = new Table().Border(TableBorder.Rounded);
+            table.AddColumn("Quantity");
+            table.AddColumn(new TableColumn("Value").RightAligned());
+            table.AddRow("Frequency", $"{r.FreqMHz:0.###} MHz");
+            table.AddRow("Regime", r.Regime.ToString());
+            if (r.Regime == MeasurementRegime.Converted)
+            {
+                table.AddRow("LO", $"{r.LoMHz:0.##} MHz");
+                table.AddRow("IF", $"{r.IfMHz:0.##} MHz");
+            }
+            table.AddRow("Source level", $"{r.SourcePowerDbm:0.##} dBm");
+            table.AddRow("Attenuator", $"{r.AttenuationDb} dB");
+            if (r.Error != null)
+                table.AddRow("Measured power", $"[red]{r.Error.EscapeMarkup()}[/]");
+            else
+            {
+                table.AddRow("Measured power", $"[green]{r.MeasuredPowerDbm:0.00} dBm[/]");
+                table.AddRow("Implied path loss", $"{r.ImpliedPathLossDb:0.00} dB");
+            }
+            AnsiConsole.Write(table);
+
+            if (!string.IsNullOrEmpty(r.Warning))
+                AnsiConsole.MarkupLine($"[yellow]! {r.Warning.EscapeMarkup()}[/]");
+
+            AnsiConsole.WriteLine();
+            if (r.Error != null)
+            {
+                AnsiConsole.MarkupLine("[red]No valid RF power reading — check the path, LO, and connections " +
+                                       "(e.g. 8902A Error 96 = no signal sensed).[/]");
+                return 1;
+            }
+            AnsiConsole.MarkupLine($"[green]RF power measured: {r.MeasuredPowerDbm:0.00} dBm.[/]");
+            return 0;
         }
 
         // ---- Sweep + reporting ---------------------------------------------

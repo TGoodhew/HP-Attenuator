@@ -75,6 +75,41 @@ namespace HpAttenuator.Measurement
             return r;
         }
 
+        /// <summary>
+        /// Test 1: single-point absolute RF power readback. Sets the attenuator to a fixed
+        /// value (default 0 dB), sources <paramref name="freqMHz"/> at the configured power,
+        /// and reads the absolute power in dBm via the 8902A RF Power measurement (through
+        /// the 11793A + LO when above the crossover). The RF-Power cal-factor table should
+        /// already be loaded for converter-path accuracy.
+        /// </summary>
+        public RfPowerResult MeasureRfPower(double freqMHz, int attenuationDb = 0)
+        {
+            var plan = Prepare(freqMHz);
+            _attenuator.SetAttenuationDb(attenuationDb);
+            _receiver.BeginRfPowerMeasurement(freqMHz, plan.Regime, plan.LoMHz);
+            Settle();
+
+            var result = new RfPowerResult
+            {
+                FreqMHz = freqMHz, Regime = plan.Regime, LoMHz = plan.LoMHz, IfMHz = plan.IfMHz,
+                Warning = plan.Warning, SourcePowerDbm = _options.SourcePowerDbm,
+                AttenuationDb = attenuationDb
+            };
+
+            try
+            {
+                double dbm = _receiver.ReadRfPowerDbm();
+                result.MeasuredPowerDbm = dbm;
+                result.ImpliedPathLossDb = _options.SourcePowerDbm - attenuationDb - dbm;
+            }
+            catch (System.Exception ex)
+            {
+                result.Error = ex is Hp8902AException ? ex.Message : "read failed: " + ex.GetType().Name;
+                try { _receiver.ClearError(); } catch { /* keep going */ }
+            }
+            return result;
+        }
+
         public FreqPointResult MeasureFrequency(double freqMHz,
             System.Action<int, int, AttenPointResult> onPoint = null)
         {

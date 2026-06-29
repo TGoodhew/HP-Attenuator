@@ -115,6 +115,22 @@ namespace HpAttenuator.Instruments
             _link.Write("32.1SP");            // 0.001 dB resolution
         }
 
+        public void BeginRfPowerMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
+        {
+            _link.Write("M4");      // RF Power (power sensor)
+            if (regime == MeasurementRegime.Converted)
+                _link.Write("27.3SP" + Fmt(loMHz) + "MZ");  // frequency-offset: external LO
+            else
+                _link.Write("27.0SP");                      // direct / normal mode
+            _link.Write("37.0SP");  // automatic cal-factor selection (table loaded separately)
+        }
+
+        public double ReadRfPowerDbm()
+        {
+            // RF Power fundamental unit = watts; convert to dBm for reporting.
+            return Rf.WattsToDbm(ReadMeasurement());
+        }
+
         public void Calibrate()
         {
             _link.Write("C1");

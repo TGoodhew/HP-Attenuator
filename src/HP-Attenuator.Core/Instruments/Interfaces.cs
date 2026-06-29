@@ -98,6 +98,19 @@ namespace HpAttenuator.Instruments
         /// </summary>
         void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz);
 
+        /// <summary>
+        /// Begins an absolute RF Power measurement at the given RF frequency, in the
+        /// direct or converter (frequency-offset, with LO) regime. The RF-Power cal-factor
+        /// table must already be loaded for accuracy on the converter path.
+        /// </summary>
+        void BeginRfPowerMeasurement(double rfMHz, MeasurementRegime regime, double loMHz);
+
+        /// <summary>
+        /// Triggers a settled RF Power measurement and returns the absolute power in dBm.
+        /// Throws <see cref="Hp8902AException"/> on an instrument error.
+        /// </summary>
+        double ReadRfPowerDbm();
+
         /// <summary>Performs one range-calibration step (CALIBRATE) at the current level.</summary>
         void Calibrate();
 

@@ -169,6 +169,17 @@ namespace HpAttenuator.Instruments
             _haveReference = false;
         }
 
+        public void BeginRfPowerMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
+        {
+            _tunedMHz = rfMHz;
+        }
+
+        public double ReadRfPowerDbm()
+        {
+            if (!_bench.SourceRfOn) throw new Hp8902AException(96, Hp8902AException.Describe(96));
+            return _bench.MeasuredLevelDbm();   // absolute level: source - attenuation - path loss
+        }
+
         public void Calibrate() { }
         public void ClearError() { }
 
