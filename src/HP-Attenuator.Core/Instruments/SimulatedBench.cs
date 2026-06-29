@@ -170,6 +170,7 @@ namespace HpAttenuator.Instruments
         }
 
         public void Calibrate() { }
+        public void ClearError() { }
 
         public void SetReference()
         {

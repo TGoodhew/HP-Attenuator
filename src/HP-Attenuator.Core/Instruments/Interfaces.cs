@@ -101,6 +101,9 @@ namespace HpAttenuator.Instruments
         /// <summary>Performs one range-calibration step (CALIBRATE) at the current level.</summary>
         void Calibrate();
 
+        /// <summary>Clears a displayed error/condition on the instrument (8902A CL key).</summary>
+        void ClearError();
+
         /// <summary>Sets the 0 dB reference (SET REF) at the current level.</summary>
         void SetReference();
 

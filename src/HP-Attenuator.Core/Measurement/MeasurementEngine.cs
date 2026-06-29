@@ -91,10 +91,14 @@ namespace HpAttenuator.Measurement
 
             // 3-point range calibration: step down (coarsely) so the 8902A calibrates each
             // RF range. Uses CalStepDb (e.g. 10 dB), independent of the measurement step.
+            // Don't calibrate below ~-100 dBm — the receiver can't calibrate near its floor
+            // and trying corrupts the cal (8902A Error 33).
             if (_options.RangeCalibrate)
             {
+                double calFloorAtten = _options.SourcePowerDbm + 100.0; // level stays >= -100 dBm
                 foreach (int atten in _options.CalSteps())
                 {
+                    if (atten > calFloorAtten) break;
                     _attenuator.SetAttenuationDb(atten);
                     Settle();
                     _receiver.Calibrate();
@@ -126,12 +130,15 @@ namespace HpAttenuator.Measurement
                     point.MeasuredAttenuationDb = -relDb;
                     point.ErrorDb = point.MeasuredAttenuationDb - expected;
                 }
-                catch (Hp8902AException ex)
+                catch (System.Exception ex)
                 {
-                    point.Error = ex.Message;
+                    // Expected once the level drops below the receiver's sensitivity: log
+                    // the error, clear it from the device, and carry on to the next point.
+                    point.Error = ex is Hp8902AException ? ex.Message : "read failed: " + ex.GetType().Name;
                     point.MeasuredRelativeDb = double.NaN;
                     point.MeasuredAttenuationDb = double.NaN;
                     point.ErrorDb = double.NaN;
+                    try { _receiver.ClearError(); } catch { /* keep going */ }
                 }
                 result.Points.Add(point);
                 onPoint?.Invoke(++index, total, point);

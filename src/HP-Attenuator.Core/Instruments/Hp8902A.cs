@@ -127,6 +127,8 @@ namespace HpAttenuator.Instruments
             Settle();
         }
 
+        public void ClearError() => _link.Write("CL");   // CLEAR key — clears a displayed error
+
         public double ReadRelativeDb() => ReadMeasurement();   // dB in LOG relative mode
 
         public double ReadSignalFrequencyMHz()
