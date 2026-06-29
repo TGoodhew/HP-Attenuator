@@ -170,7 +170,8 @@ dotnet run --project src/HP-Attenuator.TestHarness -- --hardware `
 | `--hardware` | Drive the real bench over NI-VISA |
 | `--detect` | Signal-presence check only (8902A RF-freq, source RF on vs off) |
 | `--rf-power` | **Test 1** — single-point absolute RF power readback (see [TEST-PLAN.md](TEST-PLAN.md)) |
-| `--freq <MHz>` | Frequency for `--rf-power` (default 5000 = 5 GHz) |
+| `--atten-sweep` | **Test 2** — 1 dB relative attenuation sweep at `--freq`, 0 → attenuator max |
+| `--freq <MHz>` | Frequency for `--rf-power` / `--atten-sweep` (default 5000 = 5 GHz) |
 | `--atten <dB>` | Attenuation for `--rf-power` (default 0) |
 | `--load-cal` | Load the converter cal factors into the 8902A first (hardware) |
 | `--no-cal-pass` | Skip the 8902A 3-point range-calibration pass |

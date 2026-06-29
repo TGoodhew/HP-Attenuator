@@ -80,6 +80,19 @@ namespace HpAttenuator.TestHarness
 
                 AttenuatorConfig config = ResolveAttenuator(opt, bench);
 
+                // Test 2: a single-frequency relative attenuation sweep in 1 dB steps from
+                // 0 dB to the attenuator's maximum. It reuses the Tuned RF Level relative
+                // method (SET REF at 0 dB normalises the path loss); only the frequency and
+                // attenuation grid differ from a normal sweep.
+                if (opt.AttenSweep)
+                {
+                    opt.Sweep.FreqStartMHz = opt.Sweep.FreqStopMHz = opt.RfPowerFreqMHz;
+                    opt.ExplicitFreq = true;                 // sweep exactly this one frequency
+                    opt.Sweep.AttenStartDb = 0;
+                    if (!opt.ExplicitAstep) opt.Sweep.AttenStepDb = 1;
+                    if (!opt.ExplicitAstop) opt.Sweep.AttenStopDb = config.MaxDecibels;
+                }
+
                 // (Re)build the attenuator with the resolved wiring so dB maps to the
                 // correct sections.
                 IStepAttenuator attenuator = bench.MakeAttenuator(config);
