@@ -305,6 +305,9 @@ namespace HpAttenuator.Measurement
                 catch (Hp8902AException ex)
                 {
                     last = ex;
+                    // An UNCAL reading ("CCCC") means this level's RF range needs calibrating —
+                    // CALIBRATE here (the level is in range, so it won't Error 35) and retry.
+                    if (ex.IsUncal) { try { _receiver.Calibrate(); } catch { /* may fail at the floor */ } }
                     try { _receiver.ClearError(); } catch { /* keep going */ }
                     if (attempt < maxAttempts) Settle();   // brief pause, then retry
                 }

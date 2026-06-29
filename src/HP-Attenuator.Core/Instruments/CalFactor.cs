@@ -41,10 +41,26 @@ namespace HpAttenuator.Instruments
     {
         public int Code { get; }
 
+        /// <summary>
+        /// True when the 8902A returned its uncalibrated indicator (a row of 'C') instead of a
+        /// number — RECAL/UNCAL is set and the receiver needs a CALIBRATE at the current level.
+        /// </summary>
+        public bool IsUncal { get; }
+
         public Hp8902AException(int code, string message) : base($"8902A Error {code}: {message}")
         {
             Code = code;
         }
+
+        private Hp8902AException(string message) : base(message)
+        {
+            Code = -1;
+            IsUncal = true;
+        }
+
+        /// <summary>An uncalibrated ("CCCC") reading — the receiver needs calibration at this level.</summary>
+        public static Hp8902AException Uncal() =>
+            new Hp8902AException("8902A reading uncalibrated (RECAL) — needs CALIBRATE at this level");
 
         /// <summary>Known 8902A operating-error messages (Operation manual, p.3-286).</summary>
         public static string Describe(int code)

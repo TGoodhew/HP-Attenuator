@@ -239,6 +239,12 @@ namespace HpAttenuator.Instruments
 
         private static string Fmt(double v) => v.ToString("0.######", CultureInfo.InvariantCulture);
 
+        private static bool ContainsDigit(string s)
+        {
+            foreach (char c in s) if (c >= '0' && c <= '9') return true;
+            return false;
+        }
+
         /// <summary>
         /// Parses an 8902A reading. Values ≥ 9e10 are error sentinels (+900000NNNNE+01);
         /// these throw <see cref="Hp8902AException"/>. Otherwise returns the value in the
@@ -250,6 +256,13 @@ namespace HpAttenuator.Instruments
                 throw new FormatException("Empty reading from 8902A.");
 
             string s = raw.Trim();
+
+            // Uncalibrated indicator: the 8902A streams 'C' characters (no digits) when the
+            // current reading is UNCAL (RECAL set). Surface it so the caller can CALIBRATE
+            // at this level and retry, rather than failing to parse a number.
+            if (s.IndexOf('C') >= 0 && !ContainsDigit(s))
+                throw Hp8902AException.Uncal();
+
             double v;
             if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v))
             {
