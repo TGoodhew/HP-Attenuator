@@ -73,18 +73,33 @@ namespace HpAttenuator.TestHarness
                 if (opt.CalProbe)
                     return RunCalProbe(opt, bench);
 
-                // Mandatory: the 8902A Tuned RF Level measurement requires a calibrated
-                // power sensor first. This pauses for the operator to use the CAL output.
+                // The 8902A Tuned RF Level measurement requires a calibrated power sensor.
+                // Calibrate ONCE PER SESSION: if a fresh session cal exists (and --recal was
+                // not given), reuse the resident cal and skip the interactive step; otherwise
+                // run the cal (pausing for the operator to use the CAL output) and mark it.
+                // --skip-sensor-cal bypasses calibration entirely (shallow path-check only).
                 if (!bench.IsSimulated && !opt.SkipSensorCal)
                 {
-                    if (!InteractiveSensorCalibrate(bench.Receiver))
+                    bool reuse = !opt.Recal && SensorCalSession.IsFresh(TimeSpan.FromHours(opt.CalMaxAgeHours));
+                    if (reuse)
                     {
-                        AnsiConsole.MarkupLine("[red]Sensor not calibrated — aborting (measurement needs it).[/]");
-                        return 1;
+                        AnsiConsole.MarkupLine(
+                            $"[grey]Reusing this session's sensor cal from " +
+                            $"{SensorCalSession.LastCal():HH:mm} (< {opt.CalMaxAgeHours:0.#} h old). " +
+                            "Use [/][green]--recal[/][grey] to force a fresh one.[/]");
                     }
-                    AnsiConsole.MarkupLine("Restore the measurement connections (sensor / converter IF as needed), " +
-                                           "then press [green]Enter[/] to start the measurement...");
-                    Console.ReadLine();
+                    else
+                    {
+                        if (!InteractiveSensorCalibrate(bench.Receiver))
+                        {
+                            AnsiConsole.MarkupLine("[red]Sensor not calibrated — aborting (measurement needs it).[/]");
+                            return 1;
+                        }
+                        SensorCalSession.Mark();
+                        AnsiConsole.MarkupLine("Restore the measurement connections (sensor / converter IF as needed), " +
+                                               "then press [green]Enter[/] to start the measurement...");
+                        Console.ReadLine();
+                    }
                 }
 
                 if (opt.RfPower)
@@ -223,7 +238,11 @@ namespace HpAttenuator.TestHarness
         /// waits for the operator before calibrating.
         /// </summary>
         private static int RunSensorCalInteractive(IMeasuringReceiver receiver)
-            => InteractiveSensorCalibrate(receiver) ? 0 : 1;
+        {
+            if (!InteractiveSensorCalibrate(receiver)) return 1;
+            SensorCalSession.Mark();   // count this toward the session, so measurement runs reuse it
+            return 0;
+        }
 
         /// <summary>
         /// Mandatory before any 8902A measurement: zero the sensor, prompt the operator to

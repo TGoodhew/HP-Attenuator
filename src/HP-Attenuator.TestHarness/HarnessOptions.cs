@@ -26,6 +26,8 @@ namespace HpAttenuator.TestHarness
         public bool NoCalPass;      // --no-cal-pass : skip the 3-point range calibration pass
         public bool SensorCal;      // --sensor-cal : interactive zero + (prompt to connect) + calibrate
         public bool SkipSensorCal;  // --skip-sensor-cal : bypass the mandatory pre-measurement sensor cal
+        public bool Recal;          // --recal : force a fresh sensor cal even if the session one is still fresh
+        public double CalMaxAgeHours = 8.0; // --cal-max-age : reuse a session sensor cal up to this age (hours)
         public bool NoBeep;         // --no-beep : silence the per-command beep
         public bool InvertAtten;    // --invert-atten : swap the 11713A A/B relay sense
         public bool SensorZero;     // --sensor-zero : upload cal factors + zero the power sensor
@@ -77,6 +79,8 @@ namespace HpAttenuator.TestHarness
                     case "--no-cal-pass": o.NoCalPass = true; break;
                     case "--sensor-cal": o.SensorCal = true; break;
                     case "--skip-sensor-cal": o.SkipSensorCal = true; break;
+                    case "--recal": o.Recal = true; break;
+                    case "--cal-max-age": o.CalMaxAgeHours = D(Need(args, ++i)); break;
                     case "--no-beep": o.NoBeep = true; break;
                     case "--invert-atten": o.InvertAtten = true; break;
                     case "--sensor-zero": o.SensorZero = true; break;
@@ -134,7 +138,10 @@ Usage: HP-Attenuator.TestHarness [options]
   (default)            Fast SIMULATION run over a representative frequency set.
   --hardware           Drive the real bench over GPIB (NI-VISA). A mandatory sensor
                        zero+calibrate runs first (prompts you to use the CAL output).
-  --skip-sensor-cal    Bypass the mandatory pre-measurement sensor calibration.
+  --skip-sensor-cal    Bypass the sensor calibration entirely (path-check only; shallow).
+  --recal              Force a fresh sensor cal even if the session one is still fresh.
+  --cal-max-age H      Reuse a session sensor cal up to H hours old (default 8). The cal is
+                       done once per session and skipped automatically while fresh.
   --no-beep            Silence the short beep emitted on every instrument command.
   --detect             Signal-presence check only (8902A RF-freq, RF on vs off);
                        no sweep. Default freqs 100 + 2000 MHz; no calibration needed.
