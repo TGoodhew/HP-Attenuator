@@ -145,6 +145,14 @@ namespace HpAttenuator.Measurement
             Settle();
             _receiver.SetReference();
 
+            // The 8902A SET REF can leave a small residual offset, so we also normalise in
+            // software: the reading at the start attenuation defines 0 dB and every reading
+            // is reported relative to it (substitution method, attenuation = reading0 −
+            // reading_i). This guarantees the first point is exactly 0 dB — only the
+            // attenuation shows, with no path-loss / reference offset.
+            bool haveBaseline = false;
+            double baselineRelDb = 0.0;
+
             foreach (int atten in _options.AttenuationSteps())
             {
                 string command = _attenuator.SetAttenuationDb(atten);
@@ -161,8 +169,13 @@ namespace HpAttenuator.Measurement
                 try
                 {
                     double relDb = _receiver.ReadRelativeDb();
-                    point.MeasuredRelativeDb = relDb;
-                    point.MeasuredAttenuationDb = -relDb;
+
+                    // Capture the start-attenuation reading as the software zero reference.
+                    if (atten == _options.AttenStartDb) { baselineRelDb = relDb; haveBaseline = true; }
+                    double normRelDb = haveBaseline ? relDb - baselineRelDb : relDb;
+
+                    point.MeasuredRelativeDb = normRelDb;
+                    point.MeasuredAttenuationDb = -normRelDb;
                     point.ErrorDb = point.MeasuredAttenuationDb - expected;
                 }
                 catch (System.Exception ex)
