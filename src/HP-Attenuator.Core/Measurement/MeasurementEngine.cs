@@ -22,6 +22,14 @@ namespace HpAttenuator.Measurement
         /// <summary>Read attempts for each ordinary sweep point.</summary>
         private const int StepReadAttempts = 3;
 
+        /// <summary>
+        /// How far below the source level the range CALIBRATE may go, in dB. CALIBRATE needs
+        /// the signal still measurable; past ~this depth it raises Error 35 ("level error
+        /// during calibration"). --cal-probe read cleanly to ~-90 dB; 80 keeps a margin. The
+        /// receiver then measures DEEPER than this on the calibration it established.
+        /// </summary>
+        private const int RangeCalReachDb = 80;
+
         private readonly ISignalSource _source;
         private readonly ILocalOscillator _lo;
         private readonly IStepAttenuator _attenuator;
@@ -133,23 +141,14 @@ namespace HpAttenuator.Measurement
                 IfMHz = plan.IfMHz, Warning = plan.Warning
             };
 
-            // Establish the 0 dB reference. Taking SET REF at the start attenuation also
-            // clears the initial RECAL/UNCAL condition (verified on hardware via --cal-debug:
-            // status byte 0x61 -> 0x00), and the receiver then tracks the level down with no
-            // further calibration. The old "step down and CALIBRATE each range" pass is both
-            // unnecessary here and the cause of Error 35 — issuing CALIBRATE at a level the
-            // receiver isn't asking to calibrate is a "level error during calibration". So we
-            // enable the RECAL status, take SET REF, and only CALIBRATE if it STILL asks
-            // afterwards (per cal-debug it does not).
-            if (_options.RangeCalibrate)
-                _receiver.BeginRangeCalibration();   // enable RECAL/UNCAL status (+ free-run)
-
-            _attenuator.SetAttenuationDb(_options.AttenStartDb);
-            Settle();
-            _receiver.SetReference();
-
-            if (_options.RangeCalibrate && _receiver.RecalRequested())
-                _receiver.Calibrate();               // only if the receiver is still asking
+            // Establish the 0 dB reference and run the range calibration. The 8902A needs
+            // each RF range calibrated to hold lock as the level drops; without it the tuned
+            // receiver loses lock after only a few dB (Error 96). This is the sequence proven
+            // by --cal-probe on hardware (reads cleanly to ~-90 dB): SET REF at 0 dB FIRST,
+            // then step the level down and CALIBRATE at each coarse step. The CALIBRATE is
+            // CAPPED so it never goes deeper than the signal can be measured — calibrating
+            // past that point is the "level error during calibration" (Error 35).
+            RunRangeCalibration(() => _attenuator.SetAttenuationDb(_options.AttenStartDb));
 
             // The 8902A SET REF can leave a small residual offset, so we also normalise in
             // software: the reading at the start attenuation defines 0 dB and every reading
@@ -241,15 +240,8 @@ namespace HpAttenuator.Measurement
                 IfMHz = plan.IfMHz, Warning = plan.Warning
             };
 
-            if (_options.RangeCalibrate)
-                _receiver.BeginRangeCalibration();
-
-            // 0 dB reference (all sections bypassed), then software-normalise to it.
-            _attenuator.SetEngaged(System.Array.Empty<int>());
-            Settle();
-            _receiver.SetReference();
-            if (_options.RangeCalibrate && _receiver.RecalRequested())
-                _receiver.Calibrate();
+            // 0 dB reference (all sections bypassed) + range calibration, then normalise to it.
+            RunRangeCalibration(() => _attenuator.SetEngaged(System.Array.Empty<int>()));
 
             bool haveBaseline = false;
             double baselineRelDb = 0.0;
@@ -318,6 +310,42 @@ namespace HpAttenuator.Measurement
                 }
             }
             throw last;
+        }
+
+        /// <summary>
+        /// Establishes the 0 dB reference and calibrates the receiver's RF ranges. Takes SET
+        /// REF at 0 dB FIRST, then steps the level down and CALIBRATEs at each coarse step
+        /// (CalStepDb), capped at <see cref="RangeCalReachDb"/> below the source level so it
+        /// never calibrates past where the signal is measurable (deeper → Error 35). A read
+        /// after each CALIBRATE lets the receiver settle/lock and stops the pass early if the
+        /// floor is reached. Leaves the attenuator at 0 dB. <paramref name="setZero"/> sets the
+        /// attenuator to 0 dB (SetAttenuationDb(0) for the sweep, SetEngaged(none) per-attenuator).
+        /// </summary>
+        private void RunRangeCalibration(System.Action setZero)
+        {
+            if (_options.RangeCalibrate)
+                _receiver.BeginRangeCalibration();   // enable RECAL/UNCAL status + free-run
+
+            setZero();
+            Settle();
+            _receiver.SetReference();                // SET REF first — proven to avoid Error 35
+
+            if (!_options.RangeCalibrate)
+                return;
+
+            double calCapAtten = _options.SourcePowerDbm + RangeCalReachDb;
+            foreach (int atten in _options.CalSteps())
+            {
+                if (atten > calCapAtten) break;
+                _attenuator.SetAttenuationDb(atten);
+                Settle();
+                _receiver.Calibrate();               // C1 at this level
+                try { ReadRelativeDbWithRetry(1); }  // let it settle/lock; stop if the floor is hit
+                catch { break; }
+            }
+
+            setZero();                               // back to 0 dB for the measurement
+            Settle();
         }
 
         private LoPlan Prepare(double freqMHz)
