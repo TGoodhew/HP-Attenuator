@@ -32,6 +32,8 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.MarkupLine("[grey]Attenuation-vs-frequency harness — 8340B + 8673B + 11793A + 8902A[/]");
             AnsiConsole.WriteLine();
 
+            VisaInstrumentLink.BeepOnCommand = !opt.NoBeep;
+
             var disposables = new List<IDisposable>();
             try
             {
@@ -139,14 +141,14 @@ namespace HpAttenuator.TestHarness
             source.Initialize();
             lo.Initialize();
             receiver.Initialize();
-            new Hp11713A(attLink, AttenuatorConfig.Default()).Initialize();
+            new Hp11713A(attLink, AttenuatorConfig.Default()) { InvertSense = opt.InvertAtten }.Initialize();
 
             return new Bench
             {
                 Source = source,
                 Lo = lo,
                 Receiver = receiver,
-                MakeAttenuator = cfg => new Hp11713A(attLink, cfg),
+                MakeAttenuator = cfg => new Hp11713A(attLink, cfg) { InvertSense = opt.InvertAtten },
                 IsSimulated = false
             };
         }

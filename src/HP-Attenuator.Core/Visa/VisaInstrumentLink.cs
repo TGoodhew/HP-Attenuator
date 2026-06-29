@@ -11,12 +11,21 @@ namespace HpAttenuator.Visa
     /// </summary>
     public sealed class VisaInstrumentLink : IInstrumentLink
     {
+        /// <summary>When true, sound a short beep on every command sent to an instrument.</summary>
+        public static bool BeepOnCommand = true;
+
         private readonly IMessageBasedSession _session;
         private readonly List<string> _history = new List<string>();
 
         public string ResourceName { get; }
         public bool IsSimulated => false;
         public IReadOnlyList<string> History => _history;
+
+        private static void Beep()
+        {
+            if (!BeepOnCommand) return;
+            try { Console.Beep(1000, 40); } catch { /* no console/audio device */ }
+        }
 
         public VisaInstrumentLink(string resourceName, int timeoutMs = 5000)
         {
@@ -34,6 +43,7 @@ namespace HpAttenuator.Visa
         {
             // GPIB Selected Device Clear. Some listen-only devices ignore it; don't fail.
             try { _session.Clear(); } catch { /* device may not support clear */ }
+            Beep();
         }
 
         public void Write(string command)
@@ -41,6 +51,7 @@ namespace HpAttenuator.Visa
             if (command == null) throw new ArgumentNullException(nameof(command));
             _session.RawIO.Write(command + "\n");
             _history.Add(command);
+            Beep();
         }
 
         public string Read()

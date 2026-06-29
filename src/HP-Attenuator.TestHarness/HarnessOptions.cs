@@ -16,6 +16,8 @@ namespace HpAttenuator.TestHarness
         public bool NoCalPass;      // --no-cal-pass : skip the 3-point range calibration pass
         public bool SensorCal;      // --sensor-cal : interactive zero + (prompt to connect) + calibrate
         public bool SkipSensorCal;  // --skip-sensor-cal : bypass the mandatory pre-measurement sensor cal
+        public bool NoBeep;         // --no-beep : silence the per-command beep
+        public bool InvertAtten;    // --invert-atten : swap the 11713A A/B relay sense
         public bool SensorZero;     // --sensor-zero : upload cal factors + zero the power sensor
         public bool SensorCalibrate;// --sensor-calibrate : calibrate the sensor vs the 50 MHz/1 mW ref
         public bool SwappedSim;     // --swapped-sim : simulate the 8496-on-X wiring
@@ -53,6 +55,8 @@ namespace HpAttenuator.TestHarness
                     case "--no-cal-pass": o.NoCalPass = true; break;
                     case "--sensor-cal": o.SensorCal = true; break;
                     case "--skip-sensor-cal": o.SkipSensorCal = true; break;
+                    case "--no-beep": o.NoBeep = true; break;
+                    case "--invert-atten": o.InvertAtten = true; break;
                     case "--sensor-zero": o.SensorZero = true; break;
                     case "--sensor-calibrate": o.SensorCalibrate = true; break;
                     case "--swapped-sim": o.SwappedSim = true; break;
@@ -108,6 +112,7 @@ Usage: HP-Attenuator.TestHarness [options]
   --hardware           Drive the real bench over GPIB (NI-VISA). A mandatory sensor
                        zero+calibrate runs first (prompts you to use the CAL output).
   --skip-sensor-cal    Bypass the mandatory pre-measurement sensor calibration.
+  --no-beep            Silence the short beep emitted on every instrument command.
   --detect             Signal-presence check only (8902A RF-freq, RF on vs off);
                        no sweep. Default freqs 100 + 2000 MHz; no calibration needed.
   --load-cal           Load the converter cal factors into the 8902A first (hardware).

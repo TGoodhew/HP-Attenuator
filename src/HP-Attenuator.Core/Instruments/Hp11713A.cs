@@ -25,10 +25,29 @@ namespace HpAttenuator.Instruments
         public AttenuatorConfig Config { get; }
         public DeviceState State { get; } = new DeviceState();
 
+        /// <summary>
+        /// Swap the A/B relay sense. The 11713A manual maps A = insert section, B = bypass
+        /// (so 0 dB = all B). If this attenuator is cabled with the opposite sense, set this
+        /// true so 0 dB drives the relays the other way.
+        /// </summary>
+        public bool InvertSense { get; set; }
+
         public void Initialize()
         {
             _link.Clear();                          // ignored by the listen-only 11713A, but harmless
             SetEngaged(System.Array.Empty<int>());  // known state: 0 dB (all sections bypassed)
+        }
+
+        private string Sense(string command)
+        {
+            if (!InvertSense) return command;
+            var c = command.ToCharArray();
+            for (int i = 0; i < c.Length; i++)
+            {
+                if (c[i] == 'A') c[i] = 'B';
+                else if (c[i] == 'B') c[i] = 'A';
+            }
+            return new string(c);
         }
 
         public string ResourceName => _link.ResourceName;
@@ -46,7 +65,7 @@ namespace HpAttenuator.Instruments
                 throw new ArgumentOutOfRangeException(nameof(db),
                     $"{db} dB is not achievable (range 0-{Config.MaxDecibels} dB).");
 
-            string command = CommandBuilder.BuildString(Config.AllSections, new HashSet<int>(engaged));
+            string command = Sense(CommandBuilder.BuildString(Config.AllSections, new HashSet<int>(engaged)));
             _link.Write(command);
 
             State.Engaged.Clear();
@@ -61,7 +80,7 @@ namespace HpAttenuator.Instruments
         public string SetEngaged(IEnumerable<int> digits)
         {
             var set = new HashSet<int>(digits);
-            string command = CommandBuilder.BuildString(Config.AllSections, set);
+            string command = Sense(CommandBuilder.BuildString(Config.AllSections, set));
             _link.Write(command);
 
             State.Engaged.Clear();
@@ -77,7 +96,7 @@ namespace HpAttenuator.Instruments
                 throw new ArgumentOutOfRangeException(nameof(db),
                     $"{db} dB is not achievable on this bank.");
 
-            string command = CommandBuilder.BuildString(bank, new HashSet<int>(engaged));
+            string command = Sense(CommandBuilder.BuildString(bank, new HashSet<int>(engaged)));
             _link.Write(command);
 
             foreach (var s in bank) State.Engaged.Remove(s.Digit);
