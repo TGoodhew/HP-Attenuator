@@ -198,10 +198,50 @@ Defaults: `--freq 5000`, 1 dB steps, 0 → attenuator max (121 dB for 8494 + 849
 
 ---
 
+## Test 3 — Per-attenuator individual settings
+
+### Objective
+
+Characterise **each attenuator on its own**, one setting at a time, instead of
+the combined sweep. With the other attenuator at 0 dB, exercise:
+
+- the **8494** (1 dB attenuator) at **1, 2, … 11 dB** (11 points), and
+- the **8496** (10 dB attenuator) at **10, 20, … 110 dB** (11 points).
+
+That is **~22 points** — fast, and it isolates each attenuator so a bad section
+shows up against its own bank rather than being buried in a 0–121 dB sweep.
+
+### Method
+
+Same relative Tuned RF Level method as Test 2: `SET REF` at 0 dB (all sections
+bypassed) defines the software zero, then for each setting the harness engages
+**only that attenuator's** section digits (the other bank stays bypassed),
+reads the level, and reports measured attenuation = −(reading − reference) and
+the error vs the commanded dB. Which physical attenuator is the 8494 vs the 8496
+comes from the identification step (or `--x-atten`).
+
+### Expected result / pass-fail
+
+Each setting reads within `--tolerance` (default ±1.5 dB) of its nominal value.
+The deepest 8496 points (100, 110 dB) may approach the receiver floor through the
+converter and flag as errors — raise `--power` to push them up. PASS = all points
+within tolerance, no receiver errors.
+
+### Run it
+
+```powershell
+dotnet run --project src/HP-Attenuator.TestHarness -- --per-atten --hardware `
+  --addr-attenuator GPIB0::27::INSTR
+```
+
+Defaults: `--freq 5000`. Reports a table grouped by attenuator plus a CSV.
+
+---
+
 ## Subsequent tests
 
 _To be specified:_
 
-- **Test 3** — Frequency coverage: repeat the attenuation check across the
+- **Test 4** — Frequency coverage: repeat the attenuation check across the
   band (direct ≤1300 MHz and converted >1300 MHz regimes).
-- **Test 4** — Attenuator identification (8494 vs 8496 on each 11713A port).
+- **Test 5** — Attenuator identification (8494 vs 8496 on each 11713A port).

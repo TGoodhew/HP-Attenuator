@@ -179,6 +179,8 @@ dotnet run --project src/HP-Attenuator.TestHarness -- --hardware `
 | `--detect` | Signal-presence check only (8902A RF-freq, source RF on vs off) |
 | `--rf-power` | **Test 1** — single-point absolute RF power readback (see [TEST-PLAN.md](TEST-PLAN.md)) |
 | `--atten-sweep` | **Test 2** — 1 dB relative attenuation sweep at `--freq`, 0 → attenuator max |
+| `--per-atten` | **Test 3** — exercise each attenuator's settings individually (~22 points) |
+| `--debug` | Trace every 8902A command + the status byte after it (find instrument errors) |
 | `--freq <MHz>` | Frequency for `--rf-power` / `--atten-sweep` (default 5000 = 5 GHz) |
 | `--atten <dB>` | Attenuation for `--rf-power` (default 0) |
 | `--load-cal` | Load the converter cal factors into the 8902A first (hardware) |

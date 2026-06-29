@@ -16,6 +16,7 @@ namespace HpAttenuator.TestHarness
         public double RfPowerFreqMHz = 5000.0;  // --freq  : frequency for --rf-power / --atten-sweep (5 GHz)
         public int RfPowerAttenDb = 0;          // --atten : attenuation for --rf-power (default 0 dB)
         public bool AttenSweep;     // --atten-sweep : Test 2 — 1 dB relative attenuation sweep at --freq
+        public bool PerAtten;       // --per-atten : Test 3 — exercise each attenuator's settings individually
         public bool CalDebug;       // --cal-debug : observe the 8902A status byte vs level (no CALIBRATE)
         public bool Debug;          // --debug : trace every 8902A command + status byte (find Error 35)
         public bool ExplicitAstop;  // user gave --astop (don't auto-fill the attenuator max)
@@ -65,6 +66,7 @@ namespace HpAttenuator.TestHarness
                     case "--detect-threshold": o.DetectThresholdDb = D(Need(args, ++i)); break;
                     case "--rf-power": o.RfPower = true; break;
                     case "--atten-sweep": o.AttenSweep = true; break;
+                    case "--per-atten": o.PerAtten = true; break;
                     case "--cal-debug": o.CalDebug = true; break;
                     case "--debug": o.Debug = true; break;
                     case "--freq": o.RfPowerFreqMHz = D(Need(args, ++i)); break;
@@ -140,6 +142,9 @@ Usage: HP-Attenuator.TestHarness [options]
   --atten-sweep        Test 2: at --freq, sets a 0 dB reference (Tuned RF Level SET REF,
                        normalising path loss) then steps the attenuator down in 1 dB
                        steps to the attenuator's maximum, reporting relative attenuation.
+  --per-atten          Test 3: exercise each attenuator's settings individually at --freq —
+                       the 8494 at 1..11 dB and the 8496 at 10..110 dB (the other at 0),
+                       ~22 points. Isolates each attenuator's accuracy.
   --freq MHz           Frequency for --rf-power / --atten-sweep (default 5000 = 5 GHz).
   --atten dB           Attenuation for --rf-power (default 0).
   --load-cal           Load the converter cal factors into the 8902A first (hardware).

@@ -224,6 +224,81 @@ namespace HpAttenuator.Measurement
         }
 
         /// <summary>
+        /// Test 3: measures a list of individual attenuation settings (e.g. each section/step
+        /// of each attenuator on its own) relative to a 0 dB reference. Takes SET REF with all
+        /// sections bypassed, normalises to that reading, then engages exactly the digits for
+        /// each setting and records the measured attenuation vs the expected dB.
+        /// </summary>
+        public FreqPointResult MeasureSettings(double freqMHz, IReadOnlyList<AttenSetting> settings,
+            System.Action<int, int, AttenPointResult> onPoint = null)
+        {
+            var plan = Prepare(freqMHz);
+            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz);
+
+            var result = new FreqPointResult
+            {
+                FreqMHz = freqMHz, Regime = plan.Regime, LoMHz = plan.LoMHz,
+                IfMHz = plan.IfMHz, Warning = plan.Warning
+            };
+
+            if (_options.RangeCalibrate)
+                _receiver.BeginRangeCalibration();
+
+            // 0 dB reference (all sections bypassed), then software-normalise to it.
+            _attenuator.SetEngaged(System.Array.Empty<int>());
+            Settle();
+            _receiver.SetReference();
+            if (_options.RangeCalibrate && _receiver.RecalRequested())
+                _receiver.Calibrate();
+
+            bool haveBaseline = false;
+            double baselineRelDb = 0.0;
+            try { baselineRelDb = ReadRelativeDbWithRetry(ReferenceReadAttempts); haveBaseline = true; }
+            catch { /* baseline read failed; points reported un-normalised */ }
+
+            int index = 0, total = settings.Count;
+            foreach (var s in settings)
+            {
+                string command = _attenuator.SetEngaged(s.Digits);
+                Settle();
+
+                var point = new AttenPointResult
+                {
+                    CommandedDb = s.ExpectedDb,
+                    Command = command,
+                    Group = s.Group,
+                    ExpectedAttenuationDb = s.ExpectedDb
+                };
+
+                try
+                {
+                    double rel = ReadRelativeDbWithRetry(StepReadAttempts);
+                    double norm = haveBaseline ? rel - baselineRelDb : rel;
+                    point.MeasuredRelativeDb = norm;
+                    point.MeasuredAttenuationDb = -norm;
+                    point.ErrorDb = point.MeasuredAttenuationDb - s.ExpectedDb;
+                }
+                catch (System.Exception ex)
+                {
+                    bool isTimeout = ex.GetType().Name.IndexOf("Timeout", StringComparison.OrdinalIgnoreCase) >= 0;
+                    string detail = ex is Hp8902AException ? ex.Message : (isTimeout ? "read timeout" : ex.Message);
+                    int sb = -1;
+                    try { sb = _receiver.PollStatusByte(); } catch { /* ignore */ }
+                    point.Error = sb >= 0 ? $"{detail} [SB=0x{sb:X2}]" : detail;
+                    point.MeasuredRelativeDb = double.NaN;
+                    point.MeasuredAttenuationDb = double.NaN;
+                    point.ErrorDb = double.NaN;
+                    try { _receiver.ClearError(); } catch { /* keep going */ }
+                }
+                result.Points.Add(point);
+                onPoint?.Invoke(++index, total, point);
+            }
+
+            _attenuator.SetEngaged(System.Array.Empty<int>());   // leave at 0 dB
+            return result;
+        }
+
+        /// <summary>
         /// Reads the relative dB, retrying transient instrument errors (e.g. Error 96
         /// "no input signal sensed") up to <paramref name="maxAttempts"/> times, clearing the
         /// error between tries. Timeouts and other non-instrument errors are not retried —

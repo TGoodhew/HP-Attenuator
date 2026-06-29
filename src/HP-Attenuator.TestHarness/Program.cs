@@ -87,6 +87,15 @@ namespace HpAttenuator.TestHarness
 
                 AttenuatorConfig config = ResolveAttenuator(opt, bench);
 
+                // Test 3: exercise each attenuator's settings individually (8494 1..11 dB,
+                // 8496 10..110 dB), one attenuator engaged at a time.
+                if (opt.PerAtten)
+                {
+                    var perAttn = bench.MakeAttenuator(config);
+                    var perEngine = new MeasurementEngine(bench.Source, bench.Lo, perAttn, bench.Receiver, opt.Sweep);
+                    return RunPerAtten(opt, perEngine, config);
+                }
+
                 // Test 2: a single-frequency relative attenuation sweep in 1 dB steps from
                 // 0 dB to the attenuator's maximum. It reuses the Tuned RF Level relative
                 // method (SET REF at 0 dB normalises the path loss); only the frequency and
@@ -488,6 +497,104 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.MarkupLine("[grey]Send me this table: it shows whether the RECAL bit (0x20) tracks the " +
                                    "level and where reads floor out, so the range-cal gating can be fixed.[/]");
             return 0;
+        }
+
+        // ---- Test 3: per-attenuator individual settings -------------------
+
+        private static int RunPerAtten(HarnessOptions opt, MeasurementEngine engine, AttenuatorConfig config)
+        {
+            double freq = opt.RfPowerFreqMHz;
+
+            // Split the two attenuators: the 8494 (1 dB steps, 0-11) and the 8496 (10 dB,
+            // 0-110). Exercise each across its own settings with the other bypassed.
+            bool xIsFine = config.XModel.Contains("8494");
+            var fine = xIsFine ? config.X : config.Y;
+            var coarse = xIsFine ? config.Y : config.X;
+            string fineModel = xIsFine ? config.XModel : config.YModel;
+            string coarseModel = xIsFine ? config.YModel : config.XModel;
+
+            var settings = new List<AttenSetting>();
+            for (int v = 1; v <= 11; v++)
+            {
+                var d = CommandBuilder.Solve(fine, v);
+                if (d != null) settings.Add(new AttenSetting(fineModel, v, d));
+            }
+            for (int v = 10; v <= 110; v += 10)
+            {
+                var d = CommandBuilder.Solve(coarse, v);
+                if (d != null) settings.Add(new AttenSetting(coarseModel, v, d));
+            }
+
+            AnsiConsole.MarkupLine(
+                $"[grey]Per-attenuator (Test 3):[/] {freq:0.###} MHz, {settings.Count} points — " +
+                $"{fineModel.EscapeMarkup()} 1-11 dB and {coarseModel.EscapeMarkup()} 10-110 dB, " +
+                "each exercised with the other at 0 dB.");
+            AnsiConsole.WriteLine();
+
+            Action<int, int, AttenPointResult> prog = (i, n, p) =>
+            {
+                string body = p.Error != null
+                    ? $"[red]{p.Error.EscapeMarkup()}[/]"
+                    : $"meas {p.MeasuredAttenuationDb,7:0.00} dB  (err {p.ErrorDb:+0.00;-0.00;0.00})";
+                AnsiConsole.MarkupLine($"  {i,2}/{n}  {p.Group.EscapeMarkup()}  set {p.CommandedDb,3} dB -> {body}");
+            };
+
+            FreqPointResult r = engine.MeasureSettings(freq, settings, prog);
+
+            // Results table grouped by attenuator.
+            var table = new Table().Border(TableBorder.Rounded)
+                .Title($"{freq:0.###} MHz  {r.Regime}".EscapeMarkup());
+            table.AddColumn("Attenuator");
+            table.AddColumn(new TableColumn("Set dB").RightAligned());
+            table.AddColumn("Cmd");
+            table.AddColumn(new TableColumn("Meas dB").RightAligned());
+            table.AddColumn(new TableColumn("Error dB").RightAligned());
+
+            double worst = 0; int errors = 0; string worstWhere = "";
+            foreach (var p in r.Points)
+            {
+                if (p.Error != null)
+                {
+                    errors++;
+                    table.AddRow(p.Group.EscapeMarkup(), p.CommandedDb.ToString(), p.Command.EscapeMarkup(),
+                        "[red]—[/]", $"[red]{p.Error.EscapeMarkup()}[/]");
+                    continue;
+                }
+                if (Math.Abs(p.ErrorDb) > worst) { worst = Math.Abs(p.ErrorDb); worstWhere = $"{p.Group} @ {p.CommandedDb} dB"; }
+                string err = $"{p.ErrorDb:+0.00;-0.00;0.00}";
+                string errCell = Math.Abs(p.ErrorDb) <= opt.ToleranceDb ? $"[green]{err}[/]" : $"[red]{err}[/]";
+                table.AddRow(p.Group.EscapeMarkup(), p.CommandedDb.ToString(), p.Command.EscapeMarkup(),
+                    $"{p.MeasuredAttenuationDb:0.00}", errCell);
+            }
+            AnsiConsole.Write(table);
+
+            try
+            {
+                using var csv = new StreamWriter(opt.CsvPath, false);
+                csv.WriteLine("attenuator,set_db,command,measured_atten_db,error_db,error");
+                foreach (var p in r.Points)
+                    csv.WriteLine(string.Join(",", new[]
+                    {
+                        (p.Group ?? "").Replace(",", ";"), p.CommandedDb.ToString(CultureInfo.InvariantCulture),
+                        p.Command, F(p.MeasuredAttenuationDb), F(p.ErrorDb), (p.Error ?? "").Replace(",", ";")
+                    }));
+            }
+            catch (Exception ex) { AnsiConsole.MarkupLine($"[yellow]CSV not written: {ex.Message.EscapeMarkup()}[/]"); }
+
+            AnsiConsole.WriteLine();
+            bool pass = errors == 0 && worst <= opt.ToleranceDb;
+            var summary = new Table().Border(TableBorder.Heavy);
+            summary.AddColumn("Result"); summary.AddColumn("");
+            summary.AddRow("Attenuators", $"{fineModel}, {coarseModel}".EscapeMarkup());
+            summary.AddRow("Points", r.Points.Count.ToString());
+            summary.AddRow("Worst |error|", $"{worst:0.00} dB  ({worstWhere})".EscapeMarkup());
+            if (errors > 0) summary.AddRow("8902A errors", $"[red]{errors} point(s)[/]");
+            summary.AddRow("Tolerance", $"±{opt.ToleranceDb:0.#} dB");
+            summary.AddRow("CSV", Path.GetFullPath(opt.CsvPath).EscapeMarkup());
+            summary.AddRow("Verdict", pass ? "[green]PASS[/]" : "[red]FAIL[/]");
+            AnsiConsole.Write(summary);
+
+            return pass ? 0 : 1;
         }
 
         // ---- Test 1: single-point RF power readback ------------------------
