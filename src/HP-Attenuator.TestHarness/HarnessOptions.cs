@@ -17,6 +17,7 @@ namespace HpAttenuator.TestHarness
         public int RfPowerAttenDb = 0;          // --atten : attenuation for --rf-power (default 0 dB)
         public bool AttenSweep;     // --atten-sweep : Test 2 — 1 dB relative attenuation sweep at --freq
         public bool CalDebug;       // --cal-debug : observe the 8902A status byte vs level (no CALIBRATE)
+        public bool Debug;          // --debug : trace every 8902A command + status byte (find Error 35)
         public bool ExplicitAstop;  // user gave --astop (don't auto-fill the attenuator max)
         public bool ExplicitAstep;  // user gave --astep (don't force 1 dB steps)
         public bool LoadCal;        // --load-cal : load converter cal factors into the 8902A first
@@ -65,6 +66,7 @@ namespace HpAttenuator.TestHarness
                     case "--rf-power": o.RfPower = true; break;
                     case "--atten-sweep": o.AttenSweep = true; break;
                     case "--cal-debug": o.CalDebug = true; break;
+                    case "--debug": o.Debug = true; break;
                     case "--freq": o.RfPowerFreqMHz = D(Need(args, ++i)); break;
                     case "--atten": o.RfPowerAttenDb = I(Need(args, ++i)); break;
                     case "--load-cal": o.LoadCal = true; break;
@@ -158,6 +160,8 @@ Usage: HP-Attenuator.TestHarness [options]
   --tolerance dB                 Pass/fail threshold (default 1.5).
   --read-timeout-ms ms           8902A read timeout (default 60000). Low-level Tuned RF
                                  Level reads near the floor take tens of seconds.
+  --debug                        Trace every 8902A command + the status byte after it, to
+                                 pinpoint which command sets an instrument error.
   --out file.csv                 CSV results path (default harness-results.csv).
   --addr-source/-lo/-receiver/-attenuator  VISA resource overrides.
   -h, --help                     This help.";

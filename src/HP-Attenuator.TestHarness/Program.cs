@@ -33,6 +33,8 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.WriteLine();
 
             VisaInstrumentLink.BeepOnCommand = !opt.NoBeep;
+            if (opt.Debug)
+                Hp8902A.DebugLog = s => AnsiConsole.MarkupLine($"[grey]  {s.EscapeMarkup()}[/]");
 
             var disposables = new List<IDisposable>();
             try

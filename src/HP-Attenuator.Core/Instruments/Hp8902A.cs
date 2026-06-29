@@ -18,6 +18,14 @@ namespace HpAttenuator.Instruments
     /// </summary>
     public sealed class Hp8902A : IMeasuringReceiver
     {
+        /// <summary>
+        /// When set, every command sent to the 8902A is traced here together with the status
+        /// byte read back immediately after, so the command that triggers an instrument error
+        /// (status bit 0x04 — e.g. Error 35) can be identified. Gated by the harness --debug
+        /// flag; null = no tracing (and no per-command serial poll).
+        /// </summary>
+        public static Action<string> DebugLog;
+
         private readonly IInstrumentLink _link;
 
         /// <summary>Settle delay after CALIBRATE / SET REF, ms. The settled read uses T3.</summary>
@@ -33,17 +41,34 @@ namespace HpAttenuator.Instruments
 
         public string ResourceName => _link.ResourceName;
 
+        /// <summary>
+        /// Sends a command and, when <see cref="DebugLog"/> is set, serial-polls the status
+        /// byte immediately after and traces both — flagging the instrument-error bit (0x04)
+        /// so the offending command (e.g. the one raising Error 35) is obvious.
+        /// </summary>
+        private void Send(string command)
+        {
+            _link.Write(command);
+            if (DebugLog == null) return;
+            int sb = -1;
+            try { sb = _link.SerialPoll(); } catch { /* ignore poll failure */ }
+            string flags = sb < 0 ? "?" : $"0x{sb:X2}";
+            string note = (sb & 0x04) != 0 ? "  <-- INSTRUMENT ERROR (0x04)"
+                        : (sb & 0x20) != 0 ? "  (RECAL/UNCAL 0x20)" : "";
+            DebugLog($"8902A < {command,-14} SB={flags}{note}");
+        }
+
         public void Initialize()
         {
             // Device clear drops pending I/O and deasserts a latched SRQ; IP presets to a
             // known state (Free-Run T0, SRQ mask = HP-IB code error only).
             _link.Clear();
-            _link.Write("IP");
+            Send("IP");
         }
 
-        public void Reset() => _link.Write("IP");
+        public void Reset() => Send("IP");
 
-        public void SelectRfPower() => _link.Write("M4");
+        public void SelectRfPower() => Send("M4");
 
         /// <summary>
         /// Nominal external-LO frequency (MHz) used only to <b>activate</b> Frequency-Offset
@@ -76,40 +101,40 @@ namespace HpAttenuator.Instruments
         /// </summary>
         public void LoadCalFactors(double referenceCf, IReadOnlyList<CalFactor> table)
         {
-            _link.Write("M4");        // RF Power
-            _link.Write("37.9SP");    // clear ALL cal-factor storage (both tables) — once
+            Send("M4");        // RF Power
+            Send("37.9SP");    // clear ALL cal-factor storage (both tables) — once
 
-            _link.Write("27.0SP");    // Normal mode -> 37.x entries target the Normal table
+            Send("27.0SP");    // Normal mode -> 37.x entries target the Normal table
             WriteCalFactorTable(referenceCf, table);
 
             // Activate Frequency-Offset mode with a valid LO so 37.x targets the Offset table.
-            _link.Write("27.3SP" + Fmt(CalLoadLoMHz) + "MZ");
+            Send("27.3SP" + Fmt(CalLoadLoMHz) + "MZ");
             WriteCalFactorTable(referenceCf, table);
 
-            _link.Write("27.0SP");    // exit offset mode -> back to Normal for the sensor zero/cal
+            Send("27.0SP");    // exit offset mode -> back to Normal for the sensor zero/cal
         }
 
         private void WriteCalFactorTable(double referenceCf, IReadOnlyList<CalFactor> table)
         {
-            _link.Write("37.3SP" + Fmt(referenceCf) + "CF");        // REF CF (50 MHz)
+            Send("37.3SP" + Fmt(referenceCf) + "CF");        // REF CF (50 MHz)
             foreach (var c in table)
-                _link.Write("37.3SP" + Fmt(c.FreqMHz) + "MZ" + Fmt(c.Cf) + "CF");
-            _link.Write("37.0SP");                                  // automatic cal-factor selection
+                Send("37.3SP" + Fmt(c.FreqMHz) + "MZ" + Fmt(c.Cf) + "CF");
+            Send("37.0SP");                                  // automatic cal-factor selection
         }
 
         public double ZeroSensor()
         {
-            _link.Write("M4");        // RF Power
-            _link.Write("C0");        // calibrator off — no reference power while zeroing
-            _link.Write("ZR");        // zero the sensor
+            Send("M4");        // RF Power
+            Send("C0");        // calibrator off — no reference power while zeroing
+            Send("ZR");        // zero the sensor
             if (ZeroSettleMs > 0) Thread.Sleep(ZeroSettleMs);
             return ReadMeasurement(); // watts, ~0
         }
 
         public double CalibrateSensor()
         {
-            _link.Write("M4");        // ensure RF Power mode (continues from the zero step)
-            _link.Write("C1");        // calibrator on: 50 MHz / 1 mW reference
+            Send("M4");        // ensure RF Power mode (continues from the zero step)
+            Send("C1");        // calibrator on: 50 MHz / 1 mW reference
             if (CalSettleMs > 0) Thread.Sleep(CalSettleMs);
 
             // Settled read with the calibrator on (manual: C1 T3 SC). If the reference
@@ -119,39 +144,39 @@ namespace HpAttenuator.Instruments
             double preDbm = Rf.WattsToDbm(pre);
             if (preDbm < -10.0)
             {
-                _link.Write("C0");
+                Send("C0");
                 throw new Hp8902AException(18,
                     $"reference reads {preDbm:0.0} dBm, not ~0 dBm — {Hp8902AException.Describe(18)}");
             }
 
-            _link.Write("SC");        // save cal — scales the reference to read 1.000 mW
+            Send("SC");        // save cal — scales the reference to read 1.000 mW
             double reference = ReadMeasurement();
-            _link.Write("C0");        // calibrator off
+            Send("C0");        // calibrator off
             return reference;         // watts, ≈ 1e-3
         }
 
         public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
         {
-            _link.Write("S4");      // Tuned RF Level
+            Send("S4");      // Tuned RF Level
             if (regime == MeasurementRegime.Converted)
-                _link.Write("27.3SP" + Fmt(loMHz) + "MZ");  // frequency-offset: external LO
+                Send("27.3SP" + Fmt(loMHz) + "MZ");  // frequency-offset: external LO
             else
-                _link.Write("27.0SP");                      // direct / normal mode
-            _link.Write(Fmt(rfMHz) + "MZ");   // manual tune to the fixed frequency
-            _link.Write("4.0SP");             // IF synchronous detector (floor -127 dBm)
-            _link.Write("1.0SP");             // auto RF attenuation (keep fixed after cal)
-            _link.Write("LG");                // dB display -> bus returns dB
-            _link.Write("32.1SP");            // 0.001 dB resolution
+                Send("27.0SP");                      // direct / normal mode
+            Send(Fmt(rfMHz) + "MZ");   // manual tune to the fixed frequency
+            Send("4.0SP");             // IF synchronous detector (floor -127 dBm)
+            Send("1.0SP");             // auto RF attenuation (keep fixed after cal)
+            Send("LG");                // dB display -> bus returns dB
+            Send("32.1SP");            // 0.001 dB resolution
         }
 
         public void BeginRfPowerMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
         {
-            _link.Write("M4");      // RF Power (power sensor)
+            Send("M4");      // RF Power (power sensor)
             if (regime == MeasurementRegime.Converted)
-                _link.Write("27.3SP" + Fmt(loMHz) + "MZ");  // frequency-offset: external LO
+                Send("27.3SP" + Fmt(loMHz) + "MZ");  // frequency-offset: external LO
             else
-                _link.Write("27.0SP");                      // direct / normal mode
-            _link.Write("37.0SP");  // automatic cal-factor selection (table loaded separately)
+                Send("27.0SP");                      // direct / normal mode
+            Send("37.0SP");  // automatic cal-factor selection (table loaded separately)
         }
 
         public double ReadRfPowerDbm()
@@ -167,10 +192,10 @@ namespace HpAttenuator.Instruments
         {
             // Enable Data Ready (1) + Recal/Uncal (32) in the status byte so a serial poll
             // reflects when a range needs calibrating (SF 22.NN sums the weighted conditions).
-            _link.Write("22.33SP");
+            Send("22.33SP");
             // Free-run trigger so the receiver keeps measuring (and updating RECAL) as the
             // attenuator steps down, rather than waiting for a settled trigger.
-            _link.Write("T0");
+            Send("T0");
         }
 
         public bool RecalRequested() => (_link.SerialPoll() & RecalStatusBit) != 0;
@@ -179,23 +204,23 @@ namespace HpAttenuator.Instruments
 
         public void Calibrate()
         {
-            _link.Write("C1");
+            Send("C1");
             Settle();
         }
 
         public void SetReference()
         {
-            _link.Write("RF");   // SET REF (special function 26) at the current level
+            Send("RF");   // SET REF (special function 26) at the current level
             Settle();
         }
 
-        public void ClearError() => _link.Write("CL");   // CLEAR key — clears a displayed error
+        public void ClearError() => Send("CL");   // CLEAR key — clears a displayed error
 
         public double ReadRelativeDb() => ReadMeasurement();   // dB in LOG relative mode
 
         public double ReadSignalFrequencyMHz()
         {
-            _link.Write("M5");                       // RF Frequency measurement
+            Send("M5");                       // RF Frequency measurement
             double hz = ReadMeasurement();           // fundamental units = Hz
             return hz / 1e6;
         }

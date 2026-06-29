@@ -16,6 +16,12 @@ namespace HpAttenuator.Measurement
         /// <summary>Stop a sweep after this many consecutive below-floor read failures.</summary>
         private const int FloorStopCount = 4;
 
+        /// <summary>Read attempts for the 0 dB reference point (it anchors the whole sweep).</summary>
+        private const int ReferenceReadAttempts = 5;
+
+        /// <summary>Read attempts for each ordinary sweep point.</summary>
+        private const int StepReadAttempts = 3;
+
         private readonly ISignalSource _source;
         private readonly ILocalOscillator _lo;
         private readonly IStepAttenuator _attenuator;
@@ -169,7 +175,11 @@ namespace HpAttenuator.Measurement
 
                 try
                 {
-                    double relDb = _receiver.ReadRelativeDb();
+                    // Retry transient instrument errors (e.g. Error 96 "no signal sensed") —
+                    // and give the 0 dB reference extra attempts, since it anchors every other
+                    // point. Timeouts (the receiver floor) are not retried here.
+                    bool isReference = atten == _options.AttenStartDb;
+                    double relDb = ReadRelativeDbWithRetry(isReference ? ReferenceReadAttempts : StepReadAttempts);
 
                     // Capture the start-attenuation reading as the software zero reference.
                     if (atten == _options.AttenStartDb) { baselineRelDb = relDb; haveBaseline = true; }
@@ -211,6 +221,28 @@ namespace HpAttenuator.Measurement
                 }
             }
             return result;
+        }
+
+        /// <summary>
+        /// Reads the relative dB, retrying transient instrument errors (e.g. Error 96
+        /// "no input signal sensed") up to <paramref name="maxAttempts"/> times, clearing the
+        /// error between tries. Timeouts and other non-instrument errors are not retried —
+        /// they propagate so the caller can treat them as a floor/communication failure.
+        /// </summary>
+        private double ReadRelativeDbWithRetry(int maxAttempts)
+        {
+            Hp8902AException last = null;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try { return _receiver.ReadRelativeDb(); }
+                catch (Hp8902AException ex)
+                {
+                    last = ex;
+                    try { _receiver.ClearError(); } catch { /* keep going */ }
+                    if (attempt < maxAttempts) Settle();   // brief pause, then retry
+                }
+            }
+            throw last;
         }
 
         private LoPlan Prepare(double freqMHz)
