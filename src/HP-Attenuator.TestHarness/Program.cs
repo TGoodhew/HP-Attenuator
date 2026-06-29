@@ -674,7 +674,9 @@ namespace HpAttenuator.TestHarness
         {
             bool anyError = r.Points.Exists(p => p.Error != null);
             string flag = anyError ? "[red]ER[/]" : (r.MaxAbsErrorDb <= tol ? "[green]ok[/]" : "[red]!![/]");
-            string warn = string.IsNullOrEmpty(r.Warning) ? "" : " [yellow](LO-below)[/]";
+            string warn = string.IsNullOrEmpty(r.Warning)
+                ? ""
+                : " [yellow](" + (r.Warning.Length > 60 ? r.Warning.Substring(0, 60) + "…" : r.Warning).EscapeMarkup() + ")[/]";
             // No square brackets in the plain text — Spectre would parse them as markup.
             AnsiConsole.MarkupLine(
                 $"{flag} {r.FreqMHz,9:0.###} MHz  {r.Regime,-9}  " +

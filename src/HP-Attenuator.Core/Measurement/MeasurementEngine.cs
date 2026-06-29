@@ -152,7 +152,7 @@ namespace HpAttenuator.Measurement
             // attenuation shows, with no path-loss / reference offset.
             bool haveBaseline = false;
             double baselineRelDb = 0.0;
-            int consecutiveErrors = 0;
+            int consecutiveTimeouts = 0;
 
             foreach (int atten in _options.AttenuationSteps())
             {
@@ -178,29 +178,35 @@ namespace HpAttenuator.Measurement
                     point.MeasuredRelativeDb = normRelDb;
                     point.MeasuredAttenuationDb = -normRelDb;
                     point.ErrorDb = point.MeasuredAttenuationDb - expected;
-                    consecutiveErrors = 0;
+                    consecutiveTimeouts = 0;
                 }
                 catch (System.Exception ex)
                 {
-                    // Expected once the level drops below the receiver's sensitivity: log
-                    // the error, clear it from the device, and carry on to the next point.
-                    point.Error = ex is Hp8902AException ? ex.Message : "read failed: " + ex.GetType().Name;
+                    // Capture the full detail — for a FormatException ex.Message holds the raw
+                    // 8902A response, which is exactly what we need to diagnose. Also append
+                    // the status byte so we can see RECAL/UNCAL/instrument-error bits.
+                    bool isTimeout = ex.GetType().Name.IndexOf("Timeout", StringComparison.OrdinalIgnoreCase) >= 0;
+                    string detail = ex is Hp8902AException ? ex.Message : (isTimeout ? "read timeout" : ex.Message);
+                    int sb = -1;
+                    try { sb = _receiver.PollStatusByte(); } catch { /* ignore */ }
+                    point.Error = sb >= 0 ? $"{detail} [SB=0x{sb:X2}]" : detail;
                     point.MeasuredRelativeDb = double.NaN;
                     point.MeasuredAttenuationDb = double.NaN;
                     point.ErrorDb = double.NaN;
                     try { _receiver.ClearError(); } catch { /* keep going */ }
-                    consecutiveErrors++;
+
+                    // Only a run of read TIMEOUTS means we've hit the receiver floor; other
+                    // errors (e.g. a malformed reading) are a different fault — log and continue
+                    // so the full pattern is visible rather than stopping early.
+                    consecutiveTimeouts = isTimeout ? consecutiveTimeouts + 1 : 0;
                 }
                 result.Points.Add(point);
                 onPoint?.Invoke(++index, total, point);
 
-                // Once the level is below the receiver floor, every deeper step just burns a
-                // full read timeout. After a run of consecutive failures, stop — we've gone
-                // as deep as this source level / path can measure.
-                if (consecutiveErrors >= FloorStopCount)
+                if (consecutiveTimeouts >= FloorStopCount)
                 {
-                    result.Warning = $"stopped at {atten} dB — {consecutiveErrors} consecutive reads " +
-                                     "below the receiver floor (deeper attenuation is unmeasurable here).";
+                    result.Warning = $"stopped at {atten} dB after {consecutiveTimeouts} consecutive read " +
+                                     "timeouts — below the receiver floor (deeper attenuation is unmeasurable).";
                     break;
                 }
             }
