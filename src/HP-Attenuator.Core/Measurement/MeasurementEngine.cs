@@ -13,6 +13,9 @@ namespace HpAttenuator.Measurement
     /// </summary>
     public sealed class MeasurementEngine
     {
+        /// <summary>Stop a sweep after this many consecutive below-floor read failures.</summary>
+        private const int FloorStopCount = 4;
+
         private readonly ISignalSource _source;
         private readonly ILocalOscillator _lo;
         private readonly IStepAttenuator _attenuator;
@@ -157,6 +160,7 @@ namespace HpAttenuator.Measurement
             // attenuation shows, with no path-loss / reference offset.
             bool haveBaseline = false;
             double baselineRelDb = 0.0;
+            int consecutiveErrors = 0;
 
             foreach (int atten in _options.AttenuationSteps())
             {
@@ -182,6 +186,7 @@ namespace HpAttenuator.Measurement
                     point.MeasuredRelativeDb = normRelDb;
                     point.MeasuredAttenuationDb = -normRelDb;
                     point.ErrorDb = point.MeasuredAttenuationDb - expected;
+                    consecutiveErrors = 0;
                 }
                 catch (System.Exception ex)
                 {
@@ -192,9 +197,20 @@ namespace HpAttenuator.Measurement
                     point.MeasuredAttenuationDb = double.NaN;
                     point.ErrorDb = double.NaN;
                     try { _receiver.ClearError(); } catch { /* keep going */ }
+                    consecutiveErrors++;
                 }
                 result.Points.Add(point);
                 onPoint?.Invoke(++index, total, point);
+
+                // Once the level is below the receiver floor, every deeper step just burns a
+                // full read timeout. After a run of consecutive failures, stop — we've gone
+                // as deep as this source level / path can measure.
+                if (consecutiveErrors >= FloorStopCount)
+                {
+                    result.Warning = $"stopped at {atten} dB — {consecutiveErrors} consecutive reads " +
+                                     "below the receiver floor (deeper attenuation is unmeasurable here).";
+                    break;
+                }
             }
             return result;
         }

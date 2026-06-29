@@ -148,10 +148,12 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.MarkupLine("[green]Mode:[/] HARDWARE (NI-VISA)");
             var sourceLink = Open(opt.AddrSource, disposables);
             var loLink = Open(opt.AddrLo, disposables);
-            // The 8902A's deepest settled read is <10 s; 15 s gives headroom while letting
-            // genuinely unmeasurable points (below the receiver floor) fail fast instead of
-            // stalling 30 s each at the bottom of a deep sweep.
-            var rxLink = Open(opt.AddrReceiver, disposables, 15000);
+            // Low-level Tuned RF Level reads are SLOW: at AUTO averaging (4.0SP) the 8902A
+            // ramps averaging far up near its floor (and the converter loss pushes deep
+            // attenuation close to it), so a settled read can take tens of seconds. The
+            // blocking read returns as soon as Data-Ready is set, so a generous timeout just
+            // gives those reads room to complete; only truly-below-floor points hit it.
+            var rxLink = Open(opt.AddrReceiver, disposables, opt.ReceiverTimeoutMs);
             var attLink = Open(opt.AddrAttenuator, disposables);
 
             var source = new Hp8340B(sourceLink);
@@ -191,7 +193,7 @@ namespace HpAttenuator.TestHarness
                 return new SimulatedReceiver(new SimulatedBench());
             }
             AnsiConsole.MarkupLine($"[green]Mode:[/] HARDWARE (8902A @ {opt.AddrReceiver.EscapeMarkup()})");
-            var rx = new Hp8902A(Open(opt.AddrReceiver, disposables, 30000));
+            var rx = new Hp8902A(Open(opt.AddrReceiver, disposables, opt.ReceiverTimeoutMs));
             AnsiConsole.MarkupLine("[grey]Clearing + presetting 8902A...[/]");
             rx.Initialize();   // device clear + preset (no stale errors/SRQ)
             return rx;

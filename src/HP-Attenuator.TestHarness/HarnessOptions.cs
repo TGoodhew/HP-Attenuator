@@ -34,6 +34,10 @@ namespace HpAttenuator.TestHarness
         public double ToleranceDb = 1.5;
         public string CsvPath = "harness-results.csv";
 
+        // Low-level Tuned RF Level reads (AUTO averaging near the floor) can take tens of
+        // seconds; the VISA read blocks until Data-Ready, so this is mostly headroom.
+        public int ReceiverTimeoutMs = 60000;   // --read-timeout-ms
+
         public string AddrSource = "GPIB0::20::INSTR";
         public string AddrLo = "GPIB0::19::INSTR";
         public string AddrReceiver = "GPIB0::14::INSTR";
@@ -75,6 +79,7 @@ namespace HpAttenuator.TestHarness
                     case "--ask": o.AskAtten = true; break;
                     case "--x-atten": o.XAttenSteps = Need(args, ++i) == "8496" ? 10 : 1; break;
                     case "--tolerance": o.ToleranceDb = D(Need(args, ++i)); break;
+                    case "--read-timeout-ms": o.ReceiverTimeoutMs = I(Need(args, ++i)); break;
                     case "--out": o.CsvPath = Need(args, ++i); break;
                     case "--fstart": o.Sweep.FreqStartMHz = D(Need(args, ++i)); o.ExplicitFreq = true; break;
                     case "--fstop": o.Sweep.FreqStopMHz = D(Need(args, ++i)); o.ExplicitFreq = true; break;
@@ -151,6 +156,8 @@ Usage: HP-Attenuator.TestHarness [options]
   --power dBm                    Source power (default 0).
   --settle ms                    Settle per attenuator step (default 100).
   --tolerance dB                 Pass/fail threshold (default 1.5).
+  --read-timeout-ms ms           8902A read timeout (default 60000). Low-level Tuned RF
+                                 Level reads near the floor take tens of seconds.
   --out file.csv                 CSV results path (default harness-results.csv).
   --addr-source/-lo/-receiver/-attenuator  VISA resource overrides.
   -h, --help                     This help.";
