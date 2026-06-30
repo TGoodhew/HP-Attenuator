@@ -109,16 +109,28 @@ namespace HpAttenuator.Instruments
             Send("37.3SP" + string.Format(CultureInfo.InvariantCulture, "{0:F2}MZ{1:F2}CF", freqMHz, calFactorPercent));
 
         /// <summary>
-        /// Reads back cal-factor table state for diagnostics: the table size (37.4SP) and the
-        /// stored reference cal factor (37.5SP), as the raw 8902A responses. Lets a load verify
-        /// that entries actually committed rather than inferring from the front-panel error.
+        /// Reads back the entry count (37.4SP) of BOTH cal-factor tables — Normal (27.0SP) and
+        /// Frequency-Offset (27.1SP) — to verify a load committed to each. Leaves Normal mode.
+        /// Returns -1 for a table whose size couldn't be read.
         /// </summary>
-        public (string size, string refCf) ReadCalFactorReadback()
+        public (int normal, int offset) ReadCalFactorTableSizes()
         {
-            string size, refCf;
-            try { size = _link.Query("37.4SP"); } catch (Exception ex) { size = ex.GetType().Name; }
-            try { refCf = _link.Query("37.5SP"); } catch (Exception ex) { refCf = ex.GetType().Name; }
-            return (size, refCf);
+            _link.Write("27.0SP"); int normal = TryReadTableSize();
+            _link.Write("27.1SP"); int offset = TryReadTableSize();
+            _link.Write("27.0SP");                       // leave in Normal mode
+            return (normal, offset);
+        }
+
+        private int TryReadTableSize()
+        {
+            try
+            {
+                string raw = _link.Query("37.4SP").Trim();
+                if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+                    return (int)Math.Round(v);
+            }
+            catch { /* unreadable */ }
+            return -1;
         }
 
         public double ZeroSensor()

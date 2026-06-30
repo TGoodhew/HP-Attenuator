@@ -258,16 +258,13 @@ namespace HpAttenuator.TestHarness
                 $"  [grey]Sent the 50 MHz REF CF + {ConverterCalFactors.Default.Count} entries (2–18 GHz) " +
                 "to the Normal and Frequency-Offset tables.[/]");
 
-            // Verify the entries actually committed (read the table size back).
+            // Verify the entries actually committed in BOTH tables (read each size back).
             if (receiver is Hp8902A hp)
             {
-                var (size, _) = hp.ReadCalFactorReadback();
-                int stored = ParseTableSize(size);
-                if (stored == expected)
-                    AnsiConsole.MarkupLine($"  [green]✓[/] Verified: {stored} entries stored (37.4SP table size).");
-                else
-                    AnsiConsole.MarkupLine($"  [red]✗ Read-back table size = {stored} (expected {expected}). " +
-                                           "Entries did not store.[/]");
+                var (normal, offset) = hp.ReadCalFactorTableSizes();
+                string Show(int n) => n == expected ? $"[green]{n}[/]" : $"[red]{n}[/]";
+                AnsiConsole.MarkupLine($"  Read-back (37.4SP): Normal table = {Show(normal)}, " +
+                                       $"Frequency-Offset table = {Show(offset)} (expected {expected} each).");
             }
             return 0;
         }
