@@ -39,10 +39,11 @@ namespace HpAttenuator.TestHarness
             var disposables = new List<IDisposable>();
             try
             {
-                // The sensor cal steps only need the 8902A — don't open the whole bench.
-                if (opt.SensorCal || opt.SensorZero || opt.SensorCalibrate)
+                // These steps only need the 8902A — don't open the whole bench.
+                if (opt.SensorCal || opt.SensorZero || opt.SensorCalibrate || opt.LoadCal)
                 {
                     var receiver = BuildReceiverOnly(opt, disposables);
+                    if (opt.LoadCal) return RunLoadCalFactors(receiver);
                     if (opt.SensorCal) return RunSensorCalInteractive(receiver);
                     return opt.SensorZero ? RunSensorZero(receiver) : RunSensorCalibrate(receiver);
                 }
@@ -52,13 +53,6 @@ namespace HpAttenuator.TestHarness
                 // Settling and range calibration only matter on real hardware.
                 if (bench.IsSimulated) { opt.Sweep.SettleMs = 0; opt.Sweep.RangeCalibrate = false; }
                 if (opt.NoCalPass) opt.Sweep.RangeCalibrate = false;
-
-                if (opt.LoadCal)
-                {
-                    AnsiConsole.MarkupLine("[grey]Loading converter cal factors into the 8902A...[/]");
-                    bench.Receiver.Reset();
-                    bench.Receiver.LoadCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
-                }
 
                 if (opt.Detect)
                     return RunDetect(opt, bench);
@@ -237,6 +231,30 @@ namespace HpAttenuator.TestHarness
         /// move the sensor onto the 8902A CALIBRATION RF POWER OUTPUT, so this pauses and
         /// waits for the operator before calibrating.
         /// </summary>
+        /// <summary>
+        /// Loads the converter cal-factor tables into the 8902A (both the Normal and the
+        /// Frequency-Offset RF-Power tables) and exits. Non-interactive — no sensor to move.
+        /// </summary>
+        private static int RunLoadCalFactors(IMeasuringReceiver receiver)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold]Loading converter cal factors into the 8902A[/]");
+            try
+            {
+                receiver.Reset();
+                receiver.LoadCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
+            }
+            catch (Hp8902AException ex)
+            {
+                AnsiConsole.MarkupLine($"  [red]✗ {ex.Message.EscapeMarkup()}[/]");
+                return 1;
+            }
+            AnsiConsole.MarkupLine(
+                $"  [green]✓[/] REF CF {ConverterCalFactors.ReferenceCf:0}% + {ConverterCalFactors.Default.Count} " +
+                "entries (2–18 GHz) loaded into the Normal and Frequency-Offset tables.");
+            return 0;
+        }
+
         private static int RunSensorCalInteractive(IMeasuringReceiver receiver)
         {
             if (!InteractiveSensorCalibrate(receiver)) return 1;

@@ -156,7 +156,8 @@ Usage: HP-Attenuator.TestHarness [options]
                        ~22 points. Isolates each attenuator's accuracy.
   --freq MHz           Frequency for --rf-power / --atten-sweep (default 5000 = 5 GHz).
   --atten dB           Attenuation for --rf-power (default 0).
-  --load-cal           Load the converter cal factors into the 8902A first (hardware).
+  --load-cal           Load the converter cal factors into the 8902A (both the Normal and
+                       Frequency-Offset tables) and exit. Non-interactive.
   --no-cal-pass        Skip the 8902A 3-point range-calibration pass.
   --sensor-cal         Interactive: upload cal factors + zero, prompt you to attach the
                        sensor to the CAL output, then calibrate. (Run this one yourself.)
