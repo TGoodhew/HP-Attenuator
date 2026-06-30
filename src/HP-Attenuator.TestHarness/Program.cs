@@ -243,6 +243,10 @@ namespace HpAttenuator.TestHarness
             {
                 receiver.Reset();
                 receiver.LoadCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
+                // The 37.9SP clear step momentarily leaves RF POWER with no factors, which the
+                // 8902A latches as Error 15 on the display (expected — see the Microwave Product
+                // Note). Clear it now that the entries are loaded so the panel isn't left in error.
+                receiver.ClearError();
             }
             catch (Hp8902AException ex)
             {
@@ -251,7 +255,7 @@ namespace HpAttenuator.TestHarness
             }
             AnsiConsole.MarkupLine(
                 $"  [green]✓[/] REF CF {ConverterCalFactors.ReferenceCf:0}% + {ConverterCalFactors.Default.Count} " +
-                "entries (2–18 GHz) loaded into the Normal and Frequency-Offset tables.");
+                "entries (2–18 GHz) loaded into the Normal and Frequency-Offset tables; display error cleared.");
             return 0;
         }
 
