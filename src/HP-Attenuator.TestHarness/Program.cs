@@ -253,20 +253,21 @@ namespace HpAttenuator.TestHarness
                 AnsiConsole.MarkupLine($"  [red]✗ {ex.Message.EscapeMarkup()}[/]");
                 return 1;
             }
+            int expected = ConverterCalFactors.Default.Count + 1;   // + the 50 MHz REF CF entry
             AnsiConsole.MarkupLine(
-                $"  [grey]Sent {ConverterCalFactors.Default.Count} cal-factor entries (2–18 GHz) to the " +
-                "Normal and Frequency-Offset tables.[/]");
+                $"  [grey]Sent the 50 MHz REF CF + {ConverterCalFactors.Default.Count} entries (2–18 GHz) " +
+                "to the Normal and Frequency-Offset tables.[/]");
 
             // Verify the entries actually committed (read the table size back).
             if (receiver is Hp8902A hp)
             {
                 var (size, _) = hp.ReadCalFactorReadback();
                 int stored = ParseTableSize(size);
-                if (stored == ConverterCalFactors.Default.Count)
+                if (stored == expected)
                     AnsiConsole.MarkupLine($"  [green]✓[/] Verified: {stored} entries stored (37.4SP table size).");
                 else
-                    AnsiConsole.MarkupLine($"  [red]✗ Read-back table size = {stored} (expected " +
-                                           $"{ConverterCalFactors.Default.Count}). Entries did not store.[/]");
+                    AnsiConsole.MarkupLine($"  [red]✗ Read-back table size = {stored} (expected {expected}). " +
+                                           "Entries did not store.[/]");
             }
             return 0;
         }

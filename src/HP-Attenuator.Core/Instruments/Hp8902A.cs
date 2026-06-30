@@ -81,21 +81,32 @@ namespace HpAttenuator.Instruments
         /// the entries to commit; without it RF POWER then shows Error 15 (no factors stored).
         /// <paramref name="referenceCf"/> is unused (the 8902A REF CF defaults to 100%).
         /// </summary>
+        /// <summary>The 50 MHz calibrator frequency carries the reference cal factor (REF CF).</summary>
+        private const double ReferenceCfFreqMHz = 50.0;
+
         public void LoadCalFactors(double referenceCf, IReadOnlyList<CalFactor> table)
         {
-            WriteCalFactorTable(useOffsetTable: false, table);   // Normal table
-            WriteCalFactorTable(useOffsetTable: true, table);    // Frequency-Offset table
+            WriteCalFactorTable(useOffsetTable: false, referenceCf, table);   // Normal table
+            WriteCalFactorTable(useOffsetTable: true, referenceCf, table);    // Frequency-Offset table
+            Send("27.0SP");   // leave in Normal mode (not offset-with-no-LO, which re-flags Error 15)
         }
 
-        private void WriteCalFactorTable(bool useOffsetTable, IReadOnlyList<CalFactor> table)
+        private void WriteCalFactorTable(bool useOffsetTable, double referenceCf, IReadOnlyList<CalFactor> table)
         {
             Send("M4T0");                                    // RF Power + free-run trigger
             Send(useOffsetTable ? "27.1SP" : "27.0SP");      // select Normal / Frequency-Offset table
             Send("37.9SP");                                  // clear the selected table
+
+            // The REF CF at the 50 MHz calibrator frequency MUST be in the table, else the
+            // receiver has no reference factor and RF POWER shows Error 15 (the table entries
+            // alone aren't enough). Loaded as a normal 50 MHz entry (see GPIBUtils test app).
+            WriteEntry(ReferenceCfFreqMHz, referenceCf);
             foreach (var c in table)
-                Send("37.3SP" + string.Format(CultureInfo.InvariantCulture,
-                                              "{0:F2}MZ{1:F2}CF", c.FreqMHz, c.Cf));
+                WriteEntry(c.FreqMHz, c.Cf);
         }
+
+        private void WriteEntry(double freqMHz, double calFactorPercent) =>
+            Send("37.3SP" + string.Format(CultureInfo.InvariantCulture, "{0:F2}MZ{1:F2}CF", freqMHz, calFactorPercent));
 
         /// <summary>
         /// Reads back cal-factor table state for diagnostics: the table size (37.4SP) and the
