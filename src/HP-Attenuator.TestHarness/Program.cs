@@ -254,8 +254,20 @@ namespace HpAttenuator.TestHarness
                 return 1;
             }
             AnsiConsole.MarkupLine(
-                $"  [green]✓[/] REF CF {ConverterCalFactors.ReferenceCf:0}% + {ConverterCalFactors.Default.Count} " +
-                "entries (2–18 GHz) loaded into the Normal and Frequency-Offset tables; display error cleared.");
+                $"  [grey]Sent {ConverterCalFactors.Default.Count} cal-factor entries (2–18 GHz) to the " +
+                "Normal and Frequency-Offset tables.[/]");
+
+            // Verify the entries actually committed (read the table size back).
+            if (receiver is Hp8902A hp)
+            {
+                var (size, _) = hp.ReadCalFactorReadback();
+                int stored = ParseTableSize(size);
+                if (stored == ConverterCalFactors.Default.Count)
+                    AnsiConsole.MarkupLine($"  [green]✓[/] Verified: {stored} entries stored (37.4SP table size).");
+                else
+                    AnsiConsole.MarkupLine($"  [red]✗ Read-back table size = {stored} (expected " +
+                                           $"{ConverterCalFactors.Default.Count}). Entries did not store.[/]");
+            }
             return 0;
         }
 
@@ -922,5 +934,13 @@ namespace HpAttenuator.TestHarness
         }
 
         private static string F(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);
+
+        /// <summary>Parses the 8902A 37.4SP table-size response (e.g. "+0000000017E+00") to an int; -1 on failure.</summary>
+        private static int ParseTableSize(string raw)
+        {
+            if (double.TryParse(raw?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+                return (int)Math.Round(v);
+            return -1;
+        }
     }
 }

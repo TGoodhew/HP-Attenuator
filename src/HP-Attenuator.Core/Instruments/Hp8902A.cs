@@ -71,58 +71,43 @@ namespace HpAttenuator.Instruments
         public void SelectRfPower() => Send("M4");
 
         /// <summary>
-        /// Nominal external-LO frequency (MHz) used only to <b>activate</b> Frequency-Offset
-        /// mode while the offset cal-factor table is written. The table is keyed by each
-        /// entry's RF frequency, so this value does not affect what gets stored; the real
-        /// measurement LO is set later by <see cref="BeginRfPowerMeasurement"/>. It must be
-        /// a valid, non-zero, in-range LO — see <see cref="LoadCalFactors"/>.
-        /// </summary>
-        private const double CalLoadLoMHz = 2120.53;   // ~2 GHz RF + 120.53 MHz IF
-
-        /// <summary>
-        /// Loads BOTH cal-factor tables the 8902A needs for RF Power measurements — the
-        /// Normal table (direct, incl. the 50 MHz sensor-cal reference) and the
-        /// Frequency-Offset table (converter path) — in a single pass.
-        /// <para>
-        /// SF 37 (cal-factor entry) targets whichever of the two tables the Frequency-Offset
-        /// mode (SF 27) status selects (8902A Operation manual: "the table being used is
-        /// determined by the status of the Frequency Offset mode"). <c>37.9SP</c> clears
-        /// ALL cal-factor storage, so this clears <b>once</b> then fills both tables.
-        /// </para>
-        /// <para>
-        /// Offset mode must be genuinely ACTIVE for the offset entries to land in the offset
-        /// table, and the only way to activate it is <c>27.3SP&lt;LO&gt;MZ</c> with a valid LO
-        /// frequency. <c>27.1SP</c> merely <i>re-enters</i> with a previously set LO, and
-        /// <c>27.3SP0MZ</c> (LO = 0) never activates it — in either case the offset entries
-        /// fall back into the Normal table, leaving the offset table empty and producing
-        /// Error 15 at measurement time. Loading more than once re-clears a filled table for
-        /// the same reason. Leaves the receiver in Normal mode for the sensor zero/calibrate.
-        /// </para>
+        /// Loads BOTH cal-factor tables the 8902A needs for RF Power measurements — the Normal
+        /// table (direct) and the Frequency-Offset table (converter path). Sequence per the
+        /// working GPIBUtils HP8902A driver: <c>M4T0</c> (RF Power + free-run trigger), select
+        /// the table (<c>27.0SP</c> Normal / <c>27.1SP</c> Frequency-Offset), clear it
+        /// (<c>37.9SP</c>), then write each entry as <c>37.3SP{freqMHz}MZ{cf}CF</c> — where
+        /// <c>CF</c> is the "% CAL FACTOR" entry terminator (the OCR'd code summary mislabels
+        /// it) and the values are fixed-2-decimal. The <c>T0</c> free-run state is required for
+        /// the entries to commit; without it RF POWER then shows Error 15 (no factors stored).
+        /// <paramref name="referenceCf"/> is unused (the 8902A REF CF defaults to 100%).
         /// </summary>
         public void LoadCalFactors(double referenceCf, IReadOnlyList<CalFactor> table)
         {
-            Send("M4");        // RF Power
-            Send("37.9SP");    // clear ALL cal-factor storage (both tables) — once
-
-            Send("27.0SP");    // Normal mode -> 37.x entries target the Normal table
-            WriteCalFactorTable(referenceCf, table);
-
-            // Activate Frequency-Offset mode with a valid LO so 37.x targets the Offset table.
-            Send("27.3SP" + Fmt(CalLoadLoMHz) + "MZ");
-            WriteCalFactorTable(referenceCf, table);
-
-            Send("27.0SP");    // exit offset mode -> back to Normal for the sensor zero/cal
+            WriteCalFactorTable(useOffsetTable: false, table);   // Normal table
+            WriteCalFactorTable(useOffsetTable: true, table);    // Frequency-Offset table
         }
 
-        private void WriteCalFactorTable(double referenceCf, IReadOnlyList<CalFactor> table)
+        private void WriteCalFactorTable(bool useOffsetTable, IReadOnlyList<CalFactor> table)
         {
-            // The cal-factor entry terminator is D2 (the "% CAL FACTOR" key, blue-shifted MHz).
-            // NOT "CF" — that is the CALIBRATE-Off command, which silently fails to store the
-            // factor (the entry never commits, so RF POWER then shows Error 15).
-            Send("37.3SP" + Fmt(referenceCf) + "D2");        // REF CF (50 MHz)
+            Send("M4T0");                                    // RF Power + free-run trigger
+            Send(useOffsetTable ? "27.1SP" : "27.0SP");      // select Normal / Frequency-Offset table
+            Send("37.9SP");                                  // clear the selected table
             foreach (var c in table)
-                Send("37.3SP" + Fmt(c.FreqMHz) + "MZ" + Fmt(c.Cf) + "D2");
-            Send("37.0SP");                                  // automatic cal-factor selection
+                Send("37.3SP" + string.Format(CultureInfo.InvariantCulture,
+                                              "{0:F2}MZ{1:F2}CF", c.FreqMHz, c.Cf));
+        }
+
+        /// <summary>
+        /// Reads back cal-factor table state for diagnostics: the table size (37.4SP) and the
+        /// stored reference cal factor (37.5SP), as the raw 8902A responses. Lets a load verify
+        /// that entries actually committed rather than inferring from the front-panel error.
+        /// </summary>
+        public (string size, string refCf) ReadCalFactorReadback()
+        {
+            string size, refCf;
+            try { size = _link.Query("37.4SP"); } catch (Exception ex) { size = ex.GetType().Name; }
+            try { refCf = _link.Query("37.5SP"); } catch (Exception ex) { refCf = ex.GetType().Name; }
+            return (size, refCf);
         }
 
         public double ZeroSensor()
