@@ -30,6 +30,13 @@ namespace HpAttenuator.Measurement
         /// </summary>
         private const int RangeCalReachDb = 80;
 
+        /// <summary>
+        /// Step size (dB) for the range-cal pass. Fine enough to land on each RF-range boundary
+        /// so RECAL is caught and that range calibrated; a coarse step skips boundaries and
+        /// leaves bands uncalibrated (UNCAL) during measurement.
+        /// </summary>
+        private const int RangeCalStepDb = 2;
+
         private readonly ISignalSource _source;
         private readonly ILocalOscillator _lo;
         private readonly IStepAttenuator _attenuator;
@@ -290,39 +297,43 @@ namespace HpAttenuator.Measurement
             return result;
         }
 
+        /// <summary>Wait after a CALIBRATE before re-reading; the cal takes a few seconds.</summary>
+        private const int PostCalibrateWaitMs = 2500;
+
         /// <summary>
-        /// Reads the relative dB, retrying transient instrument errors (e.g. Error 96
-        /// "no input signal sensed") up to <paramref name="maxAttempts"/> times, clearing the
-        /// error between tries. Timeouts and other non-instrument errors are not retried —
-        /// they propagate so the caller can treat them as a floor/communication failure.
+        /// Reads the relative dB robustly, up to <paramref name="maxAttempts"/> times, clearing
+        /// and re-reading on a transient instrument error (e.g. Error 96), an UNCAL reading, or
+        /// an empty/garbled response (read before Data-Ready). It does NOT calibrate here:
+        /// calibrating a range mid-measurement disturbs the other ranges (it broke the deeper
+        /// 8496 points), so the up-front range cal is solely responsible for every range.
+        /// Timeouts are not caught — they propagate as a floor/communication failure.
         /// </summary>
         private double ReadRelativeDbWithRetry(int maxAttempts)
         {
-            Hp8902AException last = null;
+            System.Exception last = null;
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 try { return _receiver.ReadRelativeDb(); }
-                catch (Hp8902AException ex)
+                catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
                 {
                     last = ex;
-                    // An UNCAL reading ("CCCC") means this level's RF range needs calibrating —
-                    // CALIBRATE here (the level is in range, so it won't Error 35) and retry.
-                    if (ex.IsUncal) { try { _receiver.Calibrate(); } catch { /* may fail at the floor */ } }
                     try { _receiver.ClearError(); } catch { /* keep going */ }
-                    if (attempt < maxAttempts) Settle();   // brief pause, then retry
+                    if (attempt < maxAttempts) Settle();
                 }
             }
             throw last;
         }
 
         /// <summary>
-        /// Establishes the 0 dB reference and calibrates the receiver's RF ranges. Takes SET
-        /// REF at 0 dB FIRST, then steps the level down and CALIBRATEs at each coarse step
-        /// (CalStepDb), capped at <see cref="RangeCalReachDb"/> below the source level so it
-        /// never calibrates past where the signal is measurable (deeper → Error 35). A read
-        /// after each CALIBRATE lets the receiver settle/lock and stops the pass early if the
-        /// floor is reached. Leaves the attenuator at 0 dB. <paramref name="setZero"/> sets the
-        /// attenuator to 0 dB (SetAttenuationDb(0) for the sweep, SetEngaged(none) per-attenuator).
+        /// Establishes the 0 dB reference and calibrates ALL of the receiver's RF ranges in one
+        /// monotonic pass, so the subsequent measurement never needs to calibrate (which would
+        /// disturb the ranges). Takes SET REF at 0 dB FIRST (proven to avoid Error 35), then
+        /// steps the level DOWN in fine steps and CALIBRATEs only when the receiver asks (RECAL)
+        /// — landing on each range boundary and calibrating it in order. Capped at
+        /// <see cref="RangeCalReachDb"/> below the source level so it never calibrates past where
+        /// the signal is measurable (deeper → Error 35). Leaves the attenuator at 0 dB.
+        /// <paramref name="setZero"/> sets 0 dB (SetAttenuationDb(0) for the sweep,
+        /// SetEngaged(none) per-attenuator).
         /// </summary>
         private void RunRangeCalibration(System.Action setZero)
         {
@@ -337,14 +348,14 @@ namespace HpAttenuator.Measurement
                 return;
 
             double calCapAtten = _options.SourcePowerDbm + RangeCalReachDb;
-            foreach (int atten in _options.CalSteps())
+            for (int atten = _options.AttenStartDb; atten <= calCapAtten; atten += RangeCalStepDb)
             {
-                if (atten > calCapAtten) break;
                 _attenuator.SetAttenuationDb(atten);
-                Settle();
-                _receiver.Calibrate();               // C1 at this level
-                try { ReadRelativeDbWithRetry(1); }  // let it settle/lock; stop if the floor is hit
-                catch { break; }
+                Thread.Sleep(Math.Max(_options.SettleMs, 500));   // let the receiver acquire so RECAL is current
+                if (!_receiver.RecalRequested())     // only calibrate the ranges the receiver flags
+                    continue;
+                _receiver.Calibrate();               // C1 at this boundary
+                Thread.Sleep(PostCalibrateWaitMs);   // CALIBRATE takes a few seconds
             }
 
             setZero();                               // back to 0 dB for the measurement

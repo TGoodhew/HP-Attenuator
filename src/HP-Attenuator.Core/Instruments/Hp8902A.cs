@@ -216,7 +216,21 @@ namespace HpAttenuator.Instruments
 
         public void ClearError() => Send("CL");   // CLEAR key — clears a displayed error
 
-        public double ReadRelativeDb() => ReadMeasurement();   // dB in LOG relative mode
+        public double ReadRelativeDb()
+        {
+            // LOG relative mode returns dB. When the current level is UNCAL the 8902A does not
+            // return a number — it sends a row of 'C's or an empty/short response — which fails
+            // to parse. Distinguish the two cases by the status byte: RECAL/UNCAL set means the
+            // receiver needs calibrating at this level (surface as IsUncal so the caller can
+            // CALIBRATE); otherwise it's a transient (e.g. read before Data-Ready) — rethrow so
+            // the caller simply re-reads.
+            try { return ReadMeasurement(); }
+            catch (FormatException)
+            {
+                if ((_link.SerialPoll() & RecalStatusBit) != 0) throw Hp8902AException.Uncal();
+                throw;
+            }
+        }
 
         public double ReadSignalFrequencyMHz()
         {
@@ -239,12 +253,6 @@ namespace HpAttenuator.Instruments
 
         private static string Fmt(double v) => v.ToString("0.######", CultureInfo.InvariantCulture);
 
-        private static bool ContainsDigit(string s)
-        {
-            foreach (char c in s) if (c >= '0' && c <= '9') return true;
-            return false;
-        }
-
         /// <summary>
         /// Parses an 8902A reading. Values ≥ 9e10 are error sentinels (+900000NNNNE+01);
         /// these throw <see cref="Hp8902AException"/>. Otherwise returns the value in the
@@ -256,13 +264,6 @@ namespace HpAttenuator.Instruments
                 throw new FormatException("Empty reading from 8902A.");
 
             string s = raw.Trim();
-
-            // Uncalibrated indicator: the 8902A streams 'C' characters (no digits) when the
-            // current reading is UNCAL (RECAL set). Surface it so the caller can CALIBRATE
-            // at this level and retry, rather than failing to parse a number.
-            if (s.IndexOf('C') >= 0 && !ContainsDigit(s))
-                throw Hp8902AException.Uncal();
-
             double v;
             if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v))
             {
