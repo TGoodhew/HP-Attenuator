@@ -116,9 +116,12 @@ namespace HpAttenuator.Instruments
 
         private void WriteCalFactorTable(double referenceCf, IReadOnlyList<CalFactor> table)
         {
-            Send("37.3SP" + Fmt(referenceCf) + "CF");        // REF CF (50 MHz)
+            // The cal-factor entry terminator is D2 (the "% CAL FACTOR" key, blue-shifted MHz).
+            // NOT "CF" — that is the CALIBRATE-Off command, which silently fails to store the
+            // factor (the entry never commits, so RF POWER then shows Error 15).
+            Send("37.3SP" + Fmt(referenceCf) + "D2");        // REF CF (50 MHz)
             foreach (var c in table)
-                Send("37.3SP" + Fmt(c.FreqMHz) + "MZ" + Fmt(c.Cf) + "CF");
+                Send("37.3SP" + Fmt(c.FreqMHz) + "MZ" + Fmt(c.Cf) + "D2");
             Send("37.0SP");                                  // automatic cal-factor selection
         }
 
