@@ -70,20 +70,25 @@ namespace HpAttenuator.Instruments
 
         public void SelectRfPower() => Send("M4");
 
+        /// <summary>Table #1 (primary / Normal) holds at most this many freq/CF pairs, plus the
+        /// separate Reference Cal Factor (8902A Operation manual, RF Power specifications).</summary>
+        public const int NormalTableMaxPairs = 16;
+
+        /// <summary>Table #2 (frequency offset) holds at most this many freq/CF pairs, plus REF CF.</summary>
+        public const int OffsetTableMaxPairs = 22;
+
         /// <summary>
         /// Loads BOTH cal-factor tables the 8902A needs for RF Power measurements — the Normal
-        /// table (direct) and the Frequency-Offset table (converter path). Sequence per the
-        /// working GPIBUtils HP8902A driver: <c>M4T0</c> (RF Power + free-run trigger), select
-        /// the table (<c>27.0SP</c> Normal / <c>27.1SP</c> Frequency-Offset), clear it
-        /// (<c>37.9SP</c>), then write each entry as <c>37.3SP{freqMHz}MZ{cf}CF</c> — where
-        /// <c>CF</c> is the "% CAL FACTOR" entry terminator (the OCR'd code summary mislabels
-        /// it) and the values are fixed-2-decimal. The <c>T0</c> free-run state is required for
-        /// the entries to commit; without it RF POWER then shows Error 15 (no factors stored).
-        /// <paramref name="referenceCf"/> is unused (the 8902A REF CF defaults to 100%).
+        /// table (direct, <c>27.0SP</c>) and the Frequency-Offset table (converter path,
+        /// <c>27.1SP</c>). Per table: <c>M4T0</c> (RF Power + free-run trigger), select the table,
+        /// clear it (<c>37.9SP</c>), set the <b>Reference Cal Factor</b> — a separate store entered
+        /// value-only as <c>37.3SP{cf}CF</c> (no <c>MZ</c>); this is what actually clears Error 15
+        /// ("no Cal Factors stored") — then write each freq/CF pair as <c>37.3SP{freqMHz}MZ{cf}CF</c>
+        /// (<c>CF</c> = the "% CAL FACTOR" terminator; values fixed-2-decimal). Pairs are capped to
+        /// the table's documented capacity (<see cref="NormalTableMaxPairs"/> / <see cref="OffsetTableMaxPairs"/>);
+        /// entries beyond the cap won't fit (they're unreachable in the low-frequency direct regime
+        /// anyway). The <c>T0</c> free-run state is required for the entries to commit.
         /// </summary>
-        /// <summary>The 50 MHz calibrator frequency carries the reference cal factor (REF CF).</summary>
-        private const double ReferenceCfFreqMHz = 50.0;
-
         public void LoadCalFactors(double referenceCf, IReadOnlyList<CalFactor> table)
         {
             WriteCalFactorTable(useOffsetTable: false, referenceCf, table);   // Normal table
@@ -97,28 +102,36 @@ namespace HpAttenuator.Instruments
             Send(useOffsetTable ? "27.1SP" : "27.0SP");      // select Normal / Frequency-Offset table
             Send("37.9SP");                                  // clear the selected table
 
-            // The REF CF at the 50 MHz calibrator frequency MUST be in the table, else the
-            // receiver has no reference factor and RF POWER shows Error 15 (the table entries
-            // alone aren't enough). Loaded as a normal 50 MHz entry (see GPIBUtils test app).
-            WriteEntry(ReferenceCfFreqMHz, referenceCf);
+            // The Reference Cal Factor is a SEPARATE store, entered value-only with NO frequency:
+            // "37.3 SPCL, REF CF value, BLUE, MHz" (Microwave Product Note p.3). Entering it is what
+            // clears Error 15 — a plain 50 MHz *pair* does NOT set the REF CF.
+            Send("37.3SP" + string.Format(CultureInfo.InvariantCulture, "{0:F2}CF", referenceCf));
+
+            // Then the freq/CF pairs, capped to the table's capacity (Table #1 = 16, Table #2 = 22).
+            int max = useOffsetTable ? OffsetTableMaxPairs : NormalTableMaxPairs;
+            int written = 0;
             foreach (var c in table)
+            {
+                if (written >= max) break;
                 WriteEntry(c.FreqMHz, c.Cf);
+                written++;
+            }
         }
 
         private void WriteEntry(double freqMHz, double calFactorPercent) =>
             Send("37.3SP" + string.Format(CultureInfo.InvariantCulture, "{0:F2}MZ{1:F2}CF", freqMHz, calFactorPercent));
 
         /// <summary>
-        /// Reads back the entry count (37.4SP) of BOTH cal-factor tables — Normal (27.0SP) and
-        /// Frequency-Offset (27.1SP) — to verify a load committed to each. Leaves Normal mode.
-        /// Returns -1 for a table whose size couldn't be read.
+        /// Reads back BOTH cal-factor tables — Normal (27.0SP) and Frequency-Offset (27.1SP) — to
+        /// verify a load committed: the freq/CF pair count (37.4SP) and the Reference Cal Factor
+        /// (37.5SP) of each. Leaves Normal mode. A count is -1 / a REF CF is NaN when unreadable.
         /// </summary>
-        public (int normal, int offset) ReadCalFactorTableSizes()
+        public (int normalPairs, int offsetPairs, double normalRefCf, double offsetRefCf) ReadCalFactorTables()
         {
-            _link.Write("27.0SP"); int normal = TryReadTableSize();
-            _link.Write("27.1SP"); int offset = TryReadTableSize();
+            _link.Write("27.0SP"); int normal = TryReadTableSize(); double normalRef = TryReadRefCf();
+            _link.Write("27.1SP"); int offset = TryReadTableSize(); double offsetRef = TryReadRefCf();
             _link.Write("27.0SP");                       // leave in Normal mode
-            return (normal, offset);
+            return (normal, offset, normalRef, offsetRef);
         }
 
         private int TryReadTableSize()
@@ -131,6 +144,22 @@ namespace HpAttenuator.Instruments
             }
             catch { /* unreadable */ }
             return -1;
+        }
+
+        /// <summary>Recalls the Reference Cal Factor of the currently-selected table: 37.5SP makes
+        /// it the "current" cal factor, then the CF query reads that value back (a bare read after
+        /// 37.5SP returns the live measurement, not the recalled factor).</summary>
+        private double TryReadRefCf()
+        {
+            try
+            {
+                _link.Write("37.5SP");                       // recall reference cal factor to "current"
+                string raw = _link.Query("CF").Trim();       // read current calibration factor
+                if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+                    return v;
+            }
+            catch { /* unreadable */ }
+            return double.NaN;
         }
 
         public double ZeroSensor()

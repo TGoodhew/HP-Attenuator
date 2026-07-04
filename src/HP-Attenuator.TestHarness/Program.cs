@@ -243,28 +243,46 @@ namespace HpAttenuator.TestHarness
             {
                 receiver.Reset();
                 receiver.LoadCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
-                // The 37.9SP clear step momentarily leaves RF POWER with no factors, which the
-                // 8902A latches as Error 15 on the display (expected — see the Microwave Product
-                // Note). Clear it now that the entries are loaded so the panel isn't left in error.
-                receiver.ClearError();
             }
             catch (Hp8902AException ex)
             {
                 AnsiConsole.MarkupLine($"  [red]✗ {ex.Message.EscapeMarkup()}[/]");
                 return 1;
             }
-            int expected = ConverterCalFactors.Default.Count + 1;   // + the 50 MHz REF CF entry
-            AnsiConsole.MarkupLine(
-                $"  [grey]Sent the 50 MHz REF CF + {ConverterCalFactors.Default.Count} entries (2–18 GHz) " +
-                "to the Normal and Frequency-Offset tables.[/]");
 
-            // Verify the entries actually committed in BOTH tables (read each size back).
+            int pairs = ConverterCalFactors.Default.Count;   // freq/CF pairs (2–18 GHz)
+            double refCf = ConverterCalFactors.ReferenceCf;
+            // 37.4SP "table size" counts the stored freq/CF pairs (capped to capacity) plus the REF CF.
+            int normalExpected = Math.Min(pairs, Hp8902A.NormalTableMaxPairs) + 1;
+            int offsetExpected = Math.Min(pairs, Hp8902A.OffsetTableMaxPairs) + 1;
+            AnsiConsole.MarkupLine(
+                $"  [grey]Set REF CF = {refCf:0.#}% + {pairs} freq/CF pairs (2–18 GHz) into the " +
+                "Normal and Frequency-Offset tables.[/]");
+            if (pairs > Hp8902A.NormalTableMaxPairs)
+                AnsiConsole.MarkupLine(
+                    $"  [grey]The Normal table caps at {Hp8902A.NormalTableMaxPairs} pairs (instrument spec); " +
+                    $"the top {pairs - Hp8902A.NormalTableMaxPairs} won't fit there — only reachable via the " +
+                    "converter/Offset path anyway.[/]");
+
+            // Verify the load committed: pair count (37.4SP) + Reference Cal Factor (37.5SP) per table.
+            // A correct REF CF is the entry that clears Error 15, so it's the key confirmation.
             if (receiver is Hp8902A hp)
             {
-                var (normal, offset) = hp.ReadCalFactorTableSizes();
-                string Show(int n) => n == expected ? $"[green]{n}[/]" : $"[red]{n}[/]";
-                AnsiConsole.MarkupLine($"  Read-back (37.4SP): Normal table = {Show(normal)}, " +
-                                       $"Frequency-Offset table = {Show(offset)} (expected {expected} each).");
+                var (normal, offset, nRef, oRef) = hp.ReadCalFactorTables();
+                string ShowN(int n, int exp) => n == exp ? $"[green]{n}[/]" : $"[red]{n}[/]";
+                string ShowRef(double r) =>
+                    double.IsNaN(r) ? "[red]unreadable[/]"
+                    : Math.Abs(r - refCf) < 0.6 ? $"[green]{r:0.#}%[/]" : $"[red]{r:0.#}%[/]";
+                AnsiConsole.MarkupLine(
+                    $"  Table size (37.4SP, pairs + REF CF): Normal = {ShowN(normal, normalExpected)} (exp {normalExpected}), " +
+                    $"Offset = {ShowN(offset, offsetExpected)} (exp {offsetExpected}).");
+                AnsiConsole.MarkupLine(
+                    $"  REF CF (37.5SP): Normal = {ShowRef(nRef)}, Offset = {ShowRef(oRef)} (exp {refCf:0.#}%).");
+
+                // Leave the receiver in RF POWER so the front panel shows the true post-load state:
+                // if cal factors are properly stored, Error 15 must NOT reappear.
+                hp.SelectRfPower();
+                AnsiConsole.MarkupLine("  [grey]Left the 8902A in RF POWER — check the panel: Error 15 should be gone.[/]");
             }
             return 0;
         }
