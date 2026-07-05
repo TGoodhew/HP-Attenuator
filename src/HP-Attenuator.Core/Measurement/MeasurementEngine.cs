@@ -37,6 +37,15 @@ namespace HpAttenuator.Measurement
         /// </summary>
         private const int RangeCalStepDb = 2;
 
+        /// <summary>
+        /// A step-to-step change in the relative reading that deviates from the expected
+        /// per-step attenuation by more than this (dB) means the receiver crossed into an
+        /// UNCALIBRATED RF range (the reading jumps by the range factor). It's the reliable
+        /// range-change signal — the RECAL status bit is polled but is often missed — so we
+        /// CALIBRATE that range and re-read when the reading jumps this far off trend.
+        /// </summary>
+        private const double RangeStepThresholdDb = 2.0;
+
         private readonly ISignalSource _source;
         private readonly ILocalOscillator _lo;
         private readonly IStepAttenuator _attenuator;
@@ -164,6 +173,8 @@ namespace HpAttenuator.Measurement
             // attenuation shows, with no path-loss / reference offset.
             bool haveBaseline = false;
             double baselineRelDb = 0.0;
+            double prevNormRelDb = 0.0;
+            bool havePrevNorm = false;
             int consecutiveTimeouts = 0;
 
             foreach (int atten in _options.AttenuationSteps())
@@ -190,6 +201,26 @@ namespace HpAttenuator.Measurement
                     // Capture the start-attenuation reading as the software zero reference.
                     if (atten == _options.AttenStartDb) { baselineRelDb = relDb; haveBaseline = true; }
                     double normRelDb = haveBaseline ? relDb - baselineRelDb : relDb;
+
+                    // Manual "Attenuator Measurements" (3-115): CALIBRATE each new RF range on RECAL.
+                    // The RECAL status bit is polled but often missed at a boundary, so we ALSO detect
+                    // the range change from the reading itself — an uncalibrated range makes the
+                    // step-to-step reading jump off the ~AttenStepDb-per-step trend. On either signal,
+                    // CALIBRATE (level steady — no track mode) and re-read on the calibrated range.
+                    if (_options.RangeCalibrate && !isReference && haveBaseline)
+                    {
+                        bool jumped = havePrevNorm &&
+                            Math.Abs((normRelDb - prevNormRelDb) + _options.AttenStepDb) > RangeStepThresholdDb;
+                        if (jumped || RecalAsserted())
+                        {
+                            try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); }
+                            catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
+                            relDb = ReadRelativeDbWithRetry(StepReadAttempts);
+                            normRelDb = relDb - baselineRelDb;
+                        }
+                    }
+                    prevNormRelDb = normRelDb;
+                    havePrevNorm = true;
 
                     point.MeasuredRelativeDb = normRelDb;
                     point.MeasuredAttenuationDb = -normRelDb;
@@ -308,12 +339,30 @@ namespace HpAttenuator.Measurement
         /// 8496 points), so the up-front range cal is solely responsible for every range.
         /// Timeouts are not caught — they propagate as a floor/communication failure.
         /// </summary>
+        /// <summary>True if the receiver is prompting for a range calibration (RECAL), swallowing
+        /// any poll failure so a flaky serial poll never aborts a sweep point.</summary>
+        private bool RecalAsserted()
+        {
+            try { return _receiver.RecalRequested(); } catch { return false; }
+        }
+
         private double ReadRelativeDbWithRetry(int maxAttempts)
         {
             System.Exception last = null;
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 try { return _receiver.ReadRelativeDb(); }
+                catch (Hp8902AException ex) when (ex.IsUncal)
+                {
+                    // UNCAL at this level (the 'AAAA' fill): the range needs calibrating. This is
+                    // the manual's low-level procedure — step down, CALIBRATE whenever RECAL shows.
+                    // With Track Mode engaged the LO feedback loop holds lock through the calibrate;
+                    // untracked, this dropped the signal to Error 96. A truly below-floor point just
+                    // exhausts its retries and is logged.
+                    last = ex;
+                    try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); }
+                    catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
+                }
                 catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
                 {
                     last = ex;
@@ -325,41 +374,35 @@ namespace HpAttenuator.Measurement
         }
 
         /// <summary>
-        /// Establishes the 0 dB reference and calibrates ALL of the receiver's RF ranges in one
-        /// monotonic pass, so the subsequent measurement never needs to calibrate (which would
-        /// disturb the ranges). Takes SET REF at 0 dB FIRST (proven to avoid Error 35), then
-        /// steps the level DOWN in fine steps and CALIBRATEs only when the receiver asks (RECAL)
-        /// — landing on each range boundary and calibrating it in order. Capped at
-        /// <see cref="RangeCalReachDb"/> below the source level so it never calibrates past where
-        /// the signal is measurable (deeper → Error 35). Leaves the attenuator at 0 dB.
-        /// <paramref name="setZero"/> sets 0 dB (SetAttenuationDb(0) for the sweep,
-        /// SetEngaged(none) per-attenuator).
+        /// Establishes the 0 dB relative reference per the manual's "Attenuator Measurements"
+        /// procedure (O&amp;C 3-115): enable the RECAL status (so the sweep can poll it), CALIBRATE the
+        /// reference (top) RF range at 0 dB while the signal is strong and steady, then take SET REF.
+        /// SET REF latches the current reading, so a settled measurement is triggered first (with no
+        /// free-run there is otherwise no live level to latch, and it stays in absolute dBm). There is
+        /// NO deep pre-pass: only the ~2 range-to-range boundaries need calibrating, and the sweep
+        /// does that on RECAL (see <see cref="MeasureFrequency"/>). <paramref name="setZero"/> sets
+        /// 0 dB (SetAttenuationDb(0) for the sweep, SetEngaged(none) per-attenuator).
         /// </summary>
         private void RunRangeCalibration(System.Action setZero)
         {
             if (_options.RangeCalibrate)
-                _receiver.BeginRangeCalibration();   // enable RECAL/UNCAL status + free-run
+                _receiver.EnableRecalStatus();       // pollable RECAL, settled reads (no free-run)
 
             setZero();
             Settle();
-            _receiver.SetReference();                // SET REF first — proven to avoid Error 35
 
-            if (!_options.RangeCalibrate)
-                return;
-
-            double calCapAtten = _options.SourcePowerDbm + RangeCalReachDb;
-            for (int atten = _options.AttenStartDb; atten <= calCapAtten; atten += RangeCalStepDb)
+            if (_options.RangeCalibrate)
             {
-                _attenuator.SetAttenuationDb(atten);
-                Thread.Sleep(Math.Max(_options.SettleMs, 500));   // let the receiver acquire so RECAL is current
-                if (!_receiver.RecalRequested())     // only calibrate the ranges the receiver flags
-                    continue;
-                _receiver.Calibrate();               // C1 at this boundary
-                Thread.Sleep(PostCalibrateWaitMs);   // CALIBRATE takes a few seconds
+                // CALIBRATE the reference range at 0 dB — strong, steady signal, so it succeeds and
+                // gives SET REF a calibrated range to anchor to.
+                try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); }
+                catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
             }
 
-            setZero();                               // back to 0 dB for the measurement
-            Settle();
+            // Prime a settled measurement so SET REF has a live level to latch (manual: "wait for the
+            // measurement result to be displayed", then SET REF).
+            try { _receiver.ReadRelativeDb(); } catch { /* just priming a measurement for SET REF */ }
+            _receiver.SetReference();
         }
 
         private LoPlan Prepare(double freqMHz)

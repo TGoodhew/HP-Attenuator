@@ -119,6 +119,13 @@ namespace HpAttenuator.Instruments
         void BeginRangeCalibration();
 
         /// <summary>
+        /// Enables just the RECAL/UNCAL status condition (so <see cref="RecalRequested"/> can poll
+        /// it) WITHOUT forcing free-run. Used on the Track-Mode path, where free-run would auto-range
+        /// the receiver and shift the relative reference by a whole RF range.
+        /// </summary>
+        void EnableRecalStatus();
+
+        /// <summary>
         /// True if the receiver is asking for a range calibration (8902A RECAL/UNCAL).
         /// Read by a serial poll; only CALIBRATE when this is set, per the 8902A
         /// procedure — calibrating a range that doesn't need it raises Error 35.

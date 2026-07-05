@@ -180,6 +180,7 @@ namespace HpAttenuator.Instruments
         }
 
         public void BeginRangeCalibration() { }
+        public void EnableRecalStatus() { }
         public bool RecalRequested() => false; // simulated receiver never needs range calibration
         public int PollStatusByte() => 0;
         public void Calibrate() { }

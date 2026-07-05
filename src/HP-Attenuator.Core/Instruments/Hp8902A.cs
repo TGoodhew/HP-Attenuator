@@ -221,13 +221,20 @@ namespace HpAttenuator.Instruments
 
         public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
         {
+            // Manual "Attenuator Measurements" (relative Tuned RF Level, O&C 3-115): S4, tune, pick
+            // the detector, then SET REF (done by the engine). NO Track Mode — its LO feedback loop
+            // keeps adjusting during a CALIBRATE, so the level isn't steady and CALIBRATE fails with
+            // Error 35 ("maintain signal stability during calibration"). The engine calibrates each
+            // range-to-range boundary once, on RECAL, with the attenuator held steady.
             Send("S4");      // Tuned RF Level
             if (regime == MeasurementRegime.Converted)
                 Send("27.3SP" + Fmt(loMHz) + "MZ");  // frequency-offset: external LO
             else
                 Send("27.0SP");                      // direct / normal mode
             Send(Fmt(rfMHz) + "MZ");   // manual tune to the fixed frequency
-            Send("4.0SP");             // IF synchronous detector (floor -127 dBm)
+            Send("4.4SP");             // IF AVERAGE detector (30 kHz BW, to -100 dBm) — the manual's
+                                       // low-level detector; range-to-range CALIBRATE needs the sensor
+                                       // module (the 11792A, which is in the chain)
             Send("1.0SP");             // auto RF attenuation (keep fixed after cal)
             Send("LG");                // dB display -> bus returns dB
             Send("32.1SP");            // 0.001 dB resolution
@@ -264,6 +271,11 @@ namespace HpAttenuator.Instruments
             // attenuator steps down, rather than waiting for a settled trigger.
             Send("T0");
         }
+
+        /// <summary>Enable RECAL/UNCAL in the status byte (SF 22.33 = Data Ready + Recal/Uncal)
+        /// WITHOUT the free-run trigger, so a serial poll reflects RECAL but the receiver keeps its
+        /// settled (T3) ranging instead of auto-ranging.</summary>
+        public void EnableRecalStatus() => Send("22.33SP");
 
         public bool RecalRequested() => (_link.SerialPoll() & RecalStatusBit) != 0;
 
@@ -331,6 +343,14 @@ namespace HpAttenuator.Instruments
                 throw new FormatException("Empty reading from 8902A.");
 
             string s = raw.Trim();
+
+            // UNCAL fill: instead of a number the 8902A returns a run of repeated letters when the
+            // current RF range is uncalibrated — 'CCCC…' (RF Power) or 'AAAA…'/'aaaa…' (Tuned RF
+            // Level). This does NOT reliably set the RECAL status bit, so recognise it from the
+            // response itself and surface it as UNCAL so the caller can CALIBRATE at this level.
+            if (Regex.IsMatch(s, "^[A-Za-z]+$"))
+                throw Hp8902AException.Uncal();
+
             double v;
             if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v))
             {
