@@ -51,6 +51,17 @@ namespace HpAttenuator.Measurement
         /// </summary>
         private const double RangeStepThresholdDb = 2.0;
 
+        /// <summary>
+        /// Maximum range-to-range CALIBRATEs per frequency during the sweep. The 8902A stores
+        /// exactly <b>two</b> input range-to-range calibration factors per IF detector (O&amp;C 3-115,
+        /// "Two input range-to-range calibration factors are stored for each of the two IF
+        /// detectors"), so at most two boundaries ever need calibrating on the way down. The cap
+        /// is also a safety net: it stops a runaway deep/weak CALIBRATE, which stores a bad factor
+        /// (the CAUTION — the AVG detector needs the sensor module to reference a range cal, and a
+        /// deep/weak level it can't reference is the ~4 dB error chased in bf6ba51).
+        /// </summary>
+        private const int MaxBoundaryCalibrations = 2;
+
         private readonly ISignalSource _source;
         private readonly ILocalOscillator _lo;
         private readonly IStepAttenuator _attenuator;
@@ -179,6 +190,7 @@ namespace HpAttenuator.Measurement
             bool haveBaseline = false;
             double baselineRelDb = 0.0;
             int consecutiveTimeouts = 0;
+            int boundaryCals = 0;   // range-to-range CALIBRATEs done this frequency (cap: MaxBoundaryCalibrations)
 
             foreach (int atten in _options.AttenuationSteps())
             {
@@ -198,19 +210,22 @@ namespace HpAttenuator.Measurement
                     // Retry transient instrument errors (e.g. Error 96 "no signal sensed") —
                     // and give the 0 dB reference extra attempts, since it anchors every other
                     // point. Timeouts (the receiver floor) are not retried here.
+                    //
+                    // Per the manual's Attenuator Measurements procedure (O&C 3-115), the stepping
+                    // points CALIBRATE each RF input range-to-range boundary the first time RECAL
+                    // appears — see ReadStepWithBoundaryCal. Only ~2 boundaries exist and they're
+                    // calibrated at the shallow level where RECAL naturally lights (strong enough for
+                    // the sensor module to reference), NOT at a fixed deep step (which stored the bad
+                    // factor removed in bf6ba51). The 0 dB reference reads without boundary cal — its
+                    // top range is already calibrated by RunRangeCalibration + SET REF.
                     bool isReference = atten == _options.AttenStartDb;
-                    double relDb = ReadRelativeDbWithRetry(isReference ? ReferenceReadAttempts : StepReadAttempts);
+                    double relDb = isReference
+                        ? ReadRelativeDbWithRetry(ReferenceReadAttempts)
+                        : ReadStepWithBoundaryCal(StepReadAttempts, ref boundaryCals);
 
                     // Capture the start-attenuation reading as the software zero reference.
                     if (atten == _options.AttenStartDb) { baselineRelDb = relDb; haveBaseline = true; }
                     double normRelDb = haveBaseline ? relDb - baselineRelDb : relDb;
-
-                    // NB: we deliberately do NOT recalibrate mid-sweep. The --section-test proved the
-                    // receiver reads 10/40/50 dB correctly from just the single 0 dB reference calibrate
-                    // (average detector). Firing CALIBRATE at a deep/weak level through the converter
-                    // instead CORRUPTS the range factor (the same 50 dB read 50.42 dB when jumped to,
-                    // but 45.80 dB when the sweep recalibrated at 40 dB). A genuinely UNCAL ('AAAA')
-                    // reading is still handled by the calibrate-on-UNCAL retry in ReadRelativeDbWithRetry.
 
                     point.MeasuredRelativeDb = normRelDb;
                     point.MeasuredAttenuationDb = -normRelDb;
@@ -326,12 +341,12 @@ namespace HpAttenuator.Measurement
         /// re-reading on a transient: an empty/garbled response (a read that raced an RF-range
         /// auto-range or Data-Ready), an UNCAL reading, or a lost-lock instrument error (Error 96).
         /// Recovery depends on the fault: Error 96 fires a VCO retune (BC) to re-acquire the signal;
-        /// everything else just clears the error (CL). It does NOT calibrate — calibrating a range
-        /// mid-sweep corrupts it (the same 50 dB
-        /// read 50.4 dB jumped-to but 45.8 dB when the sweep recalibrated; the up-front reference
-        /// cal is solely responsible for every range). Between attempts it waits the longer
-        /// <see cref="TransientReadSettleMs"/> so an auto-range boundary has time to settle before
-        /// the re-read. Timeouts are not caught — they propagate as a floor/communication failure.
+        /// everything else just clears the error (CL). This variant does NOT calibrate — it is used
+        /// for the 0 dB reference and the per-attenuator settings reads, whose range is already
+        /// calibrated. The stepping sweep instead uses <see cref="ReadStepWithBoundaryCal"/>, which
+        /// CALIBRATEs a range-to-range boundary on RECAL per the manual. Between attempts it waits the
+        /// longer <see cref="TransientReadSettleMs"/> so an auto-range boundary has time to settle
+        /// before the re-read. Timeouts are not caught — they propagate as a floor/comms failure.
         /// </summary>
         private double ReadRelativeDbWithRetry(int maxAttempts)
         {
@@ -353,6 +368,75 @@ namespace HpAttenuator.Measurement
                 }
             }
             throw last;
+        }
+
+        /// <summary>
+        /// Reads one stepping-sweep point, CALIBRATEing an RF input range-to-range boundary when the
+        /// receiver flags RECAL, per the manual's Attenuator Measurements procedure (O&amp;C 3-115): "If
+        /// RECAL is displayed, press the CALIBRATE key and hold the signal level steady until a valid
+        /// measurement is displayed." The attenuator is already set and settled, so the level is
+        /// steady for the CALIBRATE. Boundary calibration is capped at
+        /// <see cref="MaxBoundaryCalibrations"/> per frequency (the manual stores exactly two
+        /// range-to-range factors), which also prevents a deep/weak calibrate that would store a bad
+        /// factor. Error 96 (lost lock) still fires a BC retune; other transients clear and re-read.
+        /// </summary>
+        private double ReadStepWithBoundaryCal(int maxAttempts, ref int boundaryCals)
+        {
+            System.Exception last = null;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                // Honour a pending RECAL before reading — calibrate the boundary at this steady level.
+                MaybeCalibrateBoundary(ref boundaryCals);
+                try { return _receiver.ReadRelativeDb(); }
+                catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
+                {
+                    last = ex;
+                    var he = ex as Hp8902AException;
+                    if (he != null && he.Code == 96)
+                    {
+                        // Lost lock: VCO retune (BC) to recapture (manual O&C 3-116).
+                        try { _receiver.RetuneToSignal(); } catch { /* keep going */ }
+                    }
+                    else if (he != null && he.IsUncal)
+                    {
+                        // UNCAL reading: the manual allows a CALIBRATE only if RECAL is ALSO set ("if
+                        // both the UNCAL and RECAL annunciators are lighted, the instrument can still be
+                        // calibrated"). MaybeCalibrateBoundary checks RECAL, so it's a no-op on pure UNCAL.
+                        MaybeCalibrateBoundary(ref boundaryCals);
+                    }
+                    else
+                    {
+                        try { _receiver.ClearError(); } catch { /* keep going */ }
+                    }
+                    if (attempt < maxAttempts) Thread.Sleep(TransientReadSettleMs);
+                }
+            }
+            throw last;
+        }
+
+        /// <summary>
+        /// CALIBRATEs the current RF input range-to-range boundary when the receiver is asking for it
+        /// (RECAL, status bit 0x20) and we haven't already used our <see cref="MaxBoundaryCalibrations"/>
+        /// budget for this frequency. Per O&amp;C 3-115 the level must be held steady during CALIBRATE and
+        /// allowed to settle to a valid measurement afterwards; the caller has already set + settled the
+        /// attenuator, and <see cref="PostCalibrateWaitMs"/> covers the settle. Only fires on RECAL, so
+        /// a pure UNCAL (too deep/weak to calibrate) is skipped — that is where a bad factor came from.
+        /// </summary>
+        private void MaybeCalibrateBoundary(ref int boundaryCals)
+        {
+            if (!_options.RangeCalibrate || boundaryCals >= MaxBoundaryCalibrations) return;
+
+            bool recal;
+            try { recal = _receiver.RecalRequested(); } catch { return; }
+            if (!recal) return;
+
+            try
+            {
+                _receiver.Calibrate();                 // C1 — hold steady (attenuator already settled)
+                Thread.Sleep(PostCalibrateWaitMs);     // let it settle to a valid measurement
+                boundaryCals++;
+            }
+            catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
         }
 
         /// <summary>
