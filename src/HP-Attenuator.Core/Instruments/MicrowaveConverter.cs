@@ -50,8 +50,17 @@ namespace HpAttenuator.Instruments
         /// <summary>Below this RF frequency the 8902A measures directly (no converter).</summary>
         public const double CrossoverMHz = 1300.0;
 
-        /// <summary>Recommended IF for best accuracy (8902A Microwave Product Note).</summary>
+        /// <summary>Ideal IF for best accuracy — LO = RF + 120.53 MHz (8902A Microwave Product Note).</summary>
         public const double PreferredIfMHz = 120.53;
+
+        /// <summary>
+        /// Recommended IF ladder (MHz), ascending. 120.53 is ideal; when the LO can't be set
+        /// RF+120.53 (below the generator's 2 GHz floor), use the lowest of the higher values
+        /// whose LO clears the floor — "the lower the IF, the better the performance." These
+        /// specific values are "half-way between the measuring receiver's internal LO octave
+        /// bands" (Microwave Product Note); off-ladder IFs work but measure worse.
+        /// </summary>
+        public static readonly double[] IfLadderMHz = { 120.53, 240.53, 480.53, 600.53, 680.53 };
 
         public const double IfMinMHz = 10.0;
         public const double IfMaxMHz = 700.0;
@@ -65,17 +74,30 @@ namespace HpAttenuator.Instruments
             if (rfMHz < CrossoverMHz)
                 return new LoPlan(rfMHz, MeasurementRegime.Direct, 0, 0, true, null);
 
-            // LO above signal: LO = rf + IF. Keep loMin <= LO <= loMax and IF in window.
-            double aboveLow = Math.Max(IfMinMHz, loMinMHz - rfMHz);
-            double aboveHigh = Math.Min(IfMaxMHz, loMaxMHz - rfMHz);
-            if (aboveLow <= aboveHigh)
+            // LO above signal: LO = RF + IF. Walk the recommended IF ladder ascending and take the
+            // first whose LO lands in the generator's range — i.e. the ideal 120.53 whenever the LO
+            // can reach it, otherwise the lowest recommended IF that clears the floor.
+            foreach (double ifMHz in IfLadderMHz)
             {
-                double ifMHz = Clamp(PreferredIfMHz, aboveLow, aboveHigh);
-                return new LoPlan(rfMHz, MeasurementRegime.Converted, rfMHz + ifMHz, ifMHz, true, null);
+                double lo = rfMHz + ifMHz;
+                if (lo >= loMinMHz && lo <= loMaxMHz)
+                {
+                    string note = ifMHz > PreferredIfMHz
+                        ? $"LO cannot reach RF+{PreferredIfMHz} MHz; using recommended IF {ifMHz} MHz (LO {lo:0.##})."
+                        : null;
+                    return new LoPlan(rfMHz, MeasurementRegime.Converted, lo, ifMHz, true, note);
+                }
             }
 
-            // Fallback: LO below signal: LO = rf - IF. (8902A offset-mode sign handling
-            // for LO-below should be verified on hardware.)
+            // No ladder IF fits (RF just above the 1300 MHz crossover, where even 680.53 stays below
+            // the floor): use the smallest IF that just reaches the floor, within the 10-700 window.
+            // "Any IF between 10 and 700 MHz can be used" — off-ladder, so flag it as sub-optimal.
+            double edgeIf = loMinMHz - rfMHz;
+            if (edgeIf >= IfMinMHz && edgeIf <= IfMaxMHz)
+                return new LoPlan(rfMHz, MeasurementRegime.Converted, rfMHz + edgeIf, edgeIf, true,
+                    $"No recommended IF fits {rfMHz:0.##} MHz; using off-ladder IF {edgeIf:0.##} MHz (sub-optimal).");
+
+            // Last resort: LO below signal (f_RF = f_LO + f_IF). Verify 8902A offset sign on hardware.
             double belowLow = Math.Max(IfMinMHz, rfMHz - loMaxMHz);
             double belowHigh = Math.Min(IfMaxMHz, rfMHz - loMinMHz);
             if (belowLow <= belowHigh)
