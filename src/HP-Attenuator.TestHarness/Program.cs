@@ -250,14 +250,15 @@ namespace HpAttenuator.TestHarness
                 return 1;
             }
 
-            int pairs = ConverterCalFactors.Default.Count;   // freq/CF pairs (2–18 GHz)
+            // Pairs written = a 50 MHz low-frequency anchor + the 2–18 GHz table entries.
+            int pairs = ConverterCalFactors.Default.Count + 1;   // + the 50 MHz anchor pair
             double refCf = ConverterCalFactors.ReferenceCf;
             // 37.4SP "table size" counts the stored freq/CF pairs (capped to capacity) plus the REF CF.
             int normalExpected = Math.Min(pairs, Hp8902A.NormalTableMaxPairs) + 1;
             int offsetExpected = Math.Min(pairs, Hp8902A.OffsetTableMaxPairs) + 1;
             AnsiConsole.MarkupLine(
-                $"  [grey]Set REF CF = {refCf:0.#}% + {pairs} freq/CF pairs (2–18 GHz) into the " +
-                "Normal and Frequency-Offset tables.[/]");
+                $"  [grey]Set REF CF = {refCf:0.#}% + a 50 MHz anchor + {ConverterCalFactors.Default.Count} " +
+                "freq/CF pairs (2–18 GHz) into the Normal and Frequency-Offset tables.[/]");
             if (pairs > Hp8902A.NormalTableMaxPairs)
                 AnsiConsole.MarkupLine(
                     $"  [grey]The Normal table caps at {Hp8902A.NormalTableMaxPairs} pairs (instrument spec); " +

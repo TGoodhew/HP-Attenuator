@@ -117,12 +117,18 @@ namespace HpAttenuator.Instruments
 
             // The Reference Cal Factor is a SEPARATE store, entered value-only with NO frequency:
             // "37.3 SPCL, REF CF value, BLUE, MHz" (Microwave Product Note p.3). Entering it is what
-            // clears Error 15 — a plain 50 MHz *pair* does NOT set the REF CF.
+            // clears the idle "no cal factors" Error 15 — a plain 50 MHz *pair* does NOT set the REF CF.
             Send("37.3SP" + string.Format(CultureInfo.InvariantCulture, "{0:F2}CF", referenceCf));
 
-            // Then the freq/CF pairs, capped to the table's capacity (Table #1 = 16, Table #2 = 22).
+            // The pairs, capped to the table's capacity (Table #1 = 16, Table #2 = 22). Lead with a
+            // 50 MHz anchor PAIR: the Operation manual (11792A) — "enter the reference cal factor as
+            // an entry in the table at 50 MHz. If this pair is not entered, the instrument will not
+            // measure power at frequencies less than the lowest frequency entered" (2 GHz here). This
+            // lets the direct regime (<1.3 GHz) measure by interpolating up to the 2 GHz entry.
             int max = useOffsetTable ? OffsetTableMaxPairs : NormalTableMaxPairs;
             int written = 0;
+            WriteEntry(ReferenceCfFreqMHz, referenceCf);   // 50 MHz low-frequency anchor pair
+            written++;
             foreach (var c in table)
             {
                 if (written >= max) break;
@@ -130,6 +136,9 @@ namespace HpAttenuator.Instruments
                 written++;
             }
         }
+
+        /// <summary>The 50 MHz calibrator frequency — entered as a table pair to anchor the low end.</summary>
+        private const double ReferenceCfFreqMHz = 50.0;
 
         private void WriteEntry(double freqMHz, double calFactorPercent) =>
             Send("37.3SP" + string.Format(CultureInfo.InvariantCulture, "{0:F2}MZ{1:F2}CF", freqMHz, calFactorPercent));
