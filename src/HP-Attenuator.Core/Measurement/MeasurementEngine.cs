@@ -19,8 +19,13 @@ namespace HpAttenuator.Measurement
         /// <summary>Read attempts for the 0 dB reference point (it anchors the whole sweep).</summary>
         private const int ReferenceReadAttempts = 5;
 
-        /// <summary>Read attempts for each ordinary sweep point.</summary>
-        private const int StepReadAttempts = 3;
+        /// <summary>Read attempts for each ordinary sweep point (transient empty/garbled reads at an
+        /// RF-range auto-range boundary can take a few settled re-reads to clear).</summary>
+        private const int StepReadAttempts = 6;
+
+        /// <summary>Wait between read retries, ms. Longer than a normal settle so an RF-range
+        /// auto-range (which briefly returns empty/garbled reads) has time to settle before re-read.</summary>
+        private const int TransientReadSettleMs = 1200;
 
         /// <summary>
         /// How far below the source level the range CALIBRATE may go, in dB. CALIBRATE needs
@@ -173,8 +178,6 @@ namespace HpAttenuator.Measurement
             // attenuation shows, with no path-loss / reference offset.
             bool haveBaseline = false;
             double baselineRelDb = 0.0;
-            double prevNormRelDb = 0.0;
-            bool havePrevNorm = false;
             int consecutiveTimeouts = 0;
 
             foreach (int atten in _options.AttenuationSteps())
@@ -202,25 +205,12 @@ namespace HpAttenuator.Measurement
                     if (atten == _options.AttenStartDb) { baselineRelDb = relDb; haveBaseline = true; }
                     double normRelDb = haveBaseline ? relDb - baselineRelDb : relDb;
 
-                    // Manual "Attenuator Measurements" (3-115): CALIBRATE each new RF range on RECAL.
-                    // The RECAL status bit is polled but often missed at a boundary, so we ALSO detect
-                    // the range change from the reading itself — an uncalibrated range makes the
-                    // step-to-step reading jump off the ~AttenStepDb-per-step trend. On either signal,
-                    // CALIBRATE (level steady — no track mode) and re-read on the calibrated range.
-                    if (_options.RangeCalibrate && !isReference && haveBaseline)
-                    {
-                        bool jumped = havePrevNorm &&
-                            Math.Abs((normRelDb - prevNormRelDb) + _options.AttenStepDb) > RangeStepThresholdDb;
-                        if (jumped || RecalAsserted())
-                        {
-                            try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); }
-                            catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
-                            relDb = ReadRelativeDbWithRetry(StepReadAttempts);
-                            normRelDb = relDb - baselineRelDb;
-                        }
-                    }
-                    prevNormRelDb = normRelDb;
-                    havePrevNorm = true;
+                    // NB: we deliberately do NOT recalibrate mid-sweep. The --section-test proved the
+                    // receiver reads 10/40/50 dB correctly from just the single 0 dB reference calibrate
+                    // (average detector). Firing CALIBRATE at a deep/weak level through the converter
+                    // instead CORRUPTS the range factor (the same 50 dB read 50.42 dB when jumped to,
+                    // but 45.80 dB when the sweep recalibrated at 40 dB). A genuinely UNCAL ('AAAA')
+                    // reading is still handled by the calibrate-on-UNCAL retry in ReadRelativeDbWithRetry.
 
                     point.MeasuredRelativeDb = normRelDb;
                     point.MeasuredAttenuationDb = -normRelDb;
@@ -332,42 +322,26 @@ namespace HpAttenuator.Measurement
         private const int PostCalibrateWaitMs = 2500;
 
         /// <summary>
-        /// Reads the relative dB robustly, up to <paramref name="maxAttempts"/> times, clearing
-        /// and re-reading on a transient instrument error (e.g. Error 96), an UNCAL reading, or
-        /// an empty/garbled response (read before Data-Ready). It does NOT calibrate here:
-        /// calibrating a range mid-measurement disturbs the other ranges (it broke the deeper
-        /// 8496 points), so the up-front range cal is solely responsible for every range.
-        /// Timeouts are not caught — they propagate as a floor/communication failure.
+        /// Reads the relative dB robustly, up to <paramref name="maxAttempts"/> times, clearing and
+        /// re-reading on a transient: an empty/garbled response (a read that raced an RF-range
+        /// auto-range or Data-Ready), an UNCAL reading, or a transient instrument error (e.g. Error
+        /// 96). It does NOT calibrate — calibrating a range mid-sweep corrupts it (the same 50 dB
+        /// read 50.4 dB jumped-to but 45.8 dB when the sweep recalibrated; the up-front reference
+        /// cal is solely responsible for every range). Between attempts it waits the longer
+        /// <see cref="TransientReadSettleMs"/> so an auto-range boundary has time to settle before
+        /// the re-read. Timeouts are not caught — they propagate as a floor/communication failure.
         /// </summary>
-        /// <summary>True if the receiver is prompting for a range calibration (RECAL), swallowing
-        /// any poll failure so a flaky serial poll never aborts a sweep point.</summary>
-        private bool RecalAsserted()
-        {
-            try { return _receiver.RecalRequested(); } catch { return false; }
-        }
-
         private double ReadRelativeDbWithRetry(int maxAttempts)
         {
             System.Exception last = null;
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 try { return _receiver.ReadRelativeDb(); }
-                catch (Hp8902AException ex) when (ex.IsUncal)
-                {
-                    // UNCAL at this level (the 'AAAA' fill): the range needs calibrating. This is
-                    // the manual's low-level procedure — step down, CALIBRATE whenever RECAL shows.
-                    // With Track Mode engaged the LO feedback loop holds lock through the calibrate;
-                    // untracked, this dropped the signal to Error 96. A truly below-floor point just
-                    // exhausts its retries and is logged.
-                    last = ex;
-                    try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); }
-                    catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
-                }
                 catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
                 {
                     last = ex;
                     try { _receiver.ClearError(); } catch { /* keep going */ }
-                    if (attempt < maxAttempts) Settle();
+                    if (attempt < maxAttempts) Thread.Sleep(TransientReadSettleMs);
                 }
             }
             throw last;

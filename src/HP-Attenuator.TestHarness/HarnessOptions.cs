@@ -17,6 +17,7 @@ namespace HpAttenuator.TestHarness
         public int RfPowerAttenDb = 0;          // --atten : attenuation for --rf-power (default 0 dB)
         public bool AttenSweep;     // --atten-sweep : Test 2 — 1 dB relative attenuation sweep at --freq
         public bool PerAtten;       // --per-atten : Test 3 — exercise each attenuator's settings individually
+        public bool SectionTest;    // --section-test : isolate the 8496's two 40 dB sections (digit 7 vs 8)
         public bool CalDebug;       // --cal-debug : observe the 8902A status byte vs level (no CALIBRATE)
         public bool Debug;          // --debug : trace every 8902A command + status byte (find Error 35)
         public bool CalProbe;       // --cal-probe : force one Tuned RF Level CALIBRATE and trace it (hunt Error 35)
@@ -70,6 +71,7 @@ namespace HpAttenuator.TestHarness
                     case "--rf-power": o.RfPower = true; break;
                     case "--atten-sweep": o.AttenSweep = true; break;
                     case "--per-atten": o.PerAtten = true; break;
+                    case "--section-test": o.SectionTest = true; break;
                     case "--cal-debug": o.CalDebug = true; break;
                     case "--debug": o.Debug = true; break;
                     case "--cal-probe": o.CalProbe = true; break;

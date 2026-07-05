@@ -110,6 +110,16 @@ namespace HpAttenuator.TestHarness
                     return RunPerAtten(opt, perEngine, config);
                 }
 
+                // Diagnostic: isolate the 8496's two 40 dB sections (does the deep-boundary step
+                // follow a specific physical section?). Measures each 40 dB section alone and paired
+                // with the 10 dB section for 50 dB, so section 3 vs 4 can be compared directly.
+                if (opt.SectionTest)
+                {
+                    var secAttn = bench.MakeAttenuator(config);
+                    var secEngine = new MeasurementEngine(bench.Source, bench.Lo, secAttn, bench.Receiver, opt.Sweep);
+                    return RunSectionTest(opt, secEngine, config);
+                }
+
                 // Test 2: a single-frequency relative attenuation sweep in 1 dB steps from
                 // 0 dB to the attenuator's maximum. It reuses the Tuned RF Level relative
                 // method (SET REF at 0 dB normalises the path loss); only the frequency and
@@ -753,6 +763,67 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.Write(summary);
 
             return pass ? 0 : 1;
+        }
+
+        // ---- Diagnostic: isolate the 8496's two 40 dB sections --------------
+
+        private static int RunSectionTest(HarnessOptions opt, MeasurementEngine engine, AttenuatorConfig config)
+        {
+            double freq = opt.RfPowerFreqMHz;
+            bool xIsFine = config.XModel.Contains("8494");
+            var coarse = (xIsFine ? config.Y : config.X);          // the 8496 (10 dB step) sections
+            string coarseModel = xIsFine ? config.YModel : config.XModel;
+
+            var s10 = coarse.FirstOrDefault(s => s.Decibels == 10);
+            var s40 = coarse.Where(s => s.Decibels == 40).ToList();
+            if (s10 == null || s40.Count < 2)
+            {
+                AnsiConsole.MarkupLine("[red]--section-test needs the 8496 (a 10 dB + two 40 dB sections) — " +
+                                       $"found {coarseModel.EscapeMarkup()}.[/]");
+                return 1;
+            }
+            int d10 = s10.Digit, d3 = s40[0].Digit, d4 = s40[1].Digit; // d3 = section 3, d4 = section 4
+
+            var settings = new List<AttenSetting>
+            {
+                new AttenSetting($"40 via section 3 (digit {d3})", 40, new[] { d3 }),
+                new AttenSetting($"40 via section 4 (digit {d4})", 40, new[] { d4 }),
+                new AttenSetting($"10 (digit {d10})", 10, new[] { d10 }),
+                new AttenSetting($"50 = 10 + section 3 ({d10}+{d3})", 50, new[] { d10, d3 }),
+                new AttenSetting($"50 = 10 + section 4 ({d10}+{d4})", 50, new[] { d10, d4 }),
+            };
+
+            AnsiConsole.MarkupLine(
+                $"[grey]8496 section isolation:[/] {freq:0.###} MHz — comparing the two 40 dB sections " +
+                $"(digit {d3} = section 3 vs digit {d4} = section 4), alone and as 50 dB with the 10 dB (digit {d10}).");
+            AnsiConsole.WriteLine();
+
+            Action<int, int, AttenPointResult> prog = (i, n, p) =>
+            {
+                string body = p.Error != null
+                    ? $"[red]{p.Error.EscapeMarkup()}[/]"
+                    : $"meas {p.MeasuredAttenuationDb,7:0.00} dB  (err {p.ErrorDb:+0.00;-0.00;0.00})";
+                AnsiConsole.MarkupLine($"  {i,2}/{n}  set {p.CommandedDb,3} dB  {p.Group.EscapeMarkup()}  -> {body}");
+            };
+
+            FreqPointResult r = engine.MeasureSettings(freq, settings, prog);
+
+            var table = new Table().Border(TableBorder.Rounded).Title($"{freq:0.###} MHz  {r.Regime}".EscapeMarkup());
+            table.AddColumn("What"); table.AddColumn(new TableColumn("Set dB").RightAligned());
+            table.AddColumn("Cmd"); table.AddColumn(new TableColumn("Meas dB").RightAligned());
+            table.AddColumn(new TableColumn("Error dB").RightAligned());
+            foreach (var p in r.Points)
+            {
+                string measCell = p.Error != null ? $"[red]{p.Error.EscapeMarkup()}[/]" : $"{p.MeasuredAttenuationDb:0.00}";
+                string errCell = p.Error != null ? "[red]—[/]" : $"{p.ErrorDb:+0.00;-0.00;0.00}";
+                table.AddRow(p.Group.EscapeMarkup(), p.CommandedDb.ToString(), p.Command.EscapeMarkup(), measCell, errCell);
+            }
+            AnsiConsole.Write(table);
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Read section 3 vs section 4: if both ~40 (and both 50s match), the sections are " +
+                "fine and the deep-boundary step is in the MEASUREMENT. If one 40 dB section reads off, that section is the culprit.[/]");
+            return 0;
         }
 
         // ---- Test 1: single-point RF power readback ------------------------
