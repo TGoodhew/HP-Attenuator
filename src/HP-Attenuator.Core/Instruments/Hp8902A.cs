@@ -77,6 +77,14 @@ namespace HpAttenuator.Instruments
         /// <summary>Table #2 (frequency offset) holds at most this many freq/CF pairs, plus REF CF.</summary>
         public const int OffsetTableMaxPairs = 22;
 
+        /// <summary>LO (MHz) used only to genuinely ENTER Frequency Offset mode while loading /
+        /// reading the second cal-factor table. The Operation manual: "Every time you use the
+        /// second table, you must enter the external LO value" — <c>27.1SP</c> only re-enters with
+        /// a previously-set LO, so with no prior LO the offset table is never truly active and the
+        /// measurement (which enters offset via <c>27.3SP&lt;LO&gt;MZ</c>) sees an empty table →
+        /// Error 15. The exact value is arbitrary; any valid LO enables the table.</summary>
+        private const double OffsetTableLoadLoMHz = 5120.53;
+
         /// <summary>
         /// Loads BOTH cal-factor tables the 8902A needs for RF Power measurements — the Normal
         /// table (direct, <c>27.0SP</c>) and the Frequency-Offset table (converter path,
@@ -99,7 +107,12 @@ namespace HpAttenuator.Instruments
         private void WriteCalFactorTable(bool useOffsetTable, double referenceCf, IReadOnlyList<CalFactor> table)
         {
             Send("M4T0");                                    // RF Power + free-run trigger
-            Send(useOffsetTable ? "27.1SP" : "27.0SP");      // select Normal / Frequency-Offset table
+            // Select the table. The offset table is only genuinely active when offset mode is
+            // ENTERED with an LO (27.3SP<LO>MZ); 27.1SP alone (no prior LO) does not activate it,
+            // so the entries never reach the table the measurement consults → Error 15.
+            Send(useOffsetTable
+                ? "27.3SP" + Fmt(OffsetTableLoadLoMHz) + "MZ"
+                : "27.0SP");                                 // Normal (direct) table
             Send("37.9SP");                                  // clear the selected table
 
             // The Reference Cal Factor is a SEPARATE store, entered value-only with NO frequency:
@@ -129,7 +142,9 @@ namespace HpAttenuator.Instruments
         public (int normalPairs, int offsetPairs, double normalRefCf, double offsetRefCf) ReadCalFactorTables()
         {
             _link.Write("27.0SP"); int normal = TryReadTableSize(); double normalRef = TryReadRefCf();
-            _link.Write("27.1SP"); int offset = TryReadTableSize(); double offsetRef = TryReadRefCf();
+            // Enter offset mode with an LO so the ACTIVE second table is read (not a 27.1SP no-LO state).
+            _link.Write("27.3SP" + Fmt(OffsetTableLoadLoMHz) + "MZ");
+            int offset = TryReadTableSize(); double offsetRef = TryReadRefCf();
             _link.Write("27.0SP");                       // leave in Normal mode
             return (normal, offset, normalRef, offsetRef);
         }
@@ -216,6 +231,9 @@ namespace HpAttenuator.Instruments
                 Send("27.3SP" + Fmt(loMHz) + "MZ");  // frequency-offset: external LO
             else
                 Send("27.0SP");                      // direct / normal mode
+            Send(Fmt(rfMHz) + "MZ");   // tune to the RF frequency: the automatic cal factor is
+                                       // selected only AFTER the receiver has tuned (Operation
+                                       // manual, RF Power) — without it, RF POWER raises Error 15.
             Send("37.0SP");  // automatic cal-factor selection (table loaded separately)
         }
 

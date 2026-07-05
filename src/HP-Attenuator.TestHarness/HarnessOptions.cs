@@ -46,7 +46,7 @@ namespace HpAttenuator.TestHarness
         public string AddrSource = "GPIB0::20::INSTR";
         public string AddrLo = "GPIB0::19::INSTR";
         public string AddrReceiver = "GPIB0::14::INSTR";
-        public string AddrAttenuator = "GPIB0::28::INSTR";
+        public string AddrAttenuator = "GPIB0::27::INSTR";   // this bench's 11713A (NOT the factory-default 28)
 
         public readonly SweepOptions Sweep = new SweepOptions();
         public double IdFreqMHz = 100.0;
