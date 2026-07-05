@@ -10,6 +10,17 @@ branch (its branch is noted). We merge back up the stack as each branch finishes
 
 ## [Unreleased]
 
+### branch `issue-11-bus-timeout-crash-safety` (stacked on `issue-9-recal-boundary-calibrate`)
+- **Fix #11 — survive a GPIB timeout and release the held bus.** A read timeout left the 8902A
+  holding the bus (its handshake is inhibited until the measurement cycle completes, O&C 3-22);
+  the next 11713A write then timed out and, being outside the try/catch, crashed the whole
+  harness. `MeasureFrequency` now runs the attenuator-set and read inside the try; on a GPIB
+  timeout it calls the new `IMeasuringReceiver.ReleaseBus()` (device clear / SDC) to free the bus
+  and ends the frequency cleanly with a warning (a read timeout is the floor, and the device clear
+  drops the relative reference). Removed the now-dead `FloorStopCount` accumulation. The real cure
+  (wait for measurement completion instead of a blind fixed timeout) is #10. Sim sweep unchanged
+  (PASS, max|err| 0.05 dB).
+
 ### branch `issue-9-recal-boundary-calibrate` (stacked on `test2-atten-sweep`)
 - **Fix #9 — CALIBRATE range boundaries on RECAL during the sweep, per the manual.** The 8902A
   Operation & Calibration manual's *Attenuator Measurements* (3-115) requires calibrating each

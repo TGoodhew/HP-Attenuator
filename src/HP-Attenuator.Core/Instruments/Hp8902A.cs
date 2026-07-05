@@ -304,6 +304,14 @@ namespace HpAttenuator.Instruments
             Settle();
         }
 
+        public void ReleaseBus()
+        {
+            // GPIB device clear (SDC). Aborts a measurement cycle that is holding the bus handshake
+            // (O&C 3-22) and frees the bus so the next write can't collide. Best-effort: _link.Clear()
+            // swallows a device that ignores clear. Resets the 8902A to preset — caller must re-setup.
+            _link.Clear();
+        }
+
         public double ReadRelativeDb()
         {
             // LOG relative mode returns dB. When the current level is UNCAL the 8902A does not

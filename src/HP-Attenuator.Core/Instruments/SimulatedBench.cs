@@ -186,6 +186,7 @@ namespace HpAttenuator.Instruments
         public void Calibrate() { }
         public void ClearError() { }
         public void RetuneToSignal() { }   // sim never loses lock (Error 96 only when RF is off)
+        public void ReleaseBus() { }       // sim has no real GPIB bus to release
 
         public void SetReference()
         {

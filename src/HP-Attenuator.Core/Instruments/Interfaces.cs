@@ -150,6 +150,16 @@ namespace HpAttenuator.Instruments
         /// </summary>
         void RetuneToSignal();
 
+        /// <summary>
+        /// Releases the GPIB bus after a hung / timed-out measurement by issuing a device clear
+        /// (SDC). The 8902A inhibits the bus handshake until a triggered measurement cycle completes
+        /// (O&amp;C 3-22); if a read times out mid-cycle the instrument keeps holding the bus, so the
+        /// next write to ANY instrument times out too. A device clear aborts the cycle and frees the
+        /// bus — it also resets the receiver to its preset state, so the caller must re-establish the
+        /// measurement before using it again.
+        /// </summary>
+        void ReleaseBus();
+
         /// <summary>Sets the 0 dB reference (SET REF) at the current level.</summary>
         void SetReference();
 

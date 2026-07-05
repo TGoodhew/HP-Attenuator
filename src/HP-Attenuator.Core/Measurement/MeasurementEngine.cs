@@ -13,9 +13,6 @@ namespace HpAttenuator.Measurement
     /// </summary>
     public sealed class MeasurementEngine
     {
-        /// <summary>Stop a sweep after this many consecutive below-floor read failures.</summary>
-        private const int FloorStopCount = 4;
-
         /// <summary>Read attempts for the 0 dB reference point (it anchors the whole sweep).</summary>
         private const int ReferenceReadAttempts = 5;
 
@@ -189,35 +186,32 @@ namespace HpAttenuator.Measurement
             // attenuation shows, with no path-loss / reference offset.
             bool haveBaseline = false;
             double baselineRelDb = 0.0;
-            int consecutiveTimeouts = 0;
             int boundaryCals = 0;   // range-to-range CALIBRATEs done this frequency (cap: MaxBoundaryCalibrations)
 
             foreach (int atten in _options.AttenuationSteps())
             {
-                string command = _attenuator.SetAttenuationDb(atten);
-                Settle();
-
                 double expected = atten - _options.AttenStartDb;
                 var point = new AttenPointResult
                 {
                     CommandedDb = atten,
-                    Command = command,
                     ExpectedAttenuationDb = expected
                 };
 
                 try
                 {
-                    // Retry transient instrument errors (e.g. Error 96 "no signal sensed") —
-                    // and give the 0 dB reference extra attempts, since it anchors every other
-                    // point. Timeouts (the receiver floor) are not retried here.
-                    //
+                    // Setting the attenuator is a GPIB write, so it must be INSIDE the try: if the
+                    // previous 8902A measurement cycle is still holding the bus (a read timed out
+                    // mid-cycle — its handshake is inhibited until the cycle completes, O&C 3-22), this
+                    // write itself times out. Left outside the try, that IOTimeoutException is unhandled
+                    // and crashes the whole harness (issue #11).
+                    point.Command = _attenuator.SetAttenuationDb(atten);
+                    Settle();
+
                     // Per the manual's Attenuator Measurements procedure (O&C 3-115), the stepping
                     // points CALIBRATE each RF input range-to-range boundary the first time RECAL
-                    // appears — see ReadStepWithBoundaryCal. Only ~2 boundaries exist and they're
-                    // calibrated at the shallow level where RECAL naturally lights (strong enough for
-                    // the sensor module to reference), NOT at a fixed deep step (which stored the bad
-                    // factor removed in bf6ba51). The 0 dB reference reads without boundary cal — its
-                    // top range is already calibrated by RunRangeCalibration + SET REF.
+                    // appears (ReadStepWithBoundaryCal); the 0 dB reference reads without boundary cal
+                    // (its top range is calibrated by RunRangeCalibration + SET REF). The reference also
+                    // gets extra read attempts since it anchors every other point.
                     bool isReference = atten == _options.AttenStartDb;
                     double relDb = isReference
                         ? ReadRelativeDbWithRetry(ReferenceReadAttempts)
@@ -230,13 +224,11 @@ namespace HpAttenuator.Measurement
                     point.MeasuredRelativeDb = normRelDb;
                     point.MeasuredAttenuationDb = -normRelDb;
                     point.ErrorDb = point.MeasuredAttenuationDb - expected;
-                    consecutiveTimeouts = 0;
                 }
                 catch (System.Exception ex)
                 {
-                    // Capture the full detail — for a FormatException ex.Message holds the raw
-                    // 8902A response, which is exactly what we need to diagnose. Also append
-                    // the status byte so we can see RECAL/UNCAL/instrument-error bits.
+                    // Capture the full detail — for a FormatException ex.Message holds the raw 8902A
+                    // response; also append the status byte (RECAL/UNCAL/instrument-error bits).
                     bool isTimeout = ex.GetType().Name.IndexOf("Timeout", StringComparison.OrdinalIgnoreCase) >= 0;
                     string detail = ex is Hp8902AException ? ex.Message : (isTimeout ? "read timeout" : ex.Message);
                     int sb = -1;
@@ -245,22 +237,31 @@ namespace HpAttenuator.Measurement
                     point.MeasuredRelativeDb = double.NaN;
                     point.MeasuredAttenuationDb = double.NaN;
                     point.ErrorDb = double.NaN;
-                    try { _receiver.ClearError(); } catch { /* keep going */ }
 
-                    // Only a run of read TIMEOUTS means we've hit the receiver floor; other
-                    // errors (e.g. a malformed reading) are a different fault — log and continue
-                    // so the full pattern is visible rather than stopping early.
-                    consecutiveTimeouts = isTimeout ? consecutiveTimeouts + 1 : 0;
+                    if (isTimeout)
+                    {
+                        // A GPIB timeout means the 8902A hung the bus mid measurement-cycle (its
+                        // handshake is inhibited until the cycle completes — O&C 3-22). Release the bus
+                        // with a device clear so the next instrument write can't collide (which was
+                        // crashing the harness, #11), then end this frequency: a read timeout is the
+                        // floor / unrecoverable at the fixed timeout, and the device clear drops the
+                        // relative reference, so continuing would only log garbage. Waiting for
+                        // measurement completion instead of a blind timeout is issue #10.
+                        try { _receiver.ReleaseBus(); } catch { /* best effort */ }
+                        result.Points.Add(point);
+                        onPoint?.Invoke(++index, total, point);
+                        result.Warning = $"stopped at {atten} dB — the 8902A read timed out and held the " +
+                                         "GPIB bus; released it and ended the sweep (deeper points are " +
+                                         "unmeasurable at the fixed read timeout).";
+                        break;
+                    }
+
+                    // A non-timeout error (e.g. a malformed reading) is a different fault — clear it and
+                    // carry on so the full pattern is visible rather than stopping early.
+                    try { _receiver.ClearError(); } catch { /* keep going */ }
                 }
                 result.Points.Add(point);
                 onPoint?.Invoke(++index, total, point);
-
-                if (consecutiveTimeouts >= FloorStopCount)
-                {
-                    result.Warning = $"stopped at {atten} dB after {consecutiveTimeouts} consecutive read " +
-                                     "timeouts — below the receiver floor (deeper attenuation is unmeasurable).";
-                    break;
-                }
             }
             return result;
         }
