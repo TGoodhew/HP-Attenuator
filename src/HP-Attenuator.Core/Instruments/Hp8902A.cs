@@ -295,6 +295,15 @@ namespace HpAttenuator.Instruments
 
         public void ClearError() => Send("CL");   // CLEAR key — clears a displayed error
 
+        public void RetuneToSignal()
+        {
+            // Blue Key + CLEAR (O&C 3-116): forces a VCO retune during Tuned RF Level and recaptures
+            // the signal if it hasn't drifted more than 5 MHz. The remedy for a lost-lock Error 96 at
+            // a range boundary — CL alone clears the error but does NOT re-acquire the signal.
+            Send("BC");
+            Settle();
+        }
+
         public double ReadRelativeDb()
         {
             // LOG relative mode returns dB. When the current level is UNCAL the 8902A does not

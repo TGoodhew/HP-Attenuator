@@ -185,6 +185,7 @@ namespace HpAttenuator.Instruments
         public int PollStatusByte() => 0;
         public void Calibrate() { }
         public void ClearError() { }
+        public void RetuneToSignal() { }   // sim never loses lock (Error 96 only when RF is off)
 
         public void SetReference()
         {

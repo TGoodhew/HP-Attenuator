@@ -141,6 +141,15 @@ namespace HpAttenuator.Instruments
         /// <summary>Clears a displayed error/condition on the instrument (8902A CL key).</summary>
         void ClearError();
 
+        /// <summary>
+        /// Forces a retune of the Tuned-RF-Level VCO to recapture the signal after the receiver
+        /// has lost lock (8902A Error 96). This is the manual's remedy (O&amp;C 3-116, "Blue Key,
+        /// CLEAR" = HP-IB code <c>BC</c>): it retunes the VCO and recaptures the signal provided it
+        /// has not drifted more than 5 MHz — unlike <see cref="ClearError"/> (CL), which only clears
+        /// the displayed error without re-acquiring lock.
+        /// </summary>
+        void RetuneToSignal();
+
         /// <summary>Sets the 0 dB reference (SET REF) at the current level.</summary>
         void SetReference();
 

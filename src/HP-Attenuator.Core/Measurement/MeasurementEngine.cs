@@ -322,10 +322,12 @@ namespace HpAttenuator.Measurement
         private const int PostCalibrateWaitMs = 2500;
 
         /// <summary>
-        /// Reads the relative dB robustly, up to <paramref name="maxAttempts"/> times, clearing and
+        /// Reads the relative dB robustly, up to <paramref name="maxAttempts"/> times, recovering and
         /// re-reading on a transient: an empty/garbled response (a read that raced an RF-range
-        /// auto-range or Data-Ready), an UNCAL reading, or a transient instrument error (e.g. Error
-        /// 96). It does NOT calibrate — calibrating a range mid-sweep corrupts it (the same 50 dB
+        /// auto-range or Data-Ready), an UNCAL reading, or a lost-lock instrument error (Error 96).
+        /// Recovery depends on the fault: Error 96 fires a VCO retune (BC) to re-acquire the signal;
+        /// everything else just clears the error (CL). It does NOT calibrate — calibrating a range
+        /// mid-sweep corrupts it (the same 50 dB
         /// read 50.4 dB jumped-to but 45.8 dB when the sweep recalibrated; the up-front reference
         /// cal is solely responsible for every range). Between attempts it waits the longer
         /// <see cref="TransientReadSettleMs"/> so an auto-range boundary has time to settle before
@@ -340,7 +342,13 @@ namespace HpAttenuator.Measurement
                 catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
                 {
                     last = ex;
-                    try { _receiver.ClearError(); } catch { /* keep going */ }
+                    // Error 96 = the tuned receiver lost lock at a range boundary. CL alone clears the
+                    // error but does NOT re-acquire the signal, so every subsequent read re-throws 96 —
+                    // a whole-sweep cascade. BC (blue+CLEAR) forces a VCO retune and recaptures the
+                    // signal (manual O&C 3-116), which is what lets the sweep continue past the boundary.
+                    bool lostLock = (ex as Hp8902AException)?.Code == 96;
+                    try { if (lostLock) _receiver.RetuneToSignal(); else _receiver.ClearError(); }
+                    catch { /* keep going */ }
                     if (attempt < maxAttempts) Thread.Sleep(TransientReadSettleMs);
                 }
             }
