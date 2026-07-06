@@ -28,6 +28,8 @@ _ReSharper*/
 
 ## Test harness output
 harness-results.csv
+peratten-*.csv
+*-results.csv
 
 ## OS
 Thumbs.db

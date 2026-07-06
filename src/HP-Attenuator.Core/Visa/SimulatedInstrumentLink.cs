@@ -28,6 +28,8 @@ namespace HpAttenuator.Visa
             return string.Empty;
         }
 
+        public byte SerialPoll() => 0; // no condition bits in the simulated link
+
         public void Dispose() { /* nothing to release */ }
     }
 }

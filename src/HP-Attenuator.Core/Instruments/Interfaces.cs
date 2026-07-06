@@ -111,11 +111,54 @@ namespace HpAttenuator.Instruments
         /// </summary>
         double ReadRfPowerDbm();
 
+        /// <summary>
+        /// Prepares for the range-calibration pass: enables the RECAL/UNCAL status
+        /// condition (so <see cref="RecalRequested"/> can poll it) and puts the receiver
+        /// in free-run so that state tracks the live level as the attenuator steps down.
+        /// </summary>
+        void BeginRangeCalibration();
+
+        /// <summary>
+        /// Enables just the RECAL/UNCAL status condition (so <see cref="RecalRequested"/> can poll
+        /// it) WITHOUT forcing free-run. Used on the Track-Mode path, where free-run would auto-range
+        /// the receiver and shift the relative reference by a whole RF range.
+        /// </summary>
+        void EnableRecalStatus();
+
+        /// <summary>
+        /// True if the receiver is asking for a range calibration (8902A RECAL/UNCAL).
+        /// Read by a serial poll; only CALIBRATE when this is set, per the 8902A
+        /// procedure — calibrating a range that doesn't need it raises Error 35.
+        /// </summary>
+        bool RecalRequested();
+
+        /// <summary>Raw serial-poll status byte, for diagnostics. Returns -1 if not applicable.</summary>
+        int PollStatusByte();
+
         /// <summary>Performs one range-calibration step (CALIBRATE) at the current level.</summary>
         void Calibrate();
 
         /// <summary>Clears a displayed error/condition on the instrument (8902A CL key).</summary>
         void ClearError();
+
+        /// <summary>
+        /// Forces a retune of the Tuned-RF-Level VCO to recapture the signal after the receiver
+        /// has lost lock (8902A Error 96). This is the manual's remedy (O&amp;C 3-116, "Blue Key,
+        /// CLEAR" = HP-IB code <c>BC</c>): it retunes the VCO and recaptures the signal provided it
+        /// has not drifted more than 5 MHz — unlike <see cref="ClearError"/> (CL), which only clears
+        /// the displayed error without re-acquiring lock.
+        /// </summary>
+        void RetuneToSignal();
+
+        /// <summary>
+        /// Releases the GPIB bus after a hung / timed-out measurement by issuing a device clear
+        /// (SDC). The 8902A inhibits the bus handshake until a triggered measurement cycle completes
+        /// (O&amp;C 3-22); if a read times out mid-cycle the instrument keeps holding the bus, so the
+        /// next write to ANY instrument times out too. A device clear aborts the cycle and frees the
+        /// bus — it also resets the receiver to its preset state, so the caller must re-establish the
+        /// measurement before using it again.
+        /// </summary>
+        void ReleaseBus();
 
         /// <summary>Sets the 0 dB reference (SET REF) at the current level.</summary>
         void SetReference();

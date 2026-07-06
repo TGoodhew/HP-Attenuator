@@ -10,6 +10,11 @@ namespace HpAttenuator.Measurement
         public double FreqStopMHz { get; set; } = 18000.0;
         public double FreqStepMHz { get; set; } = 10.0;
 
+        // 0 dBm source lands the 0 dB reference ~-1 dBm at the 8902A at 3 GHz — just under its 0 dBm
+        // relative-measurement ceiling. +10 dBm (used to prove the floor moves with level) over-drives
+        // it to ~+9 dBm at 3 GHz, over-ranging the reference and hanging the first range boundary
+        // (~12 dB). NB the ideal level is frequency-dependent (converter loss varies) — a multi-freq
+        // sweep needs per-frequency leveling to keep the reference just below 0 dBm.
         public double SourcePowerDbm { get; set; } = 0.0;
         public double LoPowerDbm { get; set; } = 8.0; // 11793A wants +8 dBm LO drive (2-18 GHz)
 
@@ -54,11 +59,30 @@ namespace HpAttenuator.Measurement
         }
     }
 
+    /// <summary>
+    /// One attenuation setting to exercise on its own: which section digits to engage, the
+    /// dB it should produce, and the attenuator it belongs to (for grouped reporting).
+    /// </summary>
+    public sealed class AttenSetting
+    {
+        public string Group { get; }
+        public int ExpectedDb { get; }
+        public System.Collections.Generic.IReadOnlyList<int> Digits { get; }
+
+        public AttenSetting(string group, int expectedDb, System.Collections.Generic.IReadOnlyList<int> digits)
+        {
+            Group = group;
+            ExpectedDb = expectedDb;
+            Digits = digits;
+        }
+    }
+
     /// <summary>One attenuator setting measured at one frequency.</summary>
     public sealed class AttenPointResult
     {
         public int CommandedDb { get; set; }
         public string Command { get; set; }
+        public string Group { get; set; }                 // which attenuator (per-attenuator test)
         public double MeasuredRelativeDb { get; set; }   // 8902A reading, dB rel to 0 dB ref (≤ 0)
         public double MeasuredAttenuationDb { get; set; } // = -MeasuredRelativeDb
         public double ExpectedAttenuationDb { get; set; }

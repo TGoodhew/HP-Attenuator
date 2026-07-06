@@ -126,12 +126,122 @@ the LO well inside the 8673B's 2–26.5 GHz range.
 
 ---
 
+## Test 2 — Relative attenuation sweep at 5 GHz, 1 dB steps
+
+### Objective
+
+With the same path as Test 1, measure the **accuracy of the 11713A's
+attenuation** across its full range at 5 GHz. The 0 dB level becomes the
+reference (a relative 0 dBm), which **normalises away the fixed path/insertion
+loss** Test 1 exposed; the attenuator is then stepped down in **1 dB increments
+to its maximum**, and at each step the measured attenuation (dB below the
+reference) is compared with the commanded value.
+
+### Why Tuned RF Level (not RF Power)
+
+Test 1's **RF Power** sensor measurement bottoms out near −20…−30 dBm, so past
+~20–30 dB of attenuation it can no longer see the signal. This test therefore
+uses the 8902A **Tuned RF Level** relative method (`S4` + `LG`, `SET REF`), which
+reads down to −127 dBm and gives ±0.015 dB relative accuracy — the
+manual-recommended way to measure an attenuator. `SET REF` at 0 dB is exactly the
+"measured power as relative 0 dBm" normalisation: it captures the current level
+as 0 dB, and every later reading is dB-below-reference = attenuation.
+
+### Preconditions
+
+Same as Test 1: sensor zeroed + calibrated, both cal-factor tables loaded (done
+by the mandatory sensor-cal step). Source 5 GHz at 0 dBm through the converter
+(LO 5120.53 MHz).
+
+### Procedure
+
+1. Source 5 GHz / 0 dBm; converter + LO as Test 1.
+2. Configure the 8902A for **Tuned RF Level** at 5 GHz (offset mode): `S4`,
+   `27.3SP 5120.53 MZ`, `5000 MZ`, `4.0SP`, `1.0SP`, `LG`, `32.1SP`.
+3. **3-point range calibration** (hardware): step the attenuator down coarsely
+   (~10 dB), issuing `CALIBRATE` whenever RECAL lights, so each 8902A RF range is
+   calibrated. Capped so the level stays ≥ −100 dBm.
+4. At **0 dB**, `SET REF` (special function 26) — the relative 0 dB reference.
+5. Step the 11713A **0 → max (121 dB) in 1 dB steps**; at each step take a
+   settled Tuned RF Level reading. **Attenuation = −(relative dB)**; error =
+   measured − commanded.
+6. Report per-step measured attenuation and error, plus a worst-error PASS/FAIL.
+
+### Expected result
+
+- Measured attenuation tracks the commanded value within tolerance (default
+  ±1.5 dB; the method itself is ~±0.015 dB, so real error is dominated by
+  attenuator accuracy and, at the deepest steps, receiver-floor noise).
+- The deepest steps (≈ −121 dBm at the receiver, before path loss) approach the
+  8902A floor; any point that drops below sensitivity is flagged (8902A error),
+  not silently passed.
+
+### Pass / fail
+
+- **Pass:** every measurable step is within `--tolerance` of its commanded
+  attenuation, with no unexpected receiver errors above the floor region.
+- **Fail:** a step exceeds tolerance, or the receiver errors at a level that
+  should be well within range.
+
+### Run it
+
+```powershell
+# Hardware, full range (auto-resolves max from the identified attenuator):
+dotnet run --project src/HP-Attenuator.TestHarness -- --atten-sweep --hardware `
+  --addr-attenuator GPIB0::27::INSTR
+
+# Cap the depth (e.g. 8496 range only) or change frequency:
+dotnet run --project src/HP-Attenuator.TestHarness -- --atten-sweep --astop 110 --freq 5000
+```
+
+Defaults: `--freq 5000`, 1 dB steps, 0 → attenuator max (121 dB for 8494 + 8496).
+
+---
+
+## Test 3 — Per-attenuator individual settings
+
+### Objective
+
+Characterise **each attenuator on its own**, one setting at a time, instead of
+the combined sweep. With the other attenuator at 0 dB, exercise:
+
+- the **8494** (1 dB attenuator) at **1, 2, … 11 dB** (11 points), and
+- the **8496** (10 dB attenuator) at **10, 20, … 110 dB** (11 points).
+
+That is **~22 points** — fast, and it isolates each attenuator so a bad section
+shows up against its own bank rather than being buried in a 0–121 dB sweep.
+
+### Method
+
+Same relative Tuned RF Level method as Test 2: `SET REF` at 0 dB (all sections
+bypassed) defines the software zero, then for each setting the harness engages
+**only that attenuator's** section digits (the other bank stays bypassed),
+reads the level, and reports measured attenuation = −(reading − reference) and
+the error vs the commanded dB. Which physical attenuator is the 8494 vs the 8496
+comes from the identification step (or `--x-atten`).
+
+### Expected result / pass-fail
+
+Each setting reads within `--tolerance` (default ±1.5 dB) of its nominal value.
+The deepest 8496 points (100, 110 dB) may approach the receiver floor through the
+converter and flag as errors — raise `--power` to push them up. PASS = all points
+within tolerance, no receiver errors.
+
+### Run it
+
+```powershell
+dotnet run --project src/HP-Attenuator.TestHarness -- --per-atten --hardware `
+  --addr-attenuator GPIB0::27::INSTR
+```
+
+Defaults: `--freq 5000`. Reports a table grouped by attenuator plus a CSV.
+
+---
+
 ## Subsequent tests
 
-_To be specified. Likely follow-ups, building on Test 1's baseline:_
+_To be specified:_
 
-- **Test 2** — Attenuation accuracy at a fixed frequency: relative-dB sweep of
-  the 11713A 0→110 dB at 5 GHz, error vs commanded.
-- **Test 3** — Frequency coverage: repeat the attenuation check across the
+- **Test 4** — Frequency coverage: repeat the attenuation check across the
   band (direct ≤1300 MHz and converted >1300 MHz regimes).
-- **Test 4** — Attenuator identification (8494 vs 8496 on each 11713A port).
+- **Test 5** — Attenuator identification (8494 vs 8496 on each 11713A port).

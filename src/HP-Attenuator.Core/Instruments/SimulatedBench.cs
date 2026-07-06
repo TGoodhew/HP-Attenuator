@@ -179,8 +179,14 @@ namespace HpAttenuator.Instruments
             return _bench.MeasuredLevelDbm();   // absolute level: source - attenuation - path loss
         }
 
+        public void BeginRangeCalibration() { }
+        public void EnableRecalStatus() { }
+        public bool RecalRequested() => false; // simulated receiver never needs range calibration
+        public int PollStatusByte() => 0;
         public void Calibrate() { }
         public void ClearError() { }
+        public void RetuneToSignal() { }   // sim never loses lock (Error 96 only when RF is off)
+        public void ReleaseBus() { }       // sim has no real GPIB bus to release
 
         public void SetReference()
         {

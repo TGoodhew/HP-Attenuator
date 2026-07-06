@@ -135,14 +135,22 @@ The logic lives in
 ## Attenuator identification
 
 The 8494 (1 dB, 0–11) and 8496 (10 dB, 0–110) can be cabled to **either** 11713A
-port, so the harness does not assume which is which. It engages each bank fully
-and measures:
+port, so the harness does not assume which is which. It probes each bank's
+**first two sections** (not the full bank) and measures:
 
-- Full ATTEN X ≈ **11 dB** and full ATTEN Y ≈ **110 dB** → X is the 8494.
+- ATTEN X probe ≈ **3 dB** and ATTEN Y probe ≈ **30 dB** → X is the 8494.
 - The reverse → the two are swapped.
 
+The probe is deliberately shallow: a *full* 8496 is 110 dB, which at a 0 dBm
+source drops the level to ≈ −110 dBm — at/below the 8902A Tuned RF Level
+acquisition floor, so that read would hang (VISA timeout). The first two sections
+give 3 dB (8494) vs 30 dB (8496): both easily measurable, still a clean 10×
+separation. Reads are timeout-resilient, so a flaky point lowers confidence
+rather than crashing the run.
+
 This runs automatically when the bench is present. You can also declare it
-(`--x-atten 8494|8496`) or be prompted (`--ask`). See
+(`--x-atten 8494|8496`) — recommended to skip identification entirely when you
+know the wiring — or be prompted (`--ask`). See
 [`AttenuatorIdentifier`](../src/HP-Attenuator.Core/Measurement/AttenuatorIdentifier.cs).
 
 ## Usage
@@ -170,7 +178,10 @@ dotnet run --project src/HP-Attenuator.TestHarness -- --hardware `
 | `--hardware` | Drive the real bench over NI-VISA |
 | `--detect` | Signal-presence check only (8902A RF-freq, source RF on vs off) |
 | `--rf-power` | **Test 1** — single-point absolute RF power readback (see [TEST-PLAN.md](TEST-PLAN.md)) |
-| `--freq <MHz>` | Frequency for `--rf-power` (default 5000 = 5 GHz) |
+| `--atten-sweep` | **Test 2** — 1 dB relative attenuation sweep at `--freq`, 0 → attenuator max |
+| `--per-atten` | **Test 3** — exercise each attenuator's settings individually (~22 points) |
+| `--debug` | Trace every 8902A command + the status byte after it (find instrument errors) |
+| `--freq <MHz>` | Frequency for `--rf-power` / `--atten-sweep` (default 5000 = 5 GHz) |
 | `--atten <dB>` | Attenuation for `--rf-power` (default 0) |
 | `--load-cal` | Load the converter cal factors into the 8902A first (hardware) |
 | `--no-cal-pass` | Skip the 8902A 3-point range-calibration pass |

@@ -33,14 +33,17 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.WriteLine();
 
             VisaInstrumentLink.BeepOnCommand = !opt.NoBeep;
+            if (opt.Debug)
+                Hp8902A.DebugLog = s => AnsiConsole.MarkupLine($"[grey]  {s.EscapeMarkup()}[/]");
 
             var disposables = new List<IDisposable>();
             try
             {
-                // The sensor cal steps only need the 8902A — don't open the whole bench.
-                if (opt.SensorCal || opt.SensorZero || opt.SensorCalibrate)
+                // These steps only need the 8902A — don't open the whole bench.
+                if (opt.SensorCal || opt.SensorZero || opt.SensorCalibrate || opt.LoadCal)
                 {
                     var receiver = BuildReceiverOnly(opt, disposables);
+                    if (opt.LoadCal) return RunLoadCalFactors(receiver);
                     if (opt.SensorCal) return RunSensorCalInteractive(receiver);
                     return opt.SensorZero ? RunSensorZero(receiver) : RunSensorCalibrate(receiver);
                 }
@@ -51,34 +54,84 @@ namespace HpAttenuator.TestHarness
                 if (bench.IsSimulated) { opt.Sweep.SettleMs = 0; opt.Sweep.RangeCalibrate = false; }
                 if (opt.NoCalPass) opt.Sweep.RangeCalibrate = false;
 
-                if (opt.LoadCal)
-                {
-                    AnsiConsole.MarkupLine("[grey]Loading converter cal factors into the 8902A...[/]");
-                    bench.Receiver.Reset();
-                    bench.Receiver.LoadCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
-                }
-
                 if (opt.Detect)
                     return RunDetect(opt, bench);
 
-                // Mandatory: the 8902A Tuned RF Level measurement requires a calibrated
-                // power sensor first. This pauses for the operator to use the CAL output.
+                // Diagnostic: observe the 8902A status byte vs level (no CALIBRATE, no sensor
+                // cal needed — Tuned RF Level uses the RF input). Used to fix RECAL gating.
+                if (opt.CalDebug)
+                    return RunCalDebug(opt, bench);
+
+                // Diagnostic: force one Tuned RF Level CALIBRATE and trace it, to confirm
+                // Error 35 is a reference-level (sensor-range) issue. No sensor cal prompt.
+                if (opt.CalProbe)
+                    return RunCalProbe(opt, bench);
+
+                // The 8902A Tuned RF Level measurement requires a calibrated power sensor.
+                // Calibrate ONCE PER SESSION: if a fresh session cal exists (and --recal was
+                // not given), reuse the resident cal and skip the interactive step; otherwise
+                // run the cal (pausing for the operator to use the CAL output) and mark it.
+                // --skip-sensor-cal bypasses calibration entirely (shallow path-check only).
                 if (!bench.IsSimulated && !opt.SkipSensorCal)
                 {
-                    if (!InteractiveSensorCalibrate(bench.Receiver))
+                    bool reuse = !opt.Recal && SensorCalSession.IsFresh(TimeSpan.FromHours(opt.CalMaxAgeHours));
+                    if (reuse)
                     {
-                        AnsiConsole.MarkupLine("[red]Sensor not calibrated — aborting (measurement needs it).[/]");
-                        return 1;
+                        AnsiConsole.MarkupLine(
+                            $"[grey]Reusing this session's sensor cal from " +
+                            $"{SensorCalSession.LastCal():HH:mm} (< {opt.CalMaxAgeHours:0.#} h old). " +
+                            "Use [/][green]--recal[/][grey] to force a fresh one.[/]");
                     }
-                    AnsiConsole.MarkupLine("Restore the measurement connections (sensor / converter IF as needed), " +
-                                           "then press [green]Enter[/] to start the measurement...");
-                    Console.ReadLine();
+                    else
+                    {
+                        if (!InteractiveSensorCalibrate(bench.Receiver))
+                        {
+                            AnsiConsole.MarkupLine("[red]Sensor not calibrated — aborting (measurement needs it).[/]");
+                            return 1;
+                        }
+                        SensorCalSession.Mark();
+                        AnsiConsole.MarkupLine("Restore the measurement connections (sensor / converter IF as needed), " +
+                                               "then press [green]Enter[/] to start the measurement...");
+                        Console.ReadLine();
+                    }
                 }
 
                 if (opt.RfPower)
                     return RunRfPower(opt, bench);
 
                 AttenuatorConfig config = ResolveAttenuator(opt, bench);
+
+                // Test 3: exercise each attenuator's settings individually (8494 1..11 dB,
+                // 8496 10..110 dB), one attenuator engaged at a time.
+                if (opt.PerAtten)
+                {
+                    var perAttn = bench.MakeAttenuator(config);
+                    var perEngine = new MeasurementEngine(bench.Source, bench.Lo, perAttn, bench.Receiver, opt.Sweep);
+                    return RunPerAtten(opt, perEngine, config);
+                }
+
+                // Diagnostic: isolate the 8496's two 40 dB sections (does the deep-boundary step
+                // follow a specific physical section?). Measures each 40 dB section alone and paired
+                // with the 10 dB section for 50 dB, so section 3 vs 4 can be compared directly.
+                if (opt.SectionTest)
+                {
+                    var secAttn = bench.MakeAttenuator(config);
+                    var secEngine = new MeasurementEngine(bench.Source, bench.Lo, secAttn, bench.Receiver, opt.Sweep);
+                    return RunSectionTest(opt, secEngine, config);
+                }
+
+                // Test 2: a single-frequency relative attenuation sweep in 1 dB steps from
+                // 0 dB to the attenuator's maximum. It reuses the Tuned RF Level relative
+                // method (SET REF at 0 dB normalises the path loss); only the frequency and
+                // attenuation grid differ from a normal sweep.
+                if (opt.AttenSweep)
+                {
+                    opt.Sweep.FreqStartMHz = opt.Sweep.FreqStopMHz = opt.RfPowerFreqMHz;
+                    opt.ExplicitFreq = true;                 // sweep exactly this one frequency
+                    opt.Sweep.AttenStartDb = 0;
+                    if (!opt.ExplicitAstep) opt.Sweep.AttenStepDb = 1;
+                    if (!opt.ExplicitAstop) opt.Sweep.AttenStopDb = config.MaxDecibels;
+                }
 
                 // (Re)build the attenuator with the resolved wiring so dB maps to the
                 // correct sections.
@@ -130,8 +183,12 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.MarkupLine("[green]Mode:[/] HARDWARE (NI-VISA)");
             var sourceLink = Open(opt.AddrSource, disposables);
             var loLink = Open(opt.AddrLo, disposables);
-            // The 8902A's settled read can take ~10 s (averaging), so give it headroom.
-            var rxLink = Open(opt.AddrReceiver, disposables, 30000);
+            // Low-level Tuned RF Level reads are SLOW: at AUTO averaging (4.0SP) the 8902A
+            // ramps averaging far up near its floor (and the converter loss pushes deep
+            // attenuation close to it), so a settled read can take tens of seconds. The
+            // blocking read returns as soon as Data-Ready is set, so a generous timeout just
+            // gives those reads room to complete; only truly-below-floor points hit it.
+            var rxLink = Open(opt.AddrReceiver, disposables, opt.ReceiverTimeoutMs);
             var attLink = Open(opt.AddrAttenuator, disposables);
 
             var source = new Hp8340B(sourceLink);
@@ -171,7 +228,7 @@ namespace HpAttenuator.TestHarness
                 return new SimulatedReceiver(new SimulatedBench());
             }
             AnsiConsole.MarkupLine($"[green]Mode:[/] HARDWARE (8902A @ {opt.AddrReceiver.EscapeMarkup()})");
-            var rx = new Hp8902A(Open(opt.AddrReceiver, disposables, 30000));
+            var rx = new Hp8902A(Open(opt.AddrReceiver, disposables, opt.ReceiverTimeoutMs));
             AnsiConsole.MarkupLine("[grey]Clearing + presetting 8902A...[/]");
             rx.Initialize();   // device clear + preset (no stale errors/SRQ)
             return rx;
@@ -184,8 +241,69 @@ namespace HpAttenuator.TestHarness
         /// move the sensor onto the 8902A CALIBRATION RF POWER OUTPUT, so this pauses and
         /// waits for the operator before calibrating.
         /// </summary>
+        /// <summary>
+        /// Loads the converter cal-factor tables into the 8902A (both the Normal and the
+        /// Frequency-Offset RF-Power tables) and exits. Non-interactive — no sensor to move.
+        /// </summary>
+        private static int RunLoadCalFactors(IMeasuringReceiver receiver)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold]Loading converter cal factors into the 8902A[/]");
+            try
+            {
+                receiver.Reset();
+                receiver.LoadCalFactors(ConverterCalFactors.ReferenceCf, ConverterCalFactors.Default);
+            }
+            catch (Hp8902AException ex)
+            {
+                AnsiConsole.MarkupLine($"  [red]✗ {ex.Message.EscapeMarkup()}[/]");
+                return 1;
+            }
+
+            // Pairs written = a 50 MHz low-frequency anchor + the 2–18 GHz table entries.
+            int pairs = ConverterCalFactors.Default.Count + 1;   // + the 50 MHz anchor pair
+            double refCf = ConverterCalFactors.ReferenceCf;
+            // 37.4SP "table size" counts the stored freq/CF pairs (capped to capacity) plus the REF CF.
+            int normalExpected = Math.Min(pairs, Hp8902A.NormalTableMaxPairs) + 1;
+            int offsetExpected = Math.Min(pairs, Hp8902A.OffsetTableMaxPairs) + 1;
+            AnsiConsole.MarkupLine(
+                $"  [grey]Set REF CF = {refCf:0.#}% + a 50 MHz anchor + {ConverterCalFactors.Default.Count} " +
+                "freq/CF pairs (2–18 GHz) into the Normal and Frequency-Offset tables.[/]");
+            if (pairs > Hp8902A.NormalTableMaxPairs)
+                AnsiConsole.MarkupLine(
+                    $"  [grey]The Normal table caps at {Hp8902A.NormalTableMaxPairs} pairs (instrument spec); " +
+                    $"the top {pairs - Hp8902A.NormalTableMaxPairs} won't fit there — only reachable via the " +
+                    "converter/Offset path anyway.[/]");
+
+            // Verify the load committed: pair count (37.4SP) + Reference Cal Factor (37.5SP) per table.
+            // A correct REF CF is the entry that clears Error 15, so it's the key confirmation.
+            if (receiver is Hp8902A hp)
+            {
+                var (normal, offset, nRef, oRef) = hp.ReadCalFactorTables();
+                string ShowN(int n, int exp) => n == exp ? $"[green]{n}[/]" : $"[red]{n}[/]";
+                string ShowRef(double r) =>
+                    double.IsNaN(r) ? "[red]unreadable[/]"
+                    : Math.Abs(r - refCf) < 0.6 ? $"[green]{r:0.#}%[/]" : $"[red]{r:0.#}%[/]";
+                AnsiConsole.MarkupLine(
+                    $"  Table size (37.4SP, pairs + REF CF): Normal = {ShowN(normal, normalExpected)} (exp {normalExpected}), " +
+                    $"Offset = {ShowN(offset, offsetExpected)} (exp {offsetExpected}).");
+                AnsiConsole.MarkupLine(
+                    $"  REF CF (37.5SP): Normal = {ShowRef(nRef)}, Offset = {ShowRef(oRef)} (exp {refCf:0.#}%).");
+
+                // Leave the receiver in RF POWER so the front panel shows the true post-load state:
+                // if cal factors are properly stored, Error 15 must NOT reappear.
+                hp.SelectRfPower();
+                AnsiConsole.MarkupLine("  [grey]Left the 8902A in RF POWER — check the panel: Error 15 should be gone.[/]");
+            }
+            return 0;
+        }
+
         private static int RunSensorCalInteractive(IMeasuringReceiver receiver)
-            => InteractiveSensorCalibrate(receiver) ? 0 : 1;
+        {
+            if (!InteractiveSensorCalibrate(receiver)) return 1;
+            SensorCalSession.Mark();   // count this toward the session, so measurement runs reuse it
+            return 0;
+        }
 
         /// <summary>
         /// Mandatory before any 8902A measurement: zero the sensor, prompt the operator to
@@ -386,6 +504,328 @@ namespace HpAttenuator.TestHarness
             return all ? 0 : 1;
         }
 
+        // ---- Cal-debug: observe the 8902A status byte vs level -------------
+
+        /// <summary>
+        /// Steps the attenuation and prints the 8902A serial-poll status byte and a Tuned RF
+        /// Level read at each level, WITHOUT issuing CALIBRATE (so it cannot trigger Error
+        /// 35). Reveals how the RECAL/UNCAL status bit tracks the level and where reads floor
+        /// out — the ground truth needed to gate the range calibration correctly.
+        /// </summary>
+        private static int RunCalDebug(HarnessOptions opt, Bench bench)
+        {
+            double freq = opt.RfPowerFreqMHz;
+            var plan = MicrowaveConverter.Plan(freq, bench.Lo.MinFrequencyMHz, bench.Lo.MaxFrequencyMHz);
+
+            bench.Source.SetFrequencyMHz(freq);
+            bench.Source.SetPowerDbm(opt.Sweep.SourcePowerDbm);
+            bench.Source.RfOn();
+            if (plan.Regime == MeasurementRegime.Converted)
+            {
+                bench.Lo.SetFrequencyMHz(plan.LoMHz);
+                bench.Lo.SetPowerDbm(opt.Sweep.LoPowerDbm);
+                bench.Lo.RfOn();
+            }
+            else bench.Lo.RfOff();
+
+            var attenuator = bench.MakeAttenuator(AttenuatorConfig.Default());
+            var rx = bench.Receiver;
+
+            rx.BeginAttenuationMeasurement(freq, plan.Regime, plan.LoMHz);
+            rx.BeginRangeCalibration();   // enable RECAL/UNCAL status bit + free-run
+
+            AnsiConsole.MarkupLine(
+                $"[grey]Cal-debug:[/] {freq:0.###} MHz {plan.Regime}" +
+                (plan.Regime == MeasurementRegime.Converted ? $" (LO {plan.LoMHz:0.##} MHz)" : "") +
+                $", source {opt.Sweep.SourcePowerDbm:0.#} dBm. Steps attenuation and reads the 8902A " +
+                "serial-poll status byte. [bold]No CALIBRATE is issued.[/]");
+            AnsiConsole.MarkupLine("[grey]Status bits: 0x01 DataReady  0x02 HP-IB-err  0x04 InstrErr  " +
+                                   "0x10 OffsetChg  0x20 RECAL/UNCAL  0x40 SRQ[/]");
+            AnsiConsole.WriteLine();
+
+            int settle = Math.Max(opt.Sweep.SettleMs, 300);
+            attenuator.SetAttenuationDb(0);
+            System.Threading.Thread.Sleep(settle);
+            int sbInit = rx.PollStatusByte();
+            rx.SetReference();
+            int sbRef = rx.PollStatusByte();
+            AnsiConsole.MarkupLine($"[grey]After setup @0 dB: SB=0x{sbInit:X2}; after SET REF: SB=0x{sbRef:X2}[/]");
+            AnsiConsole.WriteLine();
+
+            var table = new Table().Border(TableBorder.Rounded);
+            table.AddColumn(new TableColumn("Atten dB").RightAligned());
+            table.AddColumn("SB before");
+            table.AddColumn("RECAL?");
+            table.AddColumn(new TableColumn("Read rel dB").RightAligned());
+            table.AddColumn("SB after");
+
+            for (int atten = 0; atten <= 120; atten += 10)
+            {
+                attenuator.SetAttenuationDb(atten);
+                System.Threading.Thread.Sleep(settle);
+                int sb1 = rx.PollStatusByte();
+
+                string read;
+                try { read = rx.ReadRelativeDb().ToString("0.00", CultureInfo.InvariantCulture); }
+                catch (Hp8902AException ex) { read = $"Err {ex.Code}"; try { rx.ClearError(); } catch { } }
+                catch (Exception ex) { read = ex.GetType().Name; try { rx.ClearError(); } catch { } }
+
+                int sb2 = rx.PollStatusByte();
+                bool recal = (sb1 & 0x20) != 0;
+                table.AddRow($"{atten}", $"0x{sb1:X2}", recal ? "[yellow]yes[/]" : "no",
+                             read.EscapeMarkup(), $"0x{sb2:X2}");
+            }
+            AnsiConsole.Write(table);
+            attenuator.SetAttenuationDb(0);
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Send me this table: it shows whether the RECAL bit (0x20) tracks the " +
+                                   "level and where reads floor out, so the range-cal gating can be fixed.[/]");
+            return 0;
+        }
+
+        // ---- Cal-probe: force one CALIBRATE and trace it ------------------
+
+        /// <summary>
+        /// Sets up Tuned RF Level at 0 dB, takes SET REF, then forces a single CALIBRATE and
+        /// reports the result — distinguishing Error 35 (reference level outside the power
+        /// sensor's range) from Error 31/33 (sensor not zeroed/calibrated). Traces every
+        /// 8902A command with its status byte. No sensor-cal prompt, so it runs unattended.
+        /// </summary>
+        private static int RunCalProbe(HarnessOptions opt, Bench bench)
+        {
+            Hp8902A.DebugLog = s => AnsiConsole.MarkupLine($"[grey]  {s.EscapeMarkup()}[/]");
+
+            double freq = opt.RfPowerFreqMHz;
+            var plan = MicrowaveConverter.Plan(freq, bench.Lo.MinFrequencyMHz, bench.Lo.MaxFrequencyMHz);
+
+            bench.Source.SetFrequencyMHz(freq);
+            bench.Source.SetPowerDbm(opt.Sweep.SourcePowerDbm);
+            bench.Source.RfOn();
+            if (plan.Regime == MeasurementRegime.Converted)
+            {
+                bench.Lo.SetFrequencyMHz(plan.LoMHz);
+                bench.Lo.SetPowerDbm(opt.Sweep.LoPowerDbm);
+                bench.Lo.RfOn();
+            }
+            else bench.Lo.RfOff();
+
+            var attenuator = bench.MakeAttenuator(AttenuatorConfig.Default());
+            var rx = bench.Receiver;
+
+            AnsiConsole.MarkupLine(
+                $"[grey]Cal-probe:[/] {freq:0.###} MHz {plan.Regime}, source {opt.Sweep.SourcePowerDbm:0.#} dBm. " +
+                "Forces one Tuned RF Level CALIBRATE at 0 dB and traces it.");
+            AnsiConsole.MarkupLine("[grey]Error 35 = reference outside the power-sensor range (raise power); " +
+                                   "Error 31/33 = sensor not zeroed/calibrated.[/]");
+            AnsiConsole.WriteLine();
+
+            rx.BeginAttenuationMeasurement(freq, plan.Regime, plan.LoMHz);
+            rx.BeginRangeCalibration();
+            attenuator.SetEngaged(System.Array.Empty<int>());     // 0 dB
+            System.Threading.Thread.Sleep(Math.Max(opt.Sweep.SettleMs, 500));
+            rx.SetReference();
+
+            // Step down and force a CALIBRATE at each level to find where Error 35 first
+            // appears (the manual: as the level drops past the power-sensor's range the
+            // recalibration fails with a "level error").
+            int settle = Math.Max(opt.Sweep.SettleMs, 500);
+            int firstError = -1;
+            foreach (int atten in new[] { 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110 })
+            {
+                attenuator.SetAttenuationDb(atten);
+                System.Threading.Thread.Sleep(settle);
+                int sbBefore = SafePoll(rx);
+                AnsiConsole.MarkupLine($"[grey]CALIBRATE @ {atten} dB (SB before=0x{sbBefore:X2})...[/]");
+                rx.Calibrate();
+                int sbAfter = SafePoll(rx);
+
+                string read;
+                int code = 0;
+                try { read = rx.ReadRelativeDb().ToString("0.00", CultureInfo.InvariantCulture) + " dB"; }
+                catch (Hp8902AException ex) { read = $"Error {ex.Code}"; code = ex.Code; try { rx.ClearError(); } catch { } }
+                catch (Exception ex) { read = ex.GetType().Name; try { rx.ClearError(); } catch { } }
+
+                bool instrErr = (sbAfter & 0x04) != 0;
+                string flag = (code == 35 || instrErr) ? " [red]<-- ERROR 35 / instr-error[/]" : "";
+                AnsiConsole.MarkupLine($"   SB after=0x{sbAfter:X2}, read {read.EscapeMarkup()}{flag}");
+
+                if (firstError < 0 && (code == 35 || code == 34 || instrErr)) { firstError = atten; break; }
+            }
+
+            AnsiConsole.WriteLine();
+            if (firstError < 0)
+                AnsiConsole.MarkupLine("[green]No Error 35 across the probed range — CALIBRATE succeeded at every level.[/]");
+            else
+                AnsiConsole.MarkupLine($"[yellow]CALIBRATE first failed at {firstError} dB — recalibration past this level is " +
+                                       "outside the sensor's range. The fix: range-cal only down to here, then stop (catch it).[/]");
+            return firstError < 0 ? 0 : 1;
+        }
+
+        private static int SafePoll(IMeasuringReceiver rx)
+        {
+            try { return rx.PollStatusByte(); } catch { return 0; }
+        }
+
+        // ---- Test 3: per-attenuator individual settings -------------------
+
+        private static int RunPerAtten(HarnessOptions opt, MeasurementEngine engine, AttenuatorConfig config)
+        {
+            double freq = opt.RfPowerFreqMHz;
+
+            // Split the two attenuators: the 8494 (1 dB steps, 0-11) and the 8496 (10 dB,
+            // 0-110). Exercise each across its own settings with the other bypassed.
+            bool xIsFine = config.XModel.Contains("8494");
+            var fine = xIsFine ? config.X : config.Y;
+            var coarse = xIsFine ? config.Y : config.X;
+            string fineModel = xIsFine ? config.XModel : config.YModel;
+            string coarseModel = xIsFine ? config.YModel : config.XModel;
+
+            var settings = new List<AttenSetting>();
+            for (int v = 1; v <= 11; v++)
+            {
+                var d = CommandBuilder.Solve(fine, v);
+                if (d != null) settings.Add(new AttenSetting(fineModel, v, d));
+            }
+            for (int v = 10; v <= 110; v += 10)
+            {
+                var d = CommandBuilder.Solve(coarse, v);
+                if (d != null) settings.Add(new AttenSetting(coarseModel, v, d));
+            }
+
+            AnsiConsole.MarkupLine(
+                $"[grey]Per-attenuator (Test 3):[/] {freq:0.###} MHz, {settings.Count} points — " +
+                $"{fineModel.EscapeMarkup()} 1-11 dB and {coarseModel.EscapeMarkup()} 10-110 dB, " +
+                "each exercised with the other at 0 dB.");
+            AnsiConsole.WriteLine();
+
+            Action<int, int, AttenPointResult> prog = (i, n, p) =>
+            {
+                string body = p.Error != null
+                    ? $"[red]{p.Error.EscapeMarkup()}[/]"
+                    : $"meas {p.MeasuredAttenuationDb,7:0.00} dB  (err {p.ErrorDb:+0.00;-0.00;0.00})";
+                AnsiConsole.MarkupLine($"  {i,2}/{n}  {p.Group.EscapeMarkup()}  set {p.CommandedDb,3} dB -> {body}");
+            };
+
+            FreqPointResult r = engine.MeasureSettings(freq, settings, prog);
+
+            // Results table grouped by attenuator.
+            var table = new Table().Border(TableBorder.Rounded)
+                .Title($"{freq:0.###} MHz  {r.Regime}".EscapeMarkup());
+            table.AddColumn("Attenuator");
+            table.AddColumn(new TableColumn("Set dB").RightAligned());
+            table.AddColumn("Cmd");
+            table.AddColumn(new TableColumn("Meas dB").RightAligned());
+            table.AddColumn(new TableColumn("Error dB").RightAligned());
+
+            double worst = 0; int errors = 0; string worstWhere = "";
+            foreach (var p in r.Points)
+            {
+                if (p.Error != null)
+                {
+                    errors++;
+                    table.AddRow(p.Group.EscapeMarkup(), p.CommandedDb.ToString(), p.Command.EscapeMarkup(),
+                        "[red]—[/]", $"[red]{p.Error.EscapeMarkup()}[/]");
+                    continue;
+                }
+                if (Math.Abs(p.ErrorDb) > worst) { worst = Math.Abs(p.ErrorDb); worstWhere = $"{p.Group} @ {p.CommandedDb} dB"; }
+                string err = $"{p.ErrorDb:+0.00;-0.00;0.00}";
+                string errCell = Math.Abs(p.ErrorDb) <= opt.ToleranceDb ? $"[green]{err}[/]" : $"[red]{err}[/]";
+                table.AddRow(p.Group.EscapeMarkup(), p.CommandedDb.ToString(), p.Command.EscapeMarkup(),
+                    $"{p.MeasuredAttenuationDb:0.00}", errCell);
+            }
+            AnsiConsole.Write(table);
+
+            try
+            {
+                using var csv = new StreamWriter(opt.CsvPath, false);
+                csv.WriteLine("attenuator,set_db,command,measured_atten_db,error_db,error");
+                foreach (var p in r.Points)
+                    csv.WriteLine(string.Join(",", new[]
+                    {
+                        (p.Group ?? "").Replace(",", ";"), p.CommandedDb.ToString(CultureInfo.InvariantCulture),
+                        p.Command, F(p.MeasuredAttenuationDb), F(p.ErrorDb), (p.Error ?? "").Replace(",", ";")
+                    }));
+            }
+            catch (Exception ex) { AnsiConsole.MarkupLine($"[yellow]CSV not written: {ex.Message.EscapeMarkup()}[/]"); }
+
+            AnsiConsole.WriteLine();
+            bool pass = errors == 0 && worst <= opt.ToleranceDb;
+            var summary = new Table().Border(TableBorder.Heavy);
+            summary.AddColumn("Result"); summary.AddColumn("");
+            summary.AddRow("Attenuators", $"{fineModel}, {coarseModel}".EscapeMarkup());
+            summary.AddRow("Points", r.Points.Count.ToString());
+            summary.AddRow("Worst |error|", $"{worst:0.00} dB  ({worstWhere})".EscapeMarkup());
+            if (errors > 0) summary.AddRow("8902A errors", $"[red]{errors} point(s)[/]");
+            summary.AddRow("Tolerance", $"±{opt.ToleranceDb:0.#} dB");
+            summary.AddRow("CSV", Path.GetFullPath(opt.CsvPath).EscapeMarkup());
+            summary.AddRow("Verdict", pass ? "[green]PASS[/]" : "[red]FAIL[/]");
+            AnsiConsole.Write(summary);
+
+            return pass ? 0 : 1;
+        }
+
+        // ---- Diagnostic: isolate the 8496's two 40 dB sections --------------
+
+        private static int RunSectionTest(HarnessOptions opt, MeasurementEngine engine, AttenuatorConfig config)
+        {
+            double freq = opt.RfPowerFreqMHz;
+            bool xIsFine = config.XModel.Contains("8494");
+            var coarse = (xIsFine ? config.Y : config.X);          // the 8496 (10 dB step) sections
+            string coarseModel = xIsFine ? config.YModel : config.XModel;
+
+            var s10 = coarse.FirstOrDefault(s => s.Decibels == 10);
+            var s40 = coarse.Where(s => s.Decibels == 40).ToList();
+            if (s10 == null || s40.Count < 2)
+            {
+                AnsiConsole.MarkupLine("[red]--section-test needs the 8496 (a 10 dB + two 40 dB sections) — " +
+                                       $"found {coarseModel.EscapeMarkup()}.[/]");
+                return 1;
+            }
+            int d10 = s10.Digit, d3 = s40[0].Digit, d4 = s40[1].Digit; // d3 = section 3, d4 = section 4
+
+            var settings = new List<AttenSetting>
+            {
+                new AttenSetting($"40 via section 3 (digit {d3})", 40, new[] { d3 }),
+                new AttenSetting($"40 via section 4 (digit {d4})", 40, new[] { d4 }),
+                new AttenSetting($"10 (digit {d10})", 10, new[] { d10 }),
+                new AttenSetting($"50 = 10 + section 3 ({d10}+{d3})", 50, new[] { d10, d3 }),
+                new AttenSetting($"50 = 10 + section 4 ({d10}+{d4})", 50, new[] { d10, d4 }),
+            };
+
+            AnsiConsole.MarkupLine(
+                $"[grey]8496 section isolation:[/] {freq:0.###} MHz — comparing the two 40 dB sections " +
+                $"(digit {d3} = section 3 vs digit {d4} = section 4), alone and as 50 dB with the 10 dB (digit {d10}).");
+            AnsiConsole.WriteLine();
+
+            Action<int, int, AttenPointResult> prog = (i, n, p) =>
+            {
+                string body = p.Error != null
+                    ? $"[red]{p.Error.EscapeMarkup()}[/]"
+                    : $"meas {p.MeasuredAttenuationDb,7:0.00} dB  (err {p.ErrorDb:+0.00;-0.00;0.00})";
+                AnsiConsole.MarkupLine($"  {i,2}/{n}  set {p.CommandedDb,3} dB  {p.Group.EscapeMarkup()}  -> {body}");
+            };
+
+            FreqPointResult r = engine.MeasureSettings(freq, settings, prog);
+
+            var table = new Table().Border(TableBorder.Rounded).Title($"{freq:0.###} MHz  {r.Regime}".EscapeMarkup());
+            table.AddColumn("What"); table.AddColumn(new TableColumn("Set dB").RightAligned());
+            table.AddColumn("Cmd"); table.AddColumn(new TableColumn("Meas dB").RightAligned());
+            table.AddColumn(new TableColumn("Error dB").RightAligned());
+            foreach (var p in r.Points)
+            {
+                string measCell = p.Error != null ? $"[red]{p.Error.EscapeMarkup()}[/]" : $"{p.MeasuredAttenuationDb:0.00}";
+                string errCell = p.Error != null ? "[red]—[/]" : $"{p.ErrorDb:+0.00;-0.00;0.00}";
+                table.AddRow(p.Group.EscapeMarkup(), p.CommandedDb.ToString(), p.Command.EscapeMarkup(), measCell, errCell);
+            }
+            AnsiConsole.Write(table);
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[grey]Read section 3 vs section 4: if both ~40 (and both 50s match), the sections are " +
+                "fine and the deep-boundary step is in the MEASUREMENT. If one 40 dB section reads off, that section is the culprit.[/]");
+            return 0;
+        }
+
         // ---- Test 1: single-point RF power readback ------------------------
 
         private static int RunRfPower(HarnessOptions opt, Bench bench)
@@ -572,7 +1012,9 @@ namespace HpAttenuator.TestHarness
         {
             bool anyError = r.Points.Exists(p => p.Error != null);
             string flag = anyError ? "[red]ER[/]" : (r.MaxAbsErrorDb <= tol ? "[green]ok[/]" : "[red]!![/]");
-            string warn = string.IsNullOrEmpty(r.Warning) ? "" : " [yellow](LO-below)[/]";
+            string warn = string.IsNullOrEmpty(r.Warning)
+                ? ""
+                : " [yellow](" + (r.Warning.Length > 60 ? r.Warning.Substring(0, 60) + "…" : r.Warning).EscapeMarkup() + ")[/]";
             // No square brackets in the plain text — Spectre would parse them as markup.
             AnsiConsole.MarkupLine(
                 $"{flag} {r.FreqMHz,9:0.###} MHz  {r.Regime,-9}  " +
@@ -580,5 +1022,13 @@ namespace HpAttenuator.TestHarness
         }
 
         private static string F(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);
+
+        /// <summary>Parses the 8902A 37.4SP table-size response (e.g. "+0000000017E+00") to an int; -1 on failure.</summary>
+        private static int ParseTableSize(string raw)
+        {
+            if (double.TryParse(raw?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+                return (int)Math.Round(v);
+            return -1;
+        }
     }
 }
