@@ -5,12 +5,16 @@ Newest entries first. Format loosely follows [Keep a Changelog](https://keepacha
 
 Working process: one branch **per issue** (stacked on the branch we're already on when a new
 issue starts), a commit for **every change**, and a matching entry here. Branches are **not
-merged to `main` until explicitly approved**, so an entry may describe work still on a feature
-branch (its branch is noted). We merge back up the stack as each branch finishes.
+merged to `main` until explicitly approved**. We merge back up the stack as each branch finishes;
+the branch sub-headings below record which branch each change came from.
 
-## [Unreleased]
+## 2026-07-06 — merged to main: Test 1 + Test 2 attenuation measurement
 
-### branch `issue-12-promote-polled-read` (stacked on `issue-10-completion-handshake`)
+Merged the `test2-atten-sweep → issue-9 → issue-11 → issue-10 → issue-12` stack (issues #1, #5, #7,
+#9, #10, #11, #12) — the hardware-validated relative attenuation sweep and the completion-handshake
+read path.
+
+### `issue-12-promote-polled-read` — #12
 - **Fix #12 — the Data-Ready completion handshake is now the default read path.** Folded the
   trigger → poll status (Data Ready 0x01 / instr-error 0x04 / RECAL 0x20) → read logic into the core
   `Hp8902A.ReadMeasurement`, so *every* read (Tuned RF Level, the 0 dB reference, RF Power / Test 1,
