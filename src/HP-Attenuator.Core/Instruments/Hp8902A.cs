@@ -238,6 +238,7 @@ namespace HpAttenuator.Instruments
             Send("1.0SP");             // auto RF attenuation (keep fixed after cal)
             Send("LG");                // dB display -> bus returns dB
             Send("32.1SP");            // 0.001 dB resolution
+            UnmaskMeasurementStatus(); // so ReadMeasurement's completion poll can see Data Ready
         }
 
         public void BeginRfPowerMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
@@ -251,7 +252,18 @@ namespace HpAttenuator.Instruments
                                        // selected only AFTER the receiver has tuned (Operation
                                        // manual, RF Power) — without it, RF POWER raises Error 15.
             Send("37.0SP");  // automatic cal-factor selection (table loaded separately)
+            UnmaskMeasurementStatus(); // so ReadMeasurement's completion poll can see Data Ready
         }
+
+        /// <summary>
+        /// Unmasks the Status Byte bits the completion handshake polls for — Data Ready (bit 0),
+        /// Instrument Error (bit 2) and RECAL/UNCAL (bit 5), i.e. SF 22.37 (1+4+32; the HP-IB error
+        /// bit 1/weight 2 is permanently set). REQUIRED before any measurement: at power-up / IP the
+        /// 8902A masks every Status Byte bit except HP-IB error (O&amp;C 3-25), so without this a serial
+        /// poll reads 0x00 and <see cref="ReadMeasurement"/> never sees Data Ready — it would burn the
+        /// whole budget on every read.
+        /// </summary>
+        private void UnmaskMeasurementStatus() => Send("22.37SP");
 
         public double ReadRfPowerDbm()
         {
@@ -272,23 +284,23 @@ namespace HpAttenuator.Instruments
         private const int DataReadyPollMs = 250;
 
         /// <summary>How long to watch the status byte for a completed measurement before giving up, ms.
-        /// A stalled read past this propagates as a timeout so the caller can release the bus (#11).</summary>
-        private const int DataReadyBudgetMs = 120000;
+        /// Well above the longest legitimate settled read (~6 s typical, ~12 s near the floor) so a
+        /// real measurement always finishes first; a stalled read past this propagates as a timeout so
+        /// the caller can release the bus (#11) — kept modest so a genuine hang recovers promptly.</summary>
+        private const int DataReadyBudgetMs = 30000;
 
         public void BeginRangeCalibration()
         {
-            // Enable Data Ready (1) + Recal/Uncal (32) in the status byte so a serial poll
-            // reflects when a range needs calibrating (SF 22.NN sums the weighted conditions).
-            Send("22.33SP");
+            UnmaskMeasurementStatus();   // Data Ready + Instr Error + Recal/Uncal in the status byte
             // Free-run trigger so the receiver keeps measuring (and updating RECAL) as the
             // attenuator steps down, rather than waiting for a settled trigger.
             Send("T0");
         }
 
-        /// <summary>Enable RECAL/UNCAL in the status byte (SF 22.33 = Data Ready + Recal/Uncal)
-        /// WITHOUT the free-run trigger, so a serial poll reflects RECAL but the receiver keeps its
-        /// settled (T3) ranging instead of auto-ranging.</summary>
-        public void EnableRecalStatus() => Send("22.33SP");
+        /// <summary>Unmask RECAL/UNCAL (and Data Ready + Instr Error) in the status byte WITHOUT the
+        /// free-run trigger, so a serial poll reflects RECAL but the receiver keeps its settled (T3)
+        /// ranging instead of auto-ranging.</summary>
+        public void EnableRecalStatus() => UnmaskMeasurementStatus();
 
         public bool RecalRequested() => (_link.SerialPoll() & RecalStatusBit) != 0;
 
@@ -365,8 +377,8 @@ namespace HpAttenuator.Instruments
                 if (sb >= 0 && (sb & (DataReadyBit | InstrErrorBit)) != 0) { ready = true; break; }
                 Thread.Sleep(DataReadyPollMs);
             }
-            DebugLog?.Invoke($"8902A DataReady {(ready ? "SET" : "NOT set")} after {sw.ElapsedMilliseconds} ms " +
-                             $"(SB=0x{(sb < 0 ? 0 : sb):X2})");
+            DebugLog?.Invoke($"8902A DataReady {(ready ? "SET" : "NOT set")} after " +
+                             $"{sw.ElapsedMilliseconds / 1000.0:0.0} s (SB=0x{(sb < 0 ? 0 : sb):X2})");
 
             // RECAL set but no result produced → the range needs calibrating at this level.
             if (sb >= 0 && (sb & RecalStatusBit) != 0 && !ready) throw Hp8902AException.Uncal();

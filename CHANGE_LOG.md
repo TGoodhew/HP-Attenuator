@@ -19,6 +19,13 @@ branch (its branch is noted). We merge back up the stack as each branch finishes
   A stalled read past the budget still propagates a timeout so the caller releases the bus (#11).
   Sim PASS across sweep / per-atten / detect / rf-power. **Hardware test matrix still required**
   (Test 1/2/3, `--detect`, direct path < 1300 MHz, multi-freq) before closing #12.
+- **Hardware-matrix fix: unmask the Data Ready status bit in every measurement setup.** The first
+  matrix run showed `--detect` and `--rf-power` burning the full budget per read (`SB=0x00`, correct
+  value but slow): at IP the 8902A masks all status bits except HP-IB error (O&C 3-25), so the
+  completion poll was blind. `BeginAttenuationMeasurement` / `BeginRfPowerMeasurement` now call
+  `UnmaskMeasurementStatus()` (`22.37SP` = Data Ready + Instr Error + RECAL); `EnableRecalStatus` /
+  `BeginRangeCalibration` use the same. Also cut the poll budget 120 s → 30 s (well above the ~12 s
+  worst-case real read) so a genuine hang recovers promptly, and the debug line now prints seconds.
 
 ### branch `issue-10-completion-handshake` (stacked on `issue-11-bus-timeout-crash-safety`)
 - **Defaults: test frequency 5 GHz → 3 GHz, source power 0 → +10 dBm.** The 8494G/8496G step
