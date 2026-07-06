@@ -28,8 +28,12 @@ the branch sub-headings below record which branch each change came from.
   Y dBm` and the CSV gains `leveled_ref_dbm` / `leveled_src_dbm` columns. **Sim PASS** across the
   multi-frequency sweep (reference pinned to −2.0 dBm at every frequency, source stepping −1.36→−1.02
   dBm across 1–13 GHz as path loss rises; max|err| 0.05 dB), the `--no-leveling` control, and
-  `--per-atten`. **Hardware verification pending** (multi-frequency run + confirm the leveled
-  reference reads/sweeps in range at each frequency).
+  `--per-atten`. **HARDWARE PASS (2026-07-06)** — 3/5/7 GHz, 0–60 dB: leveler held the reference in
+  the [−3,−1] dBm window at every frequency and adapted the source per frequency to do it. At 7 GHz
+  the reference came in cold (−4.5 dBm, higher converter loss), so it stepped the source +2.5 dBm and
+  re-read −2.1 dBm; 3/5 GHz were already in-window (−1.3 / −2.7 dBm) so it left the source at 0 dBm —
+  exactly the per-frequency divergence a fixed `--power` can't give. Worst |err| 0.45 dB (the 8496
+  40-dB-pad term), all within ±1.5 dB, verdict PASS.
 
 ## 2026-07-06 — merged to main: Test 1 + Test 2 attenuation measurement
 
