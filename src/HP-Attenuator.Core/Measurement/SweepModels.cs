@@ -26,6 +26,13 @@ namespace HpAttenuator.Measurement
         /// <summary>Attenuation step (dB) used only for the range-calibration pass.</summary>
         public int CalStepDb { get; set; } = 10;
 
+        /// <summary>
+        /// Experimental (issue #10): read each stepping point by triggering, polling the status byte
+        /// for Data Ready (0x01), then retrieving — instead of a single blocking T3 read. Proves
+        /// whether "wait on Data Ready then read" gets a value the blocking read can't at deep levels.
+        /// </summary>
+        public bool UseDataReadyRead { get; set; } = false;
+
         public IEnumerable<double> Frequencies()
         {
             int n = (int)System.Math.Round((FreqStopMHz - FreqStartMHz) / FreqStepMHz) + 1;

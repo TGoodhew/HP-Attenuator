@@ -262,6 +262,12 @@ namespace HpAttenuator.Instruments
         /// <summary>RECAL/UNCAL condition weight in the 8902A status byte (Special Function 22).</summary>
         private const byte RecalStatusBit = 0x20;   // 32 = "Recal or Uncal"
 
+        /// <summary>Data Ready bit in the 8902A status byte — set when a measurement result is ready.</summary>
+        private const byte DataReadyBit = 0x01;
+
+        /// <summary>Serial-poll interval while waiting for Data Ready, ms.</summary>
+        private const int DataReadyPollMs = 250;
+
         public void BeginRangeCalibration()
         {
             // Enable Data Ready (1) + Recal/Uncal (32) in the status byte so a serial poll
@@ -321,6 +327,38 @@ namespace HpAttenuator.Instruments
             // CALIBRATE); otherwise it's a transient (e.g. read before Data-Ready) — rethrow so
             // the caller simply re-reads.
             try { return ReadMeasurement(); }
+            catch (FormatException)
+            {
+                if ((_link.SerialPoll() & RecalStatusBit) != 0) throw Hp8902AException.Uncal();
+                throw;
+            }
+        }
+
+        public double ReadRelativeDbAwaitingDataReady(int budgetMs)
+        {
+            // Experimental #10: trigger a settled measurement, then poll for Data Ready instead of a
+            // single blocking read. At deep levels the blocking T3 read times out without delivering
+            // the result even though the receiver eventually sets Data Ready (SB 0x41). Here we write
+            // the trigger, watch the status byte until 0x01 sets (adaptive budget), THEN read — which
+            // should retrieve the result the blocking read couldn't. Traces the timing under --debug.
+            _link.Write("T3");                       // trigger; do NOT block-read yet
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int sb = -1;
+            bool ready = false;
+            while (sw.ElapsedMilliseconds < budgetMs)
+            {
+                try { sb = _link.SerialPoll(); } catch { sb = -1; }
+                if (sb >= 0 && (sb & RecalStatusBit) != 0) break;     // UNCAL/RECAL — stop, let caller handle
+                if (sb >= 0 && (sb & DataReadyBit) != 0) { ready = true; break; }
+                Thread.Sleep(DataReadyPollMs);
+            }
+            DebugLog?.Invoke($"8902A DataReady {(ready ? "SET" : "NOT set")} after {sw.ElapsedMilliseconds} ms " +
+                             $"(SB=0x{(sb < 0 ? 0 : sb):X2})");
+            if (sb >= 0 && (sb & RecalStatusBit) != 0 && !ready) throw Hp8902AException.Uncal();
+
+            string raw = _link.Read();               // retrieve the now-ready result
+            DebugLog?.Invoke($"8902A read after DataReady: '{raw}'");
+            try { return ParseReading(raw); }
             catch (FormatException)
             {
                 if ((_link.SerialPoll() & RecalStatusBit) != 0) throw Hp8902AException.Uncal();

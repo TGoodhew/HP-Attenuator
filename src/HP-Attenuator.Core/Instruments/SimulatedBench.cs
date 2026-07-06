@@ -202,6 +202,8 @@ namespace HpAttenuator.Instruments
             return level - reference;   // ≤ 0 as attenuation increases
         }
 
+        public double ReadRelativeDbAwaitingDataReady(int budgetMs) => ReadRelativeDb();   // sim: always ready
+
         public double ReadSignalFrequencyMHz()
         {
             if (!_bench.SourceRfOn) throw new Hp8902AException(96, Hp8902AException.Describe(96));

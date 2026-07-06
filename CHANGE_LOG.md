@@ -10,6 +10,15 @@ branch (its branch is noted). We merge back up the stack as each branch finishes
 
 ## [Unreleased]
 
+### branch `issue-10-completion-handshake` (stacked on `issue-11-bus-timeout-crash-safety`)
+- **Probe for #10 — trigger → wait on Data Ready → read.** The `ProbeSignalAfterHang` result proved
+  the 43 dB hang is #10, not #9: signal PRESENT (M5=5000.000 MHz, not lost lock) and SB=0x41
+  (Data Ready set, no RECAL/UNCAL) — the settled level read just won't deliver via a blocking T3
+  read even though Data Ready sets. New experimental read (`--handshake-probe`,
+  `ReadRelativeDbAwaitingDataReady`): triggers, polls the status byte for Data Ready (0x01) up to a
+  budget, then retrieves — tracing the Data-Ready timing under `--debug`. Gated behind the flag so
+  default behaviour is unchanged; sim sweep PASS.
+
 ### branch `issue-11-bus-timeout-crash-safety` (stacked on `issue-9-recal-boundary-calibrate`)
 - **Fix #11 — survive a GPIB timeout and release the held bus.** A read timeout left the 8902A
   holding the bus (its handshake is inhibited until the measurement cycle completes, O&C 3-22);
