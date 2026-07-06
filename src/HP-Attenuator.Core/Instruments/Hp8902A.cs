@@ -255,27 +255,40 @@ namespace HpAttenuator.Instruments
         }
 
         public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
-            TrflDetector detector = TrflDetector.Average)
+            TrflDetector detector = TrflDetector.Average, bool trackMode = false)
         {
             // Manual "Attenuator Measurements" (relative Tuned RF Level, O&C 3-115): S4, tune, pick
-            // the detector, then SET REF (done by the engine). NO Track Mode — its LO feedback loop
-            // keeps adjusting during a CALIBRATE, so the level isn't steady and CALIBRATE fails with
-            // Error 35 ("maintain signal stability during calibration"). The engine calibrates each
-            // range-to-range boundary once, on RECAL, with the attenuator held steady.
+            // the detector/mode, then SET REF (done by the engine).
             Send("S4");      // Tuned RF Level
             if (regime == MeasurementRegime.Converted)
                 Send("27.3SP" + Fmt(loMHz) + "MZ");  // frequency-offset: external LO
             else
                 Send("27.0SP");                      // direct / normal mode
             Send(Fmt(rfMHz) + "MZ");   // manual tune to the fixed frequency
-            // Detector selects noise BW vs depth (O&C, Tuned RF Level ranges). AVERAGE (4.4SP, 30 kHz
-            // BW, floor ~-100 dBm) tolerates the converter/LO path's residual FM; SYNCHRONOUS (4.0SP,
-            // 200 Hz BW, floor ~-127 dBm) reaches the full 110 dB (#14) but its narrow band can lose
-            // lock (Error 96) on a drifty signal. Either way the range-to-range CALIBRATE references
-            // the sensor module (the 11792A, which is in the chain).
-            Send(detector == TrflDetector.Synchronous ? "4.0SP" : "4.4SP");
+
+            if (trackMode)
+            {
+                // Microwave Product Note (low-level microwave TRFL through the converter): Track Mode
+                // (32.9SP) keeps the receiver LOCKED onto the drifting converted signal, which is what
+                // lets it hold down toward the ~-100 dBm converter floor instead of losing lock
+                // (Error 96) partway down. 32.9SP IS 4.4 (IF Average detector) + 8.1 + Log + Track +
+                // offset, so it supersedes the detector arg. Caveat (our earlier Error 35): to
+                // CALIBRATE in Track Mode the level must be held steady (attenuator fixed) during the
+                // CALIBRATE, and reacquisition after a lost lock needs the signal ≥ -80 dBm.
+                Send("32.9SP");        // Track Mode (AVG detector + track + Log + offset)
+            }
+            else
+            {
+                // Detector selects noise BW vs depth (O&C, Tuned RF Level ranges). AVERAGE (4.4SP,
+                // 30 kHz BW) tolerates the converter/LO path's residual FM; SYNCHRONOUS (4.0SP, 200 Hz
+                // BW) has a lower raw floor but its narrow band loses lock on a drifty converted signal
+                // (confirmed #14 — Error 96 below ~-100 dBm). Through the 11793A the practical floor is
+                // ~-100 dBm either way (Microwave Product Note). Range-to-range CALIBRATE references the
+                // sensor module (the 11792A, in the chain).
+                Send(detector == TrflDetector.Synchronous ? "4.0SP" : "4.4SP");
+                Send("LG");            // dB display -> bus returns dB
+            }
             Send("1.0SP");             // auto RF attenuation (keep fixed after cal)
-            Send("LG");                // dB display -> bus returns dB
             Send("32.1SP");            // 0.001 dB resolution
             UnmaskMeasurementStatus(); // so ReadMeasurement's completion poll can see Data Ready
         }

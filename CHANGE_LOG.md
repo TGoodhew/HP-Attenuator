@@ -37,6 +37,21 @@ the branch sub-headings below record which branch each change came from.
   (2 error points, worst |err| 2.68 dB). Next: implement the manual's explicit sequential 3-range
   CALIBRATE (0 / −40 / −80 dBm up front, per O&C Table 4-1) to fix the 80–95 dB drift; the 100–110 dB
   region is likely not directly measurable through this converter path → #15 (per-section sum).
+- **Manual review (11793A + Microwave Product Note) → direct-method redirect.** The **8902A Microwave
+  Product Note** states the converter-path floor twice: *"any power level may be measured between
+  +0 dBm and −100 dBm without further calibration."* So the −100 dBm floor is a property of the
+  **11793A path, not the detector** — the Synchronous detector's −127 dBm spec never applied here, and
+  110 dB (−112 dBm) is physically below the floor by any detector. The Note's prescribed low-level
+  converter method is **Track Mode (SF 32.9 = Average detector + track + Log + offset)**, which holds
+  lock on the drifting converted signal; it also explains the #14 lost-lock (reacquisition needs the
+  signal ≥ −80 dBm, so BC-retune at −102/−112 dBm can't recover). The 11793A wants **+8..+13 dBm LO
+  drive** (we run at the +8 dBm floor). **Increment (Track Mode + configurable LO drive):**
+  `BeginAttenuationMeasurement` gains a `trackMode` flag (sends `32.9SP` in place of the detector +
+  `LG`); `SweepOptions.TrackMode`; harness `--track-mode` and `--lo-power dBm`; the sweep summary names
+  the mode. Sim plumbing PASS; the Track-Mode command sequence (`S4 27.3SP<LO>MZ <f>MZ 32.9SP 1.0SP
+  32.1SP 22.37SP`) verified against the real `Hp8902A`. **Hardware next:** does Track Mode hold lock
+  deeper (toward the ~−100 dBm floor) than the plain Average sweep? Then layer the explicit 3-range
+  CALIBRATE. The full 110 dB stays a #15 (per-section sum) job.
 
 ### branch `issue-4-debug-poll-falseflag` (off `main`) — #4
 - **Fix #4 — the `--debug` trace no longer false-flags a failed serial poll as an INSTRUMENT

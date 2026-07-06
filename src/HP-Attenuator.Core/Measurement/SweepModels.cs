@@ -65,6 +65,14 @@ namespace HpAttenuator.Measurement
         /// </summary>
         public TrflDetector Detector { get; set; } = TrflDetector.Average;
 
+        /// <summary>
+        /// Use 8902A Track Mode (SF 32.9) for the sweep — the Microwave Product Note's low-level
+        /// converter method, which keeps the receiver locked onto the drifting converted signal so it
+        /// can hold down toward the ~−100 dBm converter floor instead of losing lock partway (#14).
+        /// Track Mode implies the Average detector.
+        /// </summary>
+        public bool TrackMode { get; set; } = false;
+
         public IEnumerable<double> Frequencies()
         {
             int n = (int)System.Math.Round((FreqStopMHz - FreqStartMHz) / FreqStepMHz) + 1;

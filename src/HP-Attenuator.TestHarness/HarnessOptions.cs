@@ -103,6 +103,8 @@ namespace HpAttenuator.TestHarness
                     case "--ref-target": o.Sweep.TargetReferenceDbm = D(Need(args, ++i)); break;
                     case "--detector": o.Sweep.Detector = ParseDetector(Need(args, ++i)); break;
                     case "--sync-detector": o.Sweep.Detector = TrflDetector.Synchronous; break;
+                    case "--track-mode": o.Sweep.TrackMode = true; break;
+                    case "--lo-power": o.Sweep.LoPowerDbm = D(Need(args, ++i)); break;
                     case "--astart": o.Sweep.AttenStartDb = I(Need(args, ++i)); break;
                     case "--astop": o.Sweep.AttenStopDb = I(Need(args, ++i)); o.ExplicitAstop = true; break;
                     case "--astep": o.Sweep.AttenStepDb = I(Need(args, ++i)); o.ExplicitAstep = true; break;
@@ -202,6 +204,12 @@ Usage: HP-Attenuator.TestHarness [options]
                                  converter/LO path; sync (4.0SP, 200 Hz BW, floor ~-127 dBm) reaches
                                  the full 110 dB but can lose lock on a drifty signal (#14).
   --sync-detector                Shorthand for --detector sync (the deep-sweep detector).
+  --track-mode                   Use 8902A Track Mode (SF 32.9), the Microwave Product Note's
+                                 low-level converter method: keeps the receiver locked onto the
+                                 drifting converted signal so it holds toward the ~-100 dBm floor
+                                 instead of losing lock partway (#14). Implies the Average detector.
+  --lo-power dBm                 8673B LO drive into the 11793A (default 8; the converter wants
+                                 +8..+13 dBm — try +10..+13 to cut conversion loss).
   --settle ms                    Settle per attenuator step (default 100).
   --tolerance dB                 Pass/fail threshold (default 1.5).
   --read-timeout-ms ms           8902A read timeout (default 60000). Low-level Tuned RF

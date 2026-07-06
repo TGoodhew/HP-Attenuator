@@ -118,9 +118,13 @@ namespace HpAttenuator.Instruments
         /// Begins a Tuned RF Level relative measurement at the given RF frequency, in the
         /// direct or converter (frequency-offset, with LO) regime, using the given IF
         /// <paramref name="detector"/> (Average by default; Synchronous for the deep sweep, #14).
+        /// When <paramref name="trackMode"/> is set, the receiver uses Track Mode (8902A SF 32.9,
+        /// the Microwave Product Note's low-level converter method) to hold lock on the drifting
+        /// converted signal; Track Mode implies the Average detector and supersedes
+        /// <paramref name="detector"/>.
         /// </summary>
         void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
-            TrflDetector detector = TrflDetector.Average);
+            TrflDetector detector = TrflDetector.Average, bool trackMode = false);
 
         /// <summary>
         /// Begins an absolute RF Power measurement at the given RF frequency, in the
