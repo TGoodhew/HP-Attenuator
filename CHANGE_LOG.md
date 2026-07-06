@@ -52,6 +52,22 @@ the branch sub-headings below record which branch each change came from.
   32.1SP 22.37SP`) verified against the real `Hp8902A`. **Hardware next:** does Track Mode hold lock
   deeper (toward the ~−100 dBm floor) than the plain Average sweep? Then layer the explicit 3-range
   CALIBRATE. The full 110 dB stays a #15 (per-section sum) job.
+- **Track Mode result → dropped; implement the manual's 3-range calibration instead.** The
+  `--track-mode --lo-power 12` run produced non-physical data (68 dB "attenuation" at a 10 dB step,
+  readings saturating at ~100 dB, leveler driven to −12 dBm, Error 1 at 100 dB). Root cause: Track
+  Mode is the Product Note's tool for a *drifting, free-running* source; our 8340B/8673B are
+  synthesized (stable), so Track Mode's continuous auto-ranging/auto-leveling just defeats the #16
+  leveler (its reads stop tracking the source) and shifts the fixed SET REF the relative sweep is
+  measured against. Track Mode left in as an (off-by-default) flag but not the path. **Correct method
+  (O&C Table 4-1 / Chapter 5 + Product Note), now implemented:** `RunRangeCalibration` calibrates the
+  **three RF ranges as a dedicated pass BEFORE SET REF** — new `CalibrateRfRanges` steps the signal
+  down from 0 dB in `CalStepDb` (≤10 dB) increments and CALIBRATEs on each RECAL/UNCAL (surfaced by
+  the completion-handshake read, capped at 3 ranges / `RangeCalReachDb`, stops on lost lock), then
+  returns to 0 dB and takes SET REF. This replaces "CALIBRATE only Range 1 at 0 dB and hope RECAL
+  re-fires mid-sweep" — which it didn't (every #14 sweep read `SB=0x41`, no RECAL), leaving Range 2/3
+  on stale factors → the deep positive drift. Sim build/regression PASS (range-cal is hardware-only,
+  off in sim). **Hardware next:** run the plain Average sweep — does the pre-SET-REF 3-range CALIBRATE
+  fire (~3× RECAL on the descent) and flatten the 80–95 dB drift toward the −100 dBm floor?
 
 ### branch `issue-4-debug-poll-falseflag` (off `main`) — #4
 - **Fix #4 — the `--debug` trace no longer false-flags a failed serial poll as an INSTRUMENT

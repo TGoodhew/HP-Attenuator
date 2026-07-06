@@ -494,14 +494,17 @@ namespace HpAttenuator.Measurement
         }
 
         /// <summary>
-        /// Establishes the 0 dB relative reference per the manual's "Attenuator Measurements"
-        /// procedure (O&amp;C 3-115): enable the RECAL status (so the sweep can poll it), CALIBRATE the
-        /// reference (top) RF range at 0 dB while the signal is strong and steady, then take SET REF.
-        /// SET REF latches the current reading, so a settled measurement is triggered first (with no
-        /// free-run there is otherwise no live level to latch, and it stays in absolute dBm). There is
-        /// NO deep pre-pass: only the ~2 range-to-range boundaries need calibrating, and the sweep
-        /// does that on RECAL (see <see cref="MeasureFrequency"/>). <paramref name="setZero"/> sets
-        /// 0 dB (SetAttenuationDb(0) for the sweep, SetEngaged(none) per-attenuator).
+        /// Establishes the 0 dB relative reference per the manual's TRFL Calibration + Attenuator
+        /// Measurement procedure (O&amp;C Table 4-1 / Chapter 5 + Microwave Product Note): enable the
+        /// RECAL status, adaptively level the reference (#16), then — BEFORE taking SET REF —
+        /// **calibrate the three RF measurement ranges** by stepping the signal down and pressing
+        /// CALIBRATE each time RECAL lights (<see cref="CalibrateRfRanges"/>), return to the 0 dB
+        /// reference, and take SET REF. The three-range calibration is a *prerequisite* done as a
+        /// dedicated pass here, NOT during the measurement sweep: the 8902A only flags RECAL for an
+        /// uncalibrated range while descending in the fresh (pre-SET REF) state, so calibrating only
+        /// Range 1 at 0 dB and hoping RECAL re-fires mid-sweep leaves Range 2/3 on stale factors — the
+        /// deep positive drift seen in the #14 sync run. <paramref name="setZero"/> sets 0 dB
+        /// (SetAttenuationDb(0) for the sweep, SetEngaged(none) per-attenuator).
         /// </summary>
         private void RunRangeCalibration(System.Action setZero, FreqPointResult result = null)
         {
@@ -513,23 +516,69 @@ namespace HpAttenuator.Measurement
 
             // Adaptive reference leveling (#16): with the attenuator at 0 dB and the receiver in Tuned
             // RF Level (pre-SET REF, so the read is the ABSOLUTE level), nudge the source so the
-            // reference lands just under the 8902A's 0 dBm ceiling. Done BEFORE the CALIBRATE and SET
-            // REF below so both anchor at the leveled reference.
+            // reference lands just under the 8902A's 0 dBm ceiling. Done BEFORE the range calibration
+            // and SET REF below so both anchor at the leveled reference.
             if (_options.AdaptiveLevel)
                 LevelReference(result);
 
             if (_options.RangeCalibrate)
             {
-                // CALIBRATE the reference range at 0 dB — strong, steady signal, so it succeeds and
-                // gives SET REF a calibrated range to anchor to.
-                try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); }
-                catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
+                // Calibrate all three RF ranges by stepping DOWN and CALIBRATEing on each RECAL, then
+                // come back to the 0 dB reference for SET REF (manual TRFL Calibration, Table 4-1).
+                CalibrateRfRanges();
+                setZero();
+                Settle();
             }
 
             // Prime a settled measurement so SET REF has a live level to latch (manual: "wait for the
             // measurement result to be displayed", then SET REF).
             try { _receiver.ReadRelativeDb(); } catch { /* just priming a measurement for SET REF */ }
             _receiver.SetReference();
+        }
+
+        /// <summary>Range-to-range CALIBRATEs done in the pre-SET-REF pass. The 8902A has three RF
+        /// measurement ranges, so RECAL lights at most three times (once per range) on the way down —
+        /// O&amp;C Table 4-1, "RECAL will only appear three times for each frequency (once for each
+        /// measurement range)".</summary>
+        private const int MaxRfRangeCalibrations = 3;
+
+        /// <summary>
+        /// Calibrates the 8902A's three RF measurement ranges the way the manual prescribes (O&amp;C
+        /// Table 4-1 / Microwave Product Note "Low Level ... Measurements"): step the signal DOWN from
+        /// the 0 dB reference in <see cref="SweepOptions.CalStepDb"/> (≤10 dB) increments and, whenever
+        /// the receiver flags RECAL/UNCAL, press CALIBRATE — holding the level steady (the attenuator
+        /// is set + settled before each CALIBRATE, else Error 35). RECAL is surfaced by the
+        /// completion-handshake read (a bare serial poll misses it — it only shows in the post-trigger
+        /// status, #9). Capped at <see cref="MaxRfRangeCalibrations"/> and <see cref="RangeCalReachDb"/>
+        /// so it never calibrates deeper than the signal can reference (a deep/weak CALIBRATE stores a
+        /// bad factor). Stops early on lost lock (Error 96) — that is past the ~-100 dBm converter
+        /// floor. Leaves the attenuator deep; the caller returns it to 0 dB for SET REF.
+        /// </summary>
+        private void CalibrateRfRanges()
+        {
+            int cals = 0;
+            int start = _options.AttenStartDb;
+            for (int db = start; db <= start + RangeCalReachDb && cals < MaxRfRangeCalibrations; db += _options.CalStepDb)
+            {
+                try { _attenuator.SetAttenuationDb(db); }
+                catch { break; }                       // beyond the attenuator's range — done
+                Settle();
+
+                try { _receiver.ReadRelativeDb(); }    // triggers; throws UNCAL if this range needs calibrating
+                catch (Hp8902AException ex) when (ex.IsUncal)
+                {
+                    // RECAL at this level — CALIBRATE this range (level held steady by the fixed atten).
+                    try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); cals++; }
+                    catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
+                }
+                catch (Hp8902AException ex) when (ex.Code == 96)
+                {
+                    // Lost lock — below the ~-100 dBm converter floor; no point calibrating deeper.
+                    try { _receiver.ClearError(); } catch { /* keep going */ }
+                    break;
+                }
+                catch { /* other transient read — keep descending */ }
+            }
         }
 
         /// <summary>
