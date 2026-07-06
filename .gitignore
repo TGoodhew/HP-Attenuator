@@ -30,6 +30,7 @@ _ReSharper*/
 harness-results.csv
 peratten-*.csv
 *-results.csv
+issue16-hw.csv
 
 ## OS
 Thumbs.db
