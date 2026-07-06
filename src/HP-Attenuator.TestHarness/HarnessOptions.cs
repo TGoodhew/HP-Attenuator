@@ -92,7 +92,6 @@ namespace HpAttenuator.TestHarness
                     case "--x-atten": o.XAttenSteps = Need(args, ++i) == "8496" ? 10 : 1; break;
                     case "--tolerance": o.ToleranceDb = D(Need(args, ++i)); break;
                     case "--read-timeout-ms": o.ReceiverTimeoutMs = I(Need(args, ++i)); break;
-                    case "--handshake-probe": o.Sweep.UseDataReadyRead = true; break;
                     case "--out": o.CsvPath = Need(args, ++i); break;
                     case "--fstart": o.Sweep.FreqStartMHz = D(Need(args, ++i)); o.ExplicitFreq = true; break;
                     case "--fstop": o.Sweep.FreqStopMHz = D(Need(args, ++i)); o.ExplicitFreq = true; break;
@@ -179,9 +178,6 @@ Usage: HP-Attenuator.TestHarness [options]
   --tolerance dB                 Pass/fail threshold (default 1.5).
   --read-timeout-ms ms           8902A read timeout (default 60000). Low-level Tuned RF
                                  Level reads near the floor take tens of seconds.
-  --handshake-probe              Experimental (#10): read each step by trigger -> poll Data
-                                 Ready -> read, instead of a blocking read. Traces the
-                                 Data-Ready timing under --debug.
   --debug                        Trace every 8902A command + the status byte after it, to
                                  pinpoint which command sets an instrument error.
   --out file.csv                 CSV results path (default harness-results.csv).

@@ -59,12 +59,6 @@ namespace HpAttenuator.Measurement
         /// </summary>
         private const int MaxBoundaryCalibrations = 2;
 
-        /// <summary>
-        /// Budget (ms) for the experimental Data-Ready-polled read (issue #10, <c>--handshake-probe</c>):
-        /// how long to watch the status byte for Data Ready after triggering before giving up.
-        /// </summary>
-        private const int DataReadyBudgetMs = 120000;
-
         private readonly ISignalSource _source;
         private readonly ILocalOscillator _lo;
         private readonly IStepAttenuator _attenuator;
@@ -436,14 +430,10 @@ namespace HpAttenuator.Measurement
             {
                 // Honour a pending RECAL before reading — calibrate the boundary at this steady level.
                 MaybeCalibrateBoundary(ref boundaryCals);
-                try
-                {
-                    // Experimental #10: trigger → wait on Data Ready → read, instead of a blocking read
-                    // that times out without delivering the result at deep levels (--handshake-probe).
-                    return _options.UseDataReadyRead
-                        ? _receiver.ReadRelativeDbAwaitingDataReady(DataReadyBudgetMs)
-                        : _receiver.ReadRelativeDb();
-                }
+                // ReadRelativeDb uses the completion handshake (trigger → wait for Data Ready → read),
+                // which is what surfaces the RECAL below and reads deep points the old blocking read
+                // couldn't (issue #10/#12).
+                try { return _receiver.ReadRelativeDb(); }
                 catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
                 {
                     last = ex;

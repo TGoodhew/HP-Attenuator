@@ -170,14 +170,6 @@ namespace HpAttenuator.Instruments
         double ReadRelativeDb();
 
         /// <summary>
-        /// Experimental (issue #10): triggers a settled Tuned RF Level measurement, then polls the
-        /// status byte for Data Ready up to <paramref name="budgetMs"/> and only then retrieves the
-        /// value — instead of a single blocking read that can time out without delivering the result
-        /// at deep levels. Returns dB relative to the reference; throws on an instrument error.
-        /// </summary>
-        double ReadRelativeDbAwaitingDataReady(int budgetMs);
-
-        /// <summary>
         /// Measures the input signal frequency (MHz) — used as a signal-presence check.
         /// Throws <see cref="Hp8902AException"/> (code 96) when no signal is sensed.
         /// </summary>

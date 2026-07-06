@@ -265,8 +265,15 @@ namespace HpAttenuator.Instruments
         /// <summary>Data Ready bit in the 8902A status byte — set when a measurement result is ready.</summary>
         private const byte DataReadyBit = 0x01;
 
+        /// <summary>Instrument-error bit in the 8902A status byte (e.g. Error 96 no-signal).</summary>
+        private const byte InstrErrorBit = 0x04;
+
         /// <summary>Serial-poll interval while waiting for Data Ready, ms.</summary>
         private const int DataReadyPollMs = 250;
+
+        /// <summary>How long to watch the status byte for a completed measurement before giving up, ms.
+        /// A stalled read past this propagates as a timeout so the caller can release the bus (#11).</summary>
+        private const int DataReadyBudgetMs = 120000;
 
         public void BeginRangeCalibration()
         {
@@ -320,50 +327,10 @@ namespace HpAttenuator.Instruments
 
         public double ReadRelativeDb()
         {
-            // LOG relative mode returns dB. When the current level is UNCAL the 8902A does not
-            // return a number — it sends a row of 'C's or an empty/short response — which fails
-            // to parse. Distinguish the two cases by the status byte: RECAL/UNCAL set means the
-            // receiver needs calibrating at this level (surface as IsUncal so the caller can
-            // CALIBRATE); otherwise it's a transient (e.g. read before Data-Ready) — rethrow so
-            // the caller simply re-reads.
-            try { return ReadMeasurement(); }
-            catch (FormatException)
-            {
-                if ((_link.SerialPoll() & RecalStatusBit) != 0) throw Hp8902AException.Uncal();
-                throw;
-            }
-        }
-
-        public double ReadRelativeDbAwaitingDataReady(int budgetMs)
-        {
-            // Experimental #10: trigger a settled measurement, then poll for Data Ready instead of a
-            // single blocking read. At deep levels the blocking T3 read times out without delivering
-            // the result even though the receiver eventually sets Data Ready (SB 0x41). Here we write
-            // the trigger, watch the status byte until 0x01 sets (adaptive budget), THEN read — which
-            // should retrieve the result the blocking read couldn't. Traces the timing under --debug.
-            _link.Write("T3");                       // trigger; do NOT block-read yet
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            int sb = -1;
-            bool ready = false;
-            while (sw.ElapsedMilliseconds < budgetMs)
-            {
-                try { sb = _link.SerialPoll(); } catch { sb = -1; }
-                if (sb >= 0 && (sb & RecalStatusBit) != 0) break;     // UNCAL/RECAL — stop, let caller handle
-                if (sb >= 0 && (sb & DataReadyBit) != 0) { ready = true; break; }
-                Thread.Sleep(DataReadyPollMs);
-            }
-            DebugLog?.Invoke($"8902A DataReady {(ready ? "SET" : "NOT set")} after {sw.ElapsedMilliseconds} ms " +
-                             $"(SB=0x{(sb < 0 ? 0 : sb):X2})");
-            if (sb >= 0 && (sb & RecalStatusBit) != 0 && !ready) throw Hp8902AException.Uncal();
-
-            string raw = _link.Read();               // retrieve the now-ready result
-            DebugLog?.Invoke($"8902A read after DataReady: '{raw}'");
-            try { return ParseReading(raw); }
-            catch (FormatException)
-            {
-                if ((_link.SerialPoll() & RecalStatusBit) != 0) throw Hp8902AException.Uncal();
-                throw;
-            }
+            // LOG relative mode returns dB. ReadMeasurement's completion handshake surfaces a UNCAL
+            // range (RECAL 0x20, or a 'CCCC'/'AAAA' fill) as an Hp8902AException so the caller can
+            // CALIBRATE; a valid level parses to dB.
+            return ReadMeasurement();
         }
 
         public double ReadSignalFrequencyMHz()
@@ -373,11 +340,46 @@ namespace HpAttenuator.Instruments
             return hz / 1e6;
         }
 
+        /// <summary>
+        /// Triggers a settled measurement and retrieves the result using the completion handshake:
+        /// write the trigger, then poll the status byte until the measurement produces something to
+        /// read — Data Ready (0x01), an instrument error (0x04), or RECAL/UNCAL (0x20) — and only then
+        /// read. This replaces the old single blocking <c>Query("T3")</c>, which at deep levels could
+        /// time out WITHOUT delivering the result even though the receiver had set Data Ready, and
+        /// which never surfaced the RECAL that drives the range-boundary CALIBRATE. On RECAL with no
+        /// result it throws UNCAL; otherwise <see cref="ParseReading"/> turns the response into a value
+        /// or the appropriate error. If nothing completes within <see cref="DataReadyBudgetMs"/> the
+        /// read is attempted anyway and any GPIB timeout propagates so the caller can release the bus
+        /// (#11). Verified on hardware via the former <c>--handshake-probe</c>; ~6 s per settled read.
+        /// </summary>
         private double ReadMeasurement()
         {
-            string raw = _link.Query("T3");          // settled trigger, then read
+            _link.Write("T3");                       // trigger; do NOT block-read yet
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int sb = -1;
+            bool ready = false;
+            while (sw.ElapsedMilliseconds < DataReadyBudgetMs)
+            {
+                try { sb = _link.SerialPoll(); } catch { sb = -1; }
+                if (sb >= 0 && (sb & RecalStatusBit) != 0) break;                     // RECAL/UNCAL
+                if (sb >= 0 && (sb & (DataReadyBit | InstrErrorBit)) != 0) { ready = true; break; }
+                Thread.Sleep(DataReadyPollMs);
+            }
+            DebugLog?.Invoke($"8902A DataReady {(ready ? "SET" : "NOT set")} after {sw.ElapsedMilliseconds} ms " +
+                             $"(SB=0x{(sb < 0 ? 0 : sb):X2})");
+
+            // RECAL set but no result produced → the range needs calibrating at this level.
+            if (sb >= 0 && (sb & RecalStatusBit) != 0 && !ready) throw Hp8902AException.Uncal();
+
+            string raw = _link.Read();               // retrieve the now-ready result
+            DebugLog?.Invoke($"8902A read after DataReady: '{raw}'");
             Settle();
-            return ParseReading(raw);
+            try { return ParseReading(raw); }
+            catch (FormatException)
+            {
+                if ((_link.SerialPoll() & RecalStatusBit) != 0) throw Hp8902AException.Uncal();
+                throw;
+            }
         }
 
         private void Settle()

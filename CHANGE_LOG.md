@@ -10,6 +10,16 @@ branch (its branch is noted). We merge back up the stack as each branch finishes
 
 ## [Unreleased]
 
+### branch `issue-12-promote-polled-read` (stacked on `issue-10-completion-handshake`)
+- **Fix #12 — the Data-Ready completion handshake is now the default read path.** Folded the
+  trigger → poll status (Data Ready 0x01 / instr-error 0x04 / RECAL 0x20) → read logic into the core
+  `Hp8902A.ReadMeasurement`, so *every* read (Tuned RF Level, the 0 dB reference, RF Power / Test 1,
+  RF frequency / `--detect`, per-atten / Test 3) uses it — no flag. Removed
+  `ReadRelativeDbAwaitingDataReady`, the `UseDataReadyRead` option and the `--handshake-probe` flag.
+  A stalled read past the budget still propagates a timeout so the caller releases the bus (#11).
+  Sim PASS across sweep / per-atten / detect / rf-power. **Hardware test matrix still required**
+  (Test 1/2/3, `--detect`, direct path < 1300 MHz, multi-freq) before closing #12.
+
 ### branch `issue-10-completion-handshake` (stacked on `issue-11-bus-timeout-crash-safety`)
 - **Defaults: test frequency 5 GHz → 3 GHz, source power 0 → +10 dBm.** The 8494G/8496G step
   attenuators are rated DC–4 GHz, so 5 GHz was out of spec; 3 GHz is in-band. Raising the 8340B to
