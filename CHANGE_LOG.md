@@ -87,6 +87,13 @@ the branch sub-headings below record which branch each change came from.
   the prompt pauses immediately BEFORE that CALIBRATE (RECAL/UNCAL should be lit right then) and
   immediately AFTER (confirm it cleared to a valid reading), so the operator confirms that exact step
   rather than one loose pause bracketing the whole multi-step descent. Sim: no-op, sweep PASS.
+- **CORRECTION via `--panel-review` → filed #17.** The panel-review run **never prompted**, which means
+  no read threw UNCAL during the descent, i.e. **`CalibrateRfRanges` fires zero CALIBRATEs — it's a
+  no-op on the bench.** So the earlier "3-range cal flattened the drift" claim was wrong: the sync→AVG
+  improvement was the detector change + **resident TRFL range factors** from earlier session runs, not
+  a fresh calibration. The direct method is still usable to ~90 dB (AVG holds lock, floor ~−98.7 dBm),
+  but the range calibration isn't actually running. See **#17** (clear TRFL range factors to force a
+  fresh cal, and/or detect range crossings by reading-jump; add observability so a no-op descent shows).
 
 ### branch `issue-4-debug-poll-falseflag` (off `main`) — #4
 - **Fix #4 — the `--debug` trace no longer false-flags a failed serial poll as an INSTRUMENT
