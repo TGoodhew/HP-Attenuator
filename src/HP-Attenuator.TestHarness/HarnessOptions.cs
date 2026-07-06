@@ -173,7 +173,8 @@ Usage: HP-Attenuator.TestHarness [options]
 
   --fstart/--fstop/--fstep MHz   Frequency range/step overrides.
   --astart/--astop/--astep dB    Attenuation range/step overrides.
-  --power dBm                    Source power (default 10).
+  --power dBm                    Source power (default 0 — lands the 0 dB reference just under the
+                                 8902A's 0 dBm ceiling at 3 GHz; higher over-ranges it).
   --settle ms                    Settle per attenuator step (default 100).
   --tolerance dB                 Pass/fail threshold (default 1.5).
   --read-timeout-ms ms           8902A read timeout (default 60000). Low-level Tuned RF

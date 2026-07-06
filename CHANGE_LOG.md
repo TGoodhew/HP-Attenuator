@@ -26,6 +26,13 @@ branch (its branch is noted). We merge back up the stack as each branch finishes
   `UnmaskMeasurementStatus()` (`22.37SP` = Data Ready + Instr Error + RECAL); `EnableRecalStatus` /
   `BeginRangeCalibration` use the same. Also cut the poll budget 120 s → 30 s (well above the ~12 s
   worst-case real read) so a genuine hang recovers promptly, and the debug line now prints seconds.
+- **Default source power +10 dBm → 0 dBm.** The +10 dBm floor-test over-drove the 3 GHz reference to
+  ~+9 dBm — above the 8902A's 0 dBm relative-measurement ceiling — which deterministically hung the
+  sweep at the first range boundary (~12 dB). 0 dBm lands the reference ~−1 dBm (in-range) and the
+  sweep runs clean (0–39 dB within ±0.11, the 8496 40 dB pad's +0.40 at 40 dB, ~6 s/read). The ideal
+  level is frequency-dependent, so a multi-freq sweep will need per-frequency leveling. **#12
+  hardware matrix now complete** — detect, rf-power, and the full sweep all pass through the promoted
+  completion-handshake read.
 
 ### branch `issue-10-completion-handshake` (stacked on `issue-11-bus-timeout-crash-safety`)
 - **Defaults: test frequency 5 GHz → 3 GHz, source power 0 → +10 dBm.** The 8494G/8496G step

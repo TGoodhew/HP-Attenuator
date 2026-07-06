@@ -10,7 +10,12 @@ namespace HpAttenuator.Measurement
         public double FreqStopMHz { get; set; } = 18000.0;
         public double FreqStepMHz { get; set; } = 10.0;
 
-        public double SourcePowerDbm { get; set; } = 10.0;   // 8340B +10 dBm — lifts the 0 dB reference so the receiver floor sits deeper in relative dB
+        // 0 dBm source lands the 0 dB reference ~-1 dBm at the 8902A at 3 GHz — just under its 0 dBm
+        // relative-measurement ceiling. +10 dBm (used to prove the floor moves with level) over-drives
+        // it to ~+9 dBm at 3 GHz, over-ranging the reference and hanging the first range boundary
+        // (~12 dB). NB the ideal level is frequency-dependent (converter loss varies) — a multi-freq
+        // sweep needs per-frequency leveling to keep the reference just below 0 dBm.
+        public double SourcePowerDbm { get; set; } = 0.0;
         public double LoPowerDbm { get; set; } = 8.0; // 11793A wants +8 dBm LO drive (2-18 GHz)
 
         public int AttenStartDb { get; set; } = 0;
