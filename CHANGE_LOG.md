@@ -66,8 +66,16 @@ the branch sub-headings below record which branch each change came from.
   returns to 0 dB and takes SET REF. This replaces "CALIBRATE only Range 1 at 0 dB and hope RECAL
   re-fires mid-sweep" — which it didn't (every #14 sweep read `SB=0x41`, no RECAL), leaving Range 2/3
   on stale factors → the deep positive drift. Sim build/regression PASS (range-cal is hardware-only,
-  off in sim). **Hardware next:** run the plain Average sweep — does the pre-SET-REF 3-range CALIBRATE
-  fire (~3× RECAL on the descent) and flatten the 80–95 dB drift toward the −100 dBm floor?
+  off in sim). **HARDWARE RESULT (2026-07-06, 3 GHz, 0–110 dB / 10 dB, Average detector + 3-range
+  cal): the method works.** Deep drift flattened — 90 dB error +2.68 (sync) → **+1.46**, and that
+  residual is mostly the DUT (both 8496 40-dB pads, +0.35/+0.40 each) not the measurement (measurement
+  error ~+0.6). The **Average detector held lock all the way** — 100/110 dB returned floor readings
+  (~97.6), **no Error 96 lost lock** (opposite of the sync run). Floor confirmed on the bench: readings
+  saturate at ~−97.6 dB rel to the −1.06 dBm reference ≈ **−98.7 dBm absolute**, matching the Product
+  Note's −100 dBm. Leveling normal (ref −1.06 dBm, source unchanged). So the direct method is honest to
+  **~90 dB**, saturating at the converter floor ~95–97 dB — the physical ceiling through this chain.
+  100/110 read the floor (errors −2.6/−12.3 = saturated, not measurement failures → motivates #13 floor
+  detection). **Full 110 dB still needs #15 (per-section sum).**
 
 ### branch `issue-4-debug-poll-falseflag` (off `main`) — #4
 - **Fix #4 — the `--debug` trace no longer false-flags a failed serial poll as an INSTRUMENT
