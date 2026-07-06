@@ -738,7 +738,7 @@ namespace HpAttenuator.TestHarness
 
             try
             {
-                using var csv = new StreamWriter(opt.CsvPath, false);
+                using var csv = OpenCsvWriter(opt.CsvPath);
                 csv.WriteLine("attenuator,set_db,command,measured_atten_db,error_db,error");
                 foreach (var p in r.Points)
                     csv.WriteLine(string.Join(",", new[]
@@ -902,7 +902,7 @@ namespace HpAttenuator.TestHarness
             string worstWhere = "";
 
             StreamWriter csvWriter;
-            try { csvWriter = new StreamWriter(opt.CsvPath, false); }
+            try { csvWriter = OpenCsvWriter(opt.CsvPath); }
             catch (Exception ex)
             {
                 AnsiConsole.MarkupLine($"[red]Cannot open CSV '{opt.CsvPath.EscapeMarkup()}':[/] {ex.Message.EscapeMarkup()}");
@@ -1033,6 +1033,15 @@ namespace HpAttenuator.TestHarness
         }
 
         private static string F(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);
+
+        /// <summary>Opens a truncating StreamWriter for a CSV, creating its parent directory first so
+        /// the default DebugResults/ path (or any --out subfolder) works on a fresh checkout.</summary>
+        private static StreamWriter OpenCsvWriter(string path)
+        {
+            string dir = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            return new StreamWriter(path, false);
+        }
 
         /// <summary>Parses the 8902A 37.4SP table-size response (e.g. "+0000000017E+00") to an int; -1 on failure.</summary>
         private static int ParseTableSize(string raw)

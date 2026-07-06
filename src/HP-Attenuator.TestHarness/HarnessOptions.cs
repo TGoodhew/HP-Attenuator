@@ -38,7 +38,8 @@ namespace HpAttenuator.TestHarness
         public int? XAttenSteps;    // --x-atten 8494|8496 : declare ATTEN X attenuator (skip auto-id)
 
         public double ToleranceDb = 1.5;
-        public string CsvPath = "harness-results.csv";
+        // Run artifacts live in DebugResults/ (git-ignored as a whole), not the repo root.
+        public string CsvPath = "DebugResults/harness-results.csv";
 
         // Low-level Tuned RF Level reads (AUTO averaging near the floor) can take tens of
         // seconds; the VISA read blocks until Data-Ready, so this is mostly headroom.
@@ -189,7 +190,8 @@ Usage: HP-Attenuator.TestHarness [options]
                                  Level reads near the floor take tens of seconds.
   --debug                        Trace every 8902A command + the status byte after it, to
                                  pinpoint which command sets an instrument error.
-  --out file.csv                 CSV results path (default harness-results.csv).
+  --out file.csv                 CSV results path (default DebugResults/harness-results.csv;
+                                 the DebugResults folder is git-ignored). Parent dirs are created.
   --addr-source/-lo/-receiver/-attenuator  VISA resource overrides.
   -h, --help                     This help.";
     }

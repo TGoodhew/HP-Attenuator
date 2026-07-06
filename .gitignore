@@ -26,11 +26,13 @@ packages/
 _ReSharper*/
 *.DotSettings.user
 
-## Test harness output
+## Test harness output — all run artifacts go in DebugResults/ (ignored as a whole)
+DebugResults/*
+!DebugResults/README.md
+# Legacy root-level result CSVs (kept ignored in case an old command writes to the root)
 harness-results.csv
 peratten-*.csv
 *-results.csv
-issue16-hw.csv
 
 ## OS
 Thumbs.db
