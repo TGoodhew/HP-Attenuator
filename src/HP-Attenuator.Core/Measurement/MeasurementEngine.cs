@@ -455,10 +455,18 @@ namespace HpAttenuator.Measurement
                     }
                     else if (he != null && he.IsUncal)
                     {
-                        // UNCAL reading: the manual allows a CALIBRATE only if RECAL is ALSO set ("if
-                        // both the UNCAL and RECAL annunciators are lighted, the instrument can still be
-                        // calibrated"). MaybeCalibrateBoundary checks RECAL, so it's a no-op on pure UNCAL.
-                        MaybeCalibrateBoundary(ref boundaryCals);
+                        // The read reported UNCAL — RECAL (0x20) was set at THIS level (the polled read
+                        // saw it in the post-trigger status byte, SB=0x61). Calibrate this boundary
+                        // DIRECTLY per the manual ("If RECAL is displayed, press CALIBRATE and hold the
+                        // level steady"), respecting the 2-per-frequency cap. Do NOT re-poll
+                        // RecalRequested() here: 0x20 only shows transiently during the measurement, so a
+                        // fresh pre-read poll misses it — that is exactly why #9's pre-read trigger never
+                        // fired. The attenuator is already set + settled, so the level is steady for C1.
+                        if (_options.RangeCalibrate && boundaryCals < MaxBoundaryCalibrations)
+                        {
+                            try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); boundaryCals++; }
+                            catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
+                        }
                     }
                     else
                     {

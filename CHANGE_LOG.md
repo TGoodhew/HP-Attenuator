@@ -18,6 +18,13 @@ branch (its branch is noted). We merge back up the stack as each branch finishes
   `ReadRelativeDbAwaitingDataReady`): triggers, polls the status byte for Data Ready (0x01) up to a
   budget, then retrieves — tracing the Data-Ready timing under `--debug`. Gated behind the flag so
   default behaviour is unchanged; sim sweep PASS.
+- **Reframe from the probe: 43 dB is a RECAL boundary (#9), not slow settling.** With `--handshake-probe`
+  the status byte at 43 dB reads `SB=0x61` = Data Ready + **RECAL (0x20)** — the receiver *is* asking
+  for a CALIBRATE, and Data Ready sets in ~6 s (not minutes). The reason #9 never fired: `0x20` only
+  appears in the *post-trigger* status, so the pre-read `RecalRequested()` poll always missed it.
+  Fix: on an UNCAL read (0x20 seen), `ReadStepWithBoundaryCal` now CALIBRATEs the boundary **directly**
+  (no re-poll), capped at 2/frequency. Needs a hardware run (with `--handshake-probe`) to confirm it
+  calibrates and reads deeper — and whether calibrating there stays accurate or corrupts.
 
 ### branch `issue-11-bus-timeout-crash-safety` (stacked on `issue-9-recal-boundary-calibrate`)
 - **Fix #11 — survive a GPIB timeout and release the held bus.** A read timeout left the 8902A
