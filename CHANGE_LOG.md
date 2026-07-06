@@ -8,9 +8,9 @@ issue starts), a commit for **every change**, and a matching entry here. Branche
 merged to `main` until explicitly approved**. We merge back up the stack as each branch finishes;
 the branch sub-headings below record which branch each change came from.
 
-## Unreleased — not yet merged
+## 2026-07-06 — merged to main: #16 adaptive reference leveling
 
-### branch `issue-16-adaptive-leveling` (stacked on `main`) — #16
+### branch `issue-16-adaptive-leveling` (off `main`) — #16
 - **Adaptive reference leveling — keep the 0 dB reference just under the 8902A's 0 dBm ceiling, per
   frequency.** Before taking SET REF at each frequency, the engine now measures the *absolute* 0 dB
   reference level (new `IMeasuringReceiver.ReadTunedLevelDbm` — the S4/LG Tuned RF Level read is
