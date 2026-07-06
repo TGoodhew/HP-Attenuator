@@ -10,7 +10,7 @@ namespace HpAttenuator.Measurement
         public double FreqStopMHz { get; set; } = 18000.0;
         public double FreqStepMHz { get; set; } = 10.0;
 
-        public double SourcePowerDbm { get; set; } = 0.0;
+        public double SourcePowerDbm { get; set; } = 10.0;   // 8340B +10 dBm — lifts the 0 dB reference so the receiver floor sits deeper in relative dB
         public double LoPowerDbm { get; set; } = 8.0; // 11793A wants +8 dBm LO drive (2-18 GHz)
 
         public int AttenStartDb { get; set; } = 0;

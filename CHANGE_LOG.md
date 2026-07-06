@@ -11,6 +11,11 @@ branch (its branch is noted). We merge back up the stack as each branch finishes
 ## [Unreleased]
 
 ### branch `issue-10-completion-handshake` (stacked on `issue-11-bus-timeout-crash-safety`)
+- **Defaults: test frequency 5 GHz → 3 GHz, source power 0 → +10 dBm.** The 8494G/8496G step
+  attenuators are rated DC–4 GHz, so 5 GHz was out of spec; 3 GHz is in-band. Raising the 8340B to
+  +10 dBm lifts the 0 dB reference so the receiver's ~−100 dBm floor sits deeper in relative dB —
+  tests whether the deep-end error (Part 2) is genuinely the measurement floor. (To propagate up
+  the stack on merge.)
 - **Probe for #10 — trigger → wait on Data Ready → read.** The `ProbeSignalAfterHang` result proved
   the 43 dB hang is #10, not #9: signal PRESENT (M5=5000.000 MHz, not lost lock) and SB=0x41
   (Data Ready set, no RECAL/UNCAL) — the settled level read just won't deliver via a blocking T3

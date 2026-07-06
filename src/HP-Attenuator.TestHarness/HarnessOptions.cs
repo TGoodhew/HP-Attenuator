@@ -13,7 +13,7 @@ namespace HpAttenuator.TestHarness
         public bool Detect;         // --detect   : signal-presence check only (no attenuation sweep)
         public double DetectThresholdDb = 10.0;
         public bool RfPower;        // --rf-power : Test 1 — single-point absolute RF power readback
-        public double RfPowerFreqMHz = 5000.0;  // --freq  : frequency for --rf-power / --atten-sweep (5 GHz)
+        public double RfPowerFreqMHz = 3000.0;  // --freq  : frequency for --rf-power / --atten-sweep (3 GHz — the 8494G/8496G are rated DC-4 GHz)
         public int RfPowerAttenDb = 0;          // --atten : attenuation for --rf-power (default 0 dB)
         public bool AttenSweep;     // --atten-sweep : Test 2 — 1 dB relative attenuation sweep at --freq
         public bool PerAtten;       // --per-atten : Test 3 — exercise each attenuator's settings individually
@@ -157,7 +157,8 @@ Usage: HP-Attenuator.TestHarness [options]
   --per-atten          Test 3: exercise each attenuator's settings individually at --freq —
                        the 8494 at 1..11 dB and the 8496 at 10..110 dB (the other at 0),
                        ~22 points. Isolates each attenuator's accuracy.
-  --freq MHz           Frequency for --rf-power / --atten-sweep (default 5000 = 5 GHz).
+  --freq MHz           Frequency for --rf-power / --atten-sweep (default 3000 = 3 GHz;
+                       the 8494G/8496G attenuators are rated DC-4 GHz).
   --atten dB           Attenuation for --rf-power (default 0).
   --load-cal           Load the converter cal factors into the 8902A (both the Normal and
                        Frequency-Offset tables) and exit. Non-interactive.
@@ -173,7 +174,7 @@ Usage: HP-Attenuator.TestHarness [options]
 
   --fstart/--fstop/--fstep MHz   Frequency range/step overrides.
   --astart/--astop/--astep dB    Attenuation range/step overrides.
-  --power dBm                    Source power (default 0).
+  --power dBm                    Source power (default 10).
   --settle ms                    Settle per attenuator step (default 100).
   --tolerance dB                 Pass/fail threshold (default 1.5).
   --read-timeout-ms ms           8902A read timeout (default 60000). Low-level Tuned RF
