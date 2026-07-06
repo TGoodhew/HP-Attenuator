@@ -21,6 +21,7 @@ namespace HpAttenuator.TestHarness
         public bool SectionTest;    // --section-test : isolate the 8496's two 40 dB sections (digit 7 vs 8)
         public bool CalDebug;       // --cal-debug : observe the 8902A status byte vs level (no CALIBRATE)
         public bool Debug;          // --debug : trace every 8902A command + status byte (find Error 35)
+        public bool PanelReview;    // --panel-review : pause to have the operator read the 8902A front panel
         public bool CalProbe;       // --cal-probe : force one Tuned RF Level CALIBRATE and trace it (hunt Error 35)
         public bool ExplicitAstop;  // user gave --astop (don't auto-fill the attenuator max)
         public bool ExplicitAstep;  // user gave --astep (don't force 1 dB steps)
@@ -76,6 +77,7 @@ namespace HpAttenuator.TestHarness
                     case "--section-test": o.SectionTest = true; break;
                     case "--cal-debug": o.CalDebug = true; break;
                     case "--debug": o.Debug = true; break;
+                    case "--panel-review": o.PanelReview = true; break;
                     case "--cal-probe": o.CalProbe = true; break;
                     case "--freq": o.RfPowerFreqMHz = D(Need(args, ++i)); break;
                     case "--atten": o.RfPowerAttenDb = I(Need(args, ++i)); break;
@@ -216,6 +218,10 @@ Usage: HP-Attenuator.TestHarness [options]
                                  Level reads near the floor take tens of seconds.
   --debug                        Trace every 8902A command + the status byte after it, to
                                  pinpoint which command sets an instrument error.
+  --panel-review                 Pause at key points to have YOU read the 8902A front panel and type
+                                 what it shows (which annunciator lit, errors) — for questions only a
+                                 human at the panel can answer. Pauses before the relevant commands
+                                 and after. Hardware + attended only (ignored in sim / redirected).
   --out file.csv                 CSV results path (default DebugResults/harness-results.csv;
                                  the DebugResults folder is git-ignored). Parent dirs are created.
   --addr-source/-lo/-receiver/-attenuator  VISA resource overrides.

@@ -59,6 +59,20 @@ namespace HpAttenuator.Measurement
         /// </summary>
         private const int MaxBoundaryCalibrations = 2;
 
+        /// <summary>
+        /// Optional hook (the harness wires this on <c>--panel-review</c>): pause the run so the
+        /// operator can start watching the 8902A front panel BEFORE a block of commands the engine is
+        /// about to issue. Null = no pause. Used to answer questions only a human reading the panel
+        /// can (which annunciator lit, etc.).
+        /// </summary>
+        public static Action<string> PanelWatch;
+
+        /// <summary>
+        /// Optional hook (harness-wired on <c>--panel-review</c>): AFTER a block of commands, ask the
+        /// operator what the front panel showed and return their typed answer. Null = skipped.
+        /// </summary>
+        public static Func<string, string> PanelReview;
+
         private readonly ISignalSource _source;
         private readonly ILocalOscillator _lo;
         private readonly IStepAttenuator _attenuator;
@@ -525,7 +539,12 @@ namespace HpAttenuator.Measurement
             {
                 // Calibrate all three RF ranges by stepping DOWN and CALIBRATEing on each RECAL, then
                 // come back to the 0 dB reference for SET REF (manual TRFL Calibration, Table 4-1).
+                // The RECAL/UNCAL annunciator only shows on the panel, so optionally have the operator
+                // watch it (pause BEFORE the descent) and report what they saw (pause AFTER).
+                PanelWatch?.Invoke("the 3-range calibration descent — watch the RECAL and UNCAL annunciators");
                 CalibrateRfRanges();
+                PanelReview?.Invoke("How many times did RECAL/UNCAL light during the descent? " +
+                                    "(expect ~3, one per RF range)");
                 setZero();
                 Settle();
             }

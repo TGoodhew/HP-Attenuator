@@ -54,6 +54,15 @@ namespace HpAttenuator.TestHarness
                 if (bench.IsSimulated) { opt.Sweep.SettleMs = 0; opt.Sweep.RangeCalibrate = false; }
                 if (opt.NoCalPass) opt.Sweep.RangeCalibrate = false;
 
+                // Front-panel review (--panel-review): only on attended hardware. Wire the engine's
+                // pause-before / ask-after hooks to the interactive prompts.
+                if (opt.PanelReview && !bench.IsSimulated)
+                {
+                    FrontPanelReview.Enabled = true;
+                    MeasurementEngine.PanelWatch = FrontPanelReview.Watch;
+                    MeasurementEngine.PanelReview = FrontPanelReview.Ask;
+                }
+
                 if (opt.Detect)
                     return RunDetect(opt, bench);
 

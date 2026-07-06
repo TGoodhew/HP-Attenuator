@@ -76,6 +76,16 @@ the branch sub-headings below record which branch each change came from.
   **~90 dB**, saturating at the converter floor ~95–97 dB — the physical ceiling through this chain.
   100/110 read the floor (errors −2.6/−12.3 = saturated, not measurement failures → motivates #13 floor
   detection). **Full 110 dB still needs #15 (per-section sum).**
+- **Front-panel review capability (`--panel-review`).** New `FrontPanelReview` helper (harness) prints
+  a question, pauses, and captures the operator's typed answer — for questions only a human reading
+  the 8902A front panel can settle (which annunciator lit, an error shown). Supports the pause-BEFORE
+  / pause-AFTER pattern (`Watch` → run commands → `Ask`, or `Observe(...)`) for observations that can
+  only be made after commands issue. The engine exposes `MeasurementEngine.PanelWatch` /
+  `PanelReview` hooks (null by default); the harness wires them to the prompts on `--panel-review`,
+  attended hardware only (guarded by `Console.IsInputRedirected` so sim / unattended / redirected runs
+  never block). First use: wraps the 3-range calibration descent — pauses to have the operator watch
+  the RECAL/UNCAL annunciators, then asks how many times they lit (expect ~3, one per RF range), the
+  direct front-panel confirmation that the manual's range calibration fired. Sim: no-op, sweep PASS.
 
 ### branch `issue-4-debug-poll-falseflag` (off `main`) — #4
 - **Fix #4 — the `--debug` trace no longer false-flags a failed serial poll as an INSTRUMENT
