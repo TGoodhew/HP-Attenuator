@@ -538,13 +538,10 @@ namespace HpAttenuator.Measurement
             if (_options.RangeCalibrate)
             {
                 // Calibrate all three RF ranges by stepping DOWN and CALIBRATEing on each RECAL, then
-                // come back to the 0 dB reference for SET REF (manual TRFL Calibration, Table 4-1).
-                // The RECAL/UNCAL annunciator only shows on the panel, so optionally have the operator
-                // watch it (pause BEFORE the descent) and report what they saw (pause AFTER).
-                PanelWatch?.Invoke("the 3-range calibration descent — watch the RECAL and UNCAL annunciators");
+                // come back to the 0 dB reference for SET REF (manual TRFL Calibration, Table 4-1). The
+                // --panel-review prompts are wrapped tightly around each CALIBRATE inside the descent
+                // (see CalibrateRfRanges), not around the whole multi-step descent.
                 CalibrateRfRanges();
-                PanelReview?.Invoke("How many times did RECAL/UNCAL light during the descent? " +
-                                    "(expect ~3, one per RF range)");
                 setZero();
                 Settle();
             }
@@ -586,9 +583,14 @@ namespace HpAttenuator.Measurement
                 try { _receiver.ReadRelativeDb(); }    // triggers; throws UNCAL if this range needs calibrating
                 catch (Hp8902AException ex) when (ex.IsUncal)
                 {
-                    // RECAL at this level — CALIBRATE this range (level held steady by the fixed atten).
+                    // RECAL/UNCAL at this level — CALIBRATE this range (level held steady by the fixed
+                    // atten). --panel-review wraps THIS step tightly: pause immediately before the
+                    // CALIBRATE (the annunciator should be lit right now) and immediately after (it
+                    // should clear to a valid reading), so the operator confirms this exact step.
+                    PanelWatch?.Invoke($"the CALIBRATE at {db} dB — RECAL/UNCAL should be lit on the panel now");
                     try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); cals++; }
                     catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
+                    PanelReview?.Invoke($"After the CALIBRATE at {db} dB — did RECAL/UNCAL go off and a valid level return?");
                 }
                 catch (Hp8902AException ex) when (ex.Code == 96)
                 {

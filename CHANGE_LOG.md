@@ -83,9 +83,10 @@ the branch sub-headings below record which branch each change came from.
   only be made after commands issue. The engine exposes `MeasurementEngine.PanelWatch` /
   `PanelReview` hooks (null by default); the harness wires them to the prompts on `--panel-review`,
   attended hardware only (guarded by `Console.IsInputRedirected` so sim / unattended / redirected runs
-  never block). First use: wraps the 3-range calibration descent — pauses to have the operator watch
-  the RECAL/UNCAL annunciators, then asks how many times they lit (expect ~3, one per RF range), the
-  direct front-panel confirmation that the manual's range calibration fired. Sim: no-op, sweep PASS.
+  never block). First use: each individual CALIBRATE in the 3-range descent is wrapped **tightly** —
+  the prompt pauses immediately BEFORE that CALIBRATE (RECAL/UNCAL should be lit right then) and
+  immediately AFTER (confirm it cleared to a valid reading), so the operator confirms that exact step
+  rather than one loose pause bracketing the whole multi-step descent. Sim: no-op, sweep PASS.
 
 ### branch `issue-4-debug-poll-falseflag` (off `main`) — #4
 - **Fix #4 — the `--debug` trace no longer false-flags a failed serial poll as an INSTRUMENT
