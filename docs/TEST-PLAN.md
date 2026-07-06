@@ -147,6 +147,29 @@ manual-recommended way to measure an attenuator. `SET REF` at 0 dB is exactly th
 "measured power as relative 0 dBm" normalisation: it captures the current level
 as 0 dB, and every later reading is dB-below-reference = attenuation.
 
+### Detector selection and full-range depth (#14)
+
+Per the 8902A O&C manual (Chapter 5, *Attenuator Measurement*), the wide-range
+method is a **single `SET REF` at 0 dB** then stepping down "in increments of 10 dB
+or less", pressing **CALIBRATE on each RECAL** — RECAL appears exactly **three
+times per frequency**, once per RF measurement range. A single reference plus the
+three range calibrations is designed to span the receiver's whole range; there is
+**no re-referencing / cascaded technique** in the manual.
+
+How deep that reaches is set by the **IF detector** (`--detector`):
+
+| Detector | HP-IB | Noise BW | RF range cal levels | Floor | Use |
+|---|---|---|---|---|---|
+| **Average** (default) | `4.4SP` | 30 kHz | 0 / −15 / −50 dBm | ≈ −100 dBm | robust through the 8673B-LO + converter path (tolerant of residual FM); accurate to ~80–95 dB |
+| **Synchronous** | `4.0SP` | 200 Hz | 0 / −40 / −80 dBm | ≈ −127 dBm | reaches a **full 110 dB** (≈ −112 dBm at a −2 dBm reference); its narrow band can lose lock (Error 96) on a drifty signal |
+
+Reaching the 8496's full **110 dB** needs the **Synchronous** detector — 110 dB of
+attenuation puts the reference-relative level at ≈ −112 dBm, below the Average
+detector's −100 dBm floor. Re-referencing cannot help: `SET REF` only re-zeroes the
+*relative* frame, not the absolute floor or the RF ranging. Run the deep sweep with
+`--sync-detector` (or `--detector sync`); if it can't hold lock through the converter
+path, fall back to Average and accept the ~95 dB ceiling.
+
 ### Preconditions
 
 Same as Test 1: sensor zeroed + calibrated, both cal-factor tables loaded (done

@@ -890,9 +890,12 @@ namespace HpAttenuator.TestHarness
                     ? opt.Sweep.Frequencies().ToList()
                     : HarnessOptions.QuickFrequenciesMHz;
 
+            string detectorTag = opt.Sweep.Detector == TrflDetector.Synchronous
+                ? "synchronous (4.0SP, ~-127 dBm)" : "average (4.4SP, ~-100 dBm)";
             AnsiConsole.MarkupLine(
                 $"[grey]Sweep:[/] {frequencies.Count} freqs, attenuation {opt.Sweep.AttenStartDb}-{opt.Sweep.AttenStopDb} dB " +
-                $"step {opt.Sweep.AttenStepDb}, source {opt.Sweep.SourcePowerDbm:0.#} dBm, tolerance ±{opt.ToleranceDb:0.#} dB");
+                $"step {opt.Sweep.AttenStepDb}, source {opt.Sweep.SourcePowerDbm:0.#} dBm, {detectorTag} detector, " +
+                $"tolerance ±{opt.ToleranceDb:0.#} dB");
             AnsiConsole.WriteLine();
 
             bool detailed = frequencies.Count <= 12;

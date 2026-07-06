@@ -162,8 +162,11 @@ namespace HpAttenuator.Instruments
         public double ZeroSensor() => 2e-10;     // a near-zero residual, watts
         public double CalibrateSensor() => 1.0e-3; // 1.000 mW reference, watts
 
-        public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
+        public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
+            TrflDetector detector = TrflDetector.Average)
         {
+            // The sim floor (-130 dBm) sits below both detectors' real floors, so the detector choice
+            // doesn't change simulated readings — it only exercises the command plumbing / flag wiring.
             _tunedMHz = rfMHz;
             _haveReference = false;
         }

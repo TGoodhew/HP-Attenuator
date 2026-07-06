@@ -254,7 +254,8 @@ namespace HpAttenuator.Instruments
             return reference;         // watts, ≈ 1e-3
         }
 
-        public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
+        public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
+            TrflDetector detector = TrflDetector.Average)
         {
             // Manual "Attenuator Measurements" (relative Tuned RF Level, O&C 3-115): S4, tune, pick
             // the detector, then SET REF (done by the engine). NO Track Mode — its LO feedback loop
@@ -267,9 +268,12 @@ namespace HpAttenuator.Instruments
             else
                 Send("27.0SP");                      // direct / normal mode
             Send(Fmt(rfMHz) + "MZ");   // manual tune to the fixed frequency
-            Send("4.4SP");             // IF AVERAGE detector (30 kHz BW, to -100 dBm) — the manual's
-                                       // low-level detector; range-to-range CALIBRATE needs the sensor
-                                       // module (the 11792A, which is in the chain)
+            // Detector selects noise BW vs depth (O&C, Tuned RF Level ranges). AVERAGE (4.4SP, 30 kHz
+            // BW, floor ~-100 dBm) tolerates the converter/LO path's residual FM; SYNCHRONOUS (4.0SP,
+            // 200 Hz BW, floor ~-127 dBm) reaches the full 110 dB (#14) but its narrow band can lose
+            // lock (Error 96) on a drifty signal. Either way the range-to-range CALIBRATE references
+            // the sensor module (the 11792A, which is in the chain).
+            Send(detector == TrflDetector.Synchronous ? "4.0SP" : "4.4SP");
             Send("1.0SP");             // auto RF attenuation (keep fixed after cal)
             Send("LG");                // dB display -> bus returns dB
             Send("32.1SP");            // 0.001 dB resolution

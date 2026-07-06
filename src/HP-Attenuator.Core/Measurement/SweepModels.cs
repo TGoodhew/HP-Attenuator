@@ -58,6 +58,13 @@ namespace HpAttenuator.Measurement
         /// <summary>Attenuation step (dB) used only for the range-calibration pass.</summary>
         public int CalStepDb { get; set; } = 10;
 
+        /// <summary>
+        /// Which 8902A IF detector the Tuned RF Level sweep uses. Average (default, floor ≈ −100 dBm)
+        /// is robust through the converter/LO path; Synchronous (floor ≈ −127 dBm) is needed to reach
+        /// the full 110 dB but can lose lock on a drifty signal (#14).
+        /// </summary>
+        public TrflDetector Detector { get; set; } = TrflDetector.Average;
+
         public IEnumerable<double> Frequencies()
         {
             int n = (int)System.Math.Round((FreqStopMHz - FreqStartMHz) / FreqStepMHz) + 1;

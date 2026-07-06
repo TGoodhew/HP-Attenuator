@@ -93,7 +93,7 @@ namespace HpAttenuator.Measurement
         public DetectResult DetectSignal(double freqMHz, double thresholdDb = 10.0)
         {
             var plan = Prepare(freqMHz);
-            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz);
+            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector);
             _attenuator.SetAttenuationDb(0);
 
             var r = new DetectResult
@@ -162,7 +162,7 @@ namespace HpAttenuator.Measurement
             int total = (_options.AttenStopDb - _options.AttenStartDb) / _options.AttenStepDb + 1;
             int index = 0;
             var plan = Prepare(freqMHz);
-            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz);
+            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector);
 
             var result = new FreqPointResult
             {
@@ -287,7 +287,7 @@ namespace HpAttenuator.Measurement
         {
             try
             {
-                _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz);
+                _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector);
                 Settle();
                 double f = _receiver.ReadSignalFrequencyMHz();
                 double tolMHz = System.Math.Max(1.0, freqMHz * 0.001);
@@ -318,7 +318,7 @@ namespace HpAttenuator.Measurement
             System.Action<int, int, AttenPointResult> onPoint = null)
         {
             var plan = Prepare(freqMHz);
-            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz);
+            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector);
 
             var result = new FreqPointResult
             {

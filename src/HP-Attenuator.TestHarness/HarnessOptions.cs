@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using HpAttenuator.Instruments;
 using HpAttenuator.Measurement;
 
 namespace HpAttenuator.TestHarness
@@ -100,6 +101,8 @@ namespace HpAttenuator.TestHarness
                     case "--power": o.Sweep.SourcePowerDbm = D(Need(args, ++i)); break;
                     case "--no-leveling": o.Sweep.AdaptiveLevel = false; break;
                     case "--ref-target": o.Sweep.TargetReferenceDbm = D(Need(args, ++i)); break;
+                    case "--detector": o.Sweep.Detector = ParseDetector(Need(args, ++i)); break;
+                    case "--sync-detector": o.Sweep.Detector = TrflDetector.Synchronous; break;
                     case "--astart": o.Sweep.AttenStartDb = I(Need(args, ++i)); break;
                     case "--astop": o.Sweep.AttenStopDb = I(Need(args, ++i)); o.ExplicitAstop = true; break;
                     case "--astep": o.Sweep.AttenStepDb = I(Need(args, ++i)); o.ExplicitAstep = true; break;
@@ -133,6 +136,16 @@ namespace HpAttenuator.TestHarness
 
         private static double D(string s) => double.Parse(s, CultureInfo.InvariantCulture);
         private static int I(string s) => int.Parse(s, CultureInfo.InvariantCulture);
+
+        private static TrflDetector ParseDetector(string s)
+        {
+            switch (s.Trim().ToLowerInvariant())
+            {
+                case "avg": case "average": return TrflDetector.Average;
+                case "sync": case "synchronous": return TrflDetector.Synchronous;
+                default: throw new ArgumentException($"--detector must be avg or sync (got '{s}').");
+            }
+        }
 
         public const string HelpText = @"HP-Attenuator test harness — steps the 8340B across frequency, measures
 power via the 8902A/11793A/8673B chain, sweeps the 11713A attenuator and
@@ -184,6 +197,11 @@ Usage: HP-Attenuator.TestHarness [options]
                                  the 8902A's 0 dBm ceiling — kept in range at every frequency (#16).
   --no-leveling                  Disable adaptive reference leveling; hold --power fixed per
                                  frequency (the pre-#16 behaviour).
+  --detector avg|sync            8902A IF detector for the Tuned RF Level sweep. avg (default,
+                                 4.4SP, 30 kHz BW, floor ~-100 dBm) is robust through the
+                                 converter/LO path; sync (4.0SP, 200 Hz BW, floor ~-127 dBm) reaches
+                                 the full 110 dB but can lose lock on a drifty signal (#14).
+  --sync-detector                Shorthand for --detector sync (the deep-sweep detector).
   --settle ms                    Settle per attenuator step (default 100).
   --tolerance dB                 Pass/fail threshold (default 1.5).
   --read-timeout-ms ms           8902A read timeout (default 60000). Low-level Tuned RF

@@ -10,6 +10,25 @@ the branch sub-headings below record which branch each change came from.
 
 ## Unreleased — not yet merged
 
+### branch `issue-14-synchronous-deep-sweep` (stacked on `issue-4-debug-poll-falseflag`) — #14
+- **#14 — selectable IF detector; Synchronous detector to reach the full 110 dB.** Consulting the
+  8902A O&C manual (Chapter 5, *Attenuator Measurement*) settled the approach: the manual's
+  wide-range method is a **single `SET REF` + CALIBRATE on each of the 3 RECALs (one per RF range)** —
+  there is **no cascaded / re-referenced technique**, and re-referencing can't help because `SET REF`
+  only re-zeroes the *relative* frame, not the absolute floor. The ~80–95 dB wall is the **IF Average
+  detector's −100 dBm floor** (its noisy IF ranges 6/7 start ~−85 dBm), not the attenuator. Reaching
+  110 dB (≈ −112 dBm at a −2 dBm reference) needs the **IF Synchronous detector** (`4.0SP`, 200 Hz BW,
+  floor ≈ −127 dBm). So the sweep detector is now selectable: `IMeasuringReceiver.BeginAttenuationMeasurement`
+  takes a `TrflDetector` (Average `4.4SP` / Synchronous `4.0SP`); `SweepOptions.Detector` (default
+  Average — preserves the validated Test 2 path); harness flags `--detector avg|sync` and
+  `--sync-detector`. The sweep summary line names the active detector. Everything else is unchanged
+  (single SET REF, boundary CALIBRATE on RECAL cap 2, #16 leveling). Sim sweep 0–110 dB PASS on both
+  detectors (the sim floor sits below both, so sim only exercises the command plumbing); the
+  detector→command mapping (`4.0SP`/`4.4SP`) and full S4 setup sequence verified against the real
+  `Hp8902A`. **Hardware verification pending** — the open question is whether the Synchronous detector
+  holds lock through the 8673B-LO + 11793A converter path (why Average was chosen originally); if it
+  loses lock (Error 96), fall back to Average and the ~95 dB ceiling.
+
 ### branch `issue-4-debug-poll-falseflag` (off `main`) — #4
 - **Fix #4 — the `--debug` trace no longer false-flags a failed serial poll as an INSTRUMENT
   ERROR.** `Hp8902A.Send`'s debug annotation ran the status-bit checks on the raw poll result, but a

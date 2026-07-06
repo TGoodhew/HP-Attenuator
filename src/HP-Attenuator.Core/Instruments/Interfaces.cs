@@ -48,6 +48,28 @@ namespace HpAttenuator.Instruments
         string SetEngaged(IEnumerable<int> digits);
     }
 
+    /// <summary>
+    /// Which 8902A IF detector a Tuned RF Level measurement uses. The choice sets both the noise
+    /// bandwidth and the usable depth (8902A O&amp;C, Tuned RF Level ranges):
+    /// <list type="bullet">
+    /// <item><b>Average</b> (SF 4.4, 30 kHz BW) — floor ≈ −100 dBm; tolerant of a noisy / drifting
+    /// source (residual FM), so it holds through the 8673B-LO + 11793A converter path. RF ranges
+    /// calibrate at 0 / −15 / −50 dBm. This is the default for the ≤~95 dB sweeps.</item>
+    /// <item><b>Synchronous</b> (SF 4.0, 200 Hz BW) — floor ≈ −127 dBm, the depth needed to reach a
+    /// full 110 dB (≈ −112 dBm at a −2 dBm reference). RF ranges calibrate at 0 / −40 / −80 dBm. Its
+    /// narrow band needs a spectrally clean signal, so it can lose lock (Error 96) through the
+    /// converter path — used for the deep sweep (#14).</item>
+    /// </list>
+    /// </summary>
+    public enum TrflDetector
+    {
+        /// <summary>IF Average detector (SF 4.4, 30 kHz BW, floor ≈ −100 dBm).</summary>
+        Average,
+
+        /// <summary>IF Synchronous detector (SF 4.0, 200 Hz BW, floor ≈ −127 dBm).</summary>
+        Synchronous
+    }
+
     /// <summary>The two 11713A attenuator ports.</summary>
     public enum AttenuatorBank
     {
@@ -94,9 +116,11 @@ namespace HpAttenuator.Instruments
 
         /// <summary>
         /// Begins a Tuned RF Level relative measurement at the given RF frequency, in the
-        /// direct or converter (frequency-offset, with LO) regime.
+        /// direct or converter (frequency-offset, with LO) regime, using the given IF
+        /// <paramref name="detector"/> (Average by default; Synchronous for the deep sweep, #14).
         /// </summary>
-        void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz);
+        void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
+            TrflDetector detector = TrflDetector.Average);
 
         /// <summary>
         /// Begins an absolute RF Power measurement at the given RF frequency, in the
