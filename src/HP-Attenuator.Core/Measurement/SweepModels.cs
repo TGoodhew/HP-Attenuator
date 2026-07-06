@@ -18,6 +18,33 @@ namespace HpAttenuator.Measurement
         public double SourcePowerDbm { get; set; } = 0.0;
         public double LoPowerDbm { get; set; } = 8.0; // 11793A wants +8 dBm LO drive (2-18 GHz)
 
+        // --- Adaptive reference leveling (#16) ---
+        // Before SET REF at each frequency, measure the absolute 0 dB reference level and nudge the
+        // source so it lands just under the 8902A's 0 dBm relative-measurement ceiling. The ideal
+        // source power is frequency-dependent (11793A converter loss varies with frequency), so one
+        // fixed SourcePowerDbm can't serve a multi-frequency / --full sweep — too hot over-ranges and
+        // hangs the reference, too cold makes a shallow floor. Leveling keeps the reference in range
+        // at every frequency and maximises usable depth. Prerequisite for #14 (segmented sweep).
+
+        /// <summary>Measure and level the 0 dB reference per frequency before SET REF (#16).</summary>
+        public bool AdaptiveLevel { get; set; } = true;
+
+        /// <summary>Target for the leveled 0 dB reference at the 8902A, dBm. Just under the 0 dBm
+        /// ceiling with margin against drift (manual guidance −1 to −3 dBm).</summary>
+        public double TargetReferenceDbm { get; set; } = -2.0;
+
+        /// <summary>Accept the reference without stepping when it is within this of the target, dB.</summary>
+        public double LevelToleranceDb { get; set; } = 1.0;
+
+        /// <summary>Max source-power adjustment iterations per frequency (best-effort; clamps out).</summary>
+        public int MaxLevelIterations { get; set; } = 5;
+
+        /// <summary>Lower clamp on the leveled source power, dBm (8340B usable range / safety).</summary>
+        public double SourcePowerMinDbm { get; set; } = -15.0;
+
+        /// <summary>Upper clamp on the leveled source power, dBm (keep the reference ≤ 0 dBm-safe).</summary>
+        public double SourcePowerMaxDbm { get; set; } = 15.0;
+
         public int AttenStartDb { get; set; } = 0;
         public int AttenStopDb { get; set; } = 110;
         public int AttenStepDb { get; set; } = 10;
@@ -131,7 +158,14 @@ namespace HpAttenuator.Measurement
         public double LoMHz { get; set; }
         public double IfMHz { get; set; }
         public string Warning { get; set; }
-        public double ReferencePowerDbm { get; set; }
+
+        /// <summary>Absolute 0 dB reference level measured at the 8902A after leveling, dBm
+        /// (NaN if leveling was off or the level couldn't be read). See #16.</summary>
+        public double ReferencePowerDbm { get; set; } = double.NaN;
+
+        /// <summary>Source power the leveler settled on for this frequency, dBm (#16).</summary>
+        public double LeveledSourcePowerDbm { get; set; } = double.NaN;
+
         public List<AttenPointResult> Points { get; } = new List<AttenPointResult>();
 
         public double MaxAbsErrorDb

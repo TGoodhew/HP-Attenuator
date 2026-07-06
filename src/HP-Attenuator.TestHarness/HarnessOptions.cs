@@ -97,6 +97,8 @@ namespace HpAttenuator.TestHarness
                     case "--fstop": o.Sweep.FreqStopMHz = D(Need(args, ++i)); o.ExplicitFreq = true; break;
                     case "--fstep": o.Sweep.FreqStepMHz = D(Need(args, ++i)); o.ExplicitFreq = true; break;
                     case "--power": o.Sweep.SourcePowerDbm = D(Need(args, ++i)); break;
+                    case "--no-leveling": o.Sweep.AdaptiveLevel = false; break;
+                    case "--ref-target": o.Sweep.TargetReferenceDbm = D(Need(args, ++i)); break;
                     case "--astart": o.Sweep.AttenStartDb = I(Need(args, ++i)); break;
                     case "--astop": o.Sweep.AttenStopDb = I(Need(args, ++i)); o.ExplicitAstop = true; break;
                     case "--astep": o.Sweep.AttenStepDb = I(Need(args, ++i)); o.ExplicitAstep = true; break;
@@ -174,7 +176,13 @@ Usage: HP-Attenuator.TestHarness [options]
   --fstart/--fstop/--fstep MHz   Frequency range/step overrides.
   --astart/--astop/--astep dB    Attenuation range/step overrides.
   --power dBm                    Source power (default 0 — lands the 0 dB reference just under the
-                                 8902A's 0 dBm ceiling at 3 GHz; higher over-ranges it).
+                                 8902A's 0 dBm ceiling at 3 GHz; higher over-ranges it). With
+                                 adaptive leveling on this is only the starting guess per frequency.
+  --ref-target dBm               Target for the leveled 0 dB reference (default -2). Adaptive
+                                 leveling nudges the source so the reference lands here, just under
+                                 the 8902A's 0 dBm ceiling — kept in range at every frequency (#16).
+  --no-leveling                  Disable adaptive reference leveling; hold --power fixed per
+                                 frequency (the pre-#16 behaviour).
   --settle ms                    Settle per attenuator step (default 100).
   --tolerance dB                 Pass/fail threshold (default 1.5).
   --read-timeout-ms ms           8902A read timeout (default 60000). Low-level Tuned RF

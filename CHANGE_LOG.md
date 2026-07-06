@@ -8,6 +8,29 @@ issue starts), a commit for **every change**, and a matching entry here. Branche
 merged to `main` until explicitly approved**. We merge back up the stack as each branch finishes;
 the branch sub-headings below record which branch each change came from.
 
+## Unreleased — not yet merged
+
+### branch `issue-16-adaptive-leveling` (stacked on `main`) — #16
+- **Adaptive reference leveling — keep the 0 dB reference just under the 8902A's 0 dBm ceiling, per
+  frequency.** Before taking SET REF at each frequency, the engine now measures the *absolute* 0 dB
+  reference level (new `IMeasuringReceiver.ReadTunedLevelDbm` — the S4/LG Tuned RF Level read is
+  absolute dBm until SET REF re-zeroes it) and nudges the 8340B source power so the reference lands
+  in a target window (`--ref-target`, default −2 dBm). The level tracks source power 1:1, so each
+  iteration moves the source by the remaining delta, clamped to the source's usable range; best-effort
+  (aborts on Error 96 / no signal, leaving the source at the last commanded power). Runs inside
+  `RunRangeCalibration` **before** the reference-range CALIBRATE + SET REF, so both anchor at the
+  leveled level, and applies to both the sweep and `--per-atten`. Motivation: converter loss varies
+  with frequency, so one fixed `--power` can't serve a multi-frequency / `--full` run — too hot
+  over-ranges and hangs the reference (the ~12 dB hang at +10 dBm/3 GHz), too cold gives a shallow
+  floor. Prerequisite for #14 (segmented sweep). New flags `--ref-target dBm` and `--no-leveling`
+  (hold `--power` fixed, the pre-#16 behaviour). `FreqPointResult` now carries the achieved
+  `ReferencePowerDbm` + `LeveledSourcePowerDbm`; the per-frequency table/line show `ref X dBm @ src
+  Y dBm` and the CSV gains `leveled_ref_dbm` / `leveled_src_dbm` columns. **Sim PASS** across the
+  multi-frequency sweep (reference pinned to −2.0 dBm at every frequency, source stepping −1.36→−1.02
+  dBm across 1–13 GHz as path loss rises; max|err| 0.05 dB), the `--no-leveling` control, and
+  `--per-atten`. **Hardware verification pending** (multi-frequency run + confirm the leveled
+  reference reads/sweeps in range at each frequency).
+
 ## 2026-07-06 — merged to main: Test 1 + Test 2 attenuation measurement
 
 Merged the `test2-atten-sweep → issue-9 → issue-11 → issue-10 → issue-12` stack (issues #1, #5, #7,

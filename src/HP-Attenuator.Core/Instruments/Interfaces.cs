@@ -170,6 +170,16 @@ namespace HpAttenuator.Instruments
         double ReadRelativeDb();
 
         /// <summary>
+        /// Triggers a settled Tuned RF Level measurement and returns the <b>absolute</b> level in
+        /// dBm — the level BEFORE <see cref="SetReference"/> is taken (S4/LG shows absolute dBm until
+        /// SET REF re-zeroes it to relative dB). Used by adaptive reference leveling (issue #16) to
+        /// read where the 0 dB reference currently sits so the source can be nudged to keep it just
+        /// under the 8902A's 0 dBm relative-measurement ceiling. Throws <see cref="Hp8902AException"/>
+        /// on an instrument error (e.g. 96, no signal).
+        /// </summary>
+        double ReadTunedLevelDbm();
+
+        /// <summary>
         /// Measures the input signal frequency (MHz) — used as a signal-presence check.
         /// Throws <see cref="Hp8902AException"/> (code 96) when no signal is sensed.
         /// </summary>

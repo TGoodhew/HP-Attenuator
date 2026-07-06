@@ -177,7 +177,7 @@ namespace HpAttenuator.Measurement
             // then step the level down and CALIBRATE at each coarse step. The CALIBRATE is
             // CAPPED so it never goes deeper than the signal can be measured — calibrating
             // past that point is the "level error during calibration" (Error 35).
-            RunRangeCalibration(() => _attenuator.SetAttenuationDb(_options.AttenStartDb));
+            RunRangeCalibration(() => _attenuator.SetAttenuationDb(_options.AttenStartDb), result);
 
             // The 8902A SET REF can leave a small residual offset, so we also normalise in
             // software: the reading at the start attenuation defines 0 dB and every reading
@@ -327,7 +327,7 @@ namespace HpAttenuator.Measurement
             };
 
             // 0 dB reference (all sections bypassed) + range calibration, then normalise to it.
-            RunRangeCalibration(() => _attenuator.SetEngaged(System.Array.Empty<int>()));
+            RunRangeCalibration(() => _attenuator.SetEngaged(System.Array.Empty<int>()), result);
 
             bool haveBaseline = false;
             double baselineRelDb = 0.0;
@@ -503,13 +503,20 @@ namespace HpAttenuator.Measurement
         /// does that on RECAL (see <see cref="MeasureFrequency"/>). <paramref name="setZero"/> sets
         /// 0 dB (SetAttenuationDb(0) for the sweep, SetEngaged(none) per-attenuator).
         /// </summary>
-        private void RunRangeCalibration(System.Action setZero)
+        private void RunRangeCalibration(System.Action setZero, FreqPointResult result = null)
         {
             if (_options.RangeCalibrate)
                 _receiver.EnableRecalStatus();       // pollable RECAL, settled reads (no free-run)
 
             setZero();
             Settle();
+
+            // Adaptive reference leveling (#16): with the attenuator at 0 dB and the receiver in Tuned
+            // RF Level (pre-SET REF, so the read is the ABSOLUTE level), nudge the source so the
+            // reference lands just under the 8902A's 0 dBm ceiling. Done BEFORE the CALIBRATE and SET
+            // REF below so both anchor at the leveled reference.
+            if (_options.AdaptiveLevel)
+                LevelReference(result);
 
             if (_options.RangeCalibrate)
             {
@@ -523,6 +530,57 @@ namespace HpAttenuator.Measurement
             // measurement result to be displayed", then SET REF).
             try { _receiver.ReadRelativeDb(); } catch { /* just priming a measurement for SET REF */ }
             _receiver.SetReference();
+        }
+
+        /// <summary>
+        /// Adaptive reference leveling (issue #16). With the attenuator already at its 0 dB reference
+        /// setting and the receiver in Tuned RF Level mode (pre-SET REF, so <see cref="IMeasuringReceiver.ReadTunedLevelDbm"/>
+        /// returns the ABSOLUTE level in dBm), nudges the 8340B source power until the reference lands
+        /// in the target window just under the 8902A's 0 dBm relative-measurement ceiling. The level
+        /// tracks source power 1:1 (both dB), so each step moves the source by the remaining delta,
+        /// clamped to the source's usable range. Converter loss varies with frequency, so one fixed
+        /// <c>--power</c> can't keep the reference in range across a multi-frequency / <c>--full</c>
+        /// sweep — too hot over-ranges and hangs the reference (the ~12 dB hang at +10 dBm/3 GHz), too
+        /// cold gives a shallow floor. Best-effort: if the level can't be read (e.g. Error 96, no
+        /// signal) it leaves the source at the last commanded power and returns NaN. Records the
+        /// achieved reference and settled source power on <paramref name="result"/>.
+        /// </summary>
+        private double LevelReference(FreqPointResult result)
+        {
+            double power = _options.SourcePowerDbm;   // Prepare() already commanded this baseline
+            double target = _options.TargetReferenceDbm;
+            double achieved = double.NaN;
+
+            for (int iter = 0; iter <= _options.MaxLevelIterations; iter++)
+            {
+                double level;
+                try { level = _receiver.ReadTunedLevelDbm(); }
+                catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
+                {
+                    // No settled absolute level (e.g. lost lock / no signal). Abort leveling and let
+                    // the sweep surface the fault; leave the source at the last commanded power.
+                    try { _receiver.ClearError(); } catch { /* keep going */ }
+                    break;
+                }
+                achieved = level;
+
+                double delta = target - level;                               // dB the reference must move
+                if (System.Math.Abs(delta) <= _options.LevelToleranceDb) break;   // in the window — done
+
+                double next = System.Math.Max(_options.SourcePowerMinDbm,
+                              System.Math.Min(_options.SourcePowerMaxDbm, power + delta));
+                if (System.Math.Abs(next - power) < 1e-3) break;             // clamped — no further move
+                power = next;
+                _source.SetPowerDbm(power);
+                Settle();
+            }
+
+            if (result != null)
+            {
+                result.ReferencePowerDbm = achieved;
+                result.LeveledSourcePowerDbm = power;
+            }
+            return achieved;
         }
 
         private LoPlan Prepare(double freqMHz)

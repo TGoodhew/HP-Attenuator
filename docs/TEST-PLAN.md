@@ -158,14 +158,20 @@ by the mandatory sensor-cal step). Source 5 GHz at 0 dBm through the converter
 1. Source 5 GHz / 0 dBm; converter + LO as Test 1.
 2. Configure the 8902A for **Tuned RF Level** at 5 GHz (offset mode): `S4`,
    `27.3SP 5120.53 MZ`, `5000 MZ`, `4.0SP`, `1.0SP`, `LG`, `32.1SP`.
-3. **3-point range calibration** (hardware): step the attenuator down coarsely
+3. **Adaptive reference leveling** (#16, on by default): at **0 dB**, read the
+   *absolute* Tuned RF Level and nudge the 8340B so the reference lands just under
+   the 8902A's 0 dBm ceiling (`--ref-target`, default −2 dBm). This keeps the
+   reference in range at every frequency (converter loss is frequency-dependent, so
+   one fixed `--power` can't serve a multi-frequency / `--full` sweep) and maximises
+   the usable depth. `--no-leveling` holds `--power` fixed instead.
+4. **3-point range calibration** (hardware): step the attenuator down coarsely
    (~10 dB), issuing `CALIBRATE` whenever RECAL lights, so each 8902A RF range is
    calibrated. Capped so the level stays ≥ −100 dBm.
-4. At **0 dB**, `SET REF` (special function 26) — the relative 0 dB reference.
-5. Step the 11713A **0 → max (121 dB) in 1 dB steps**; at each step take a
+5. At **0 dB**, `SET REF` (special function 26) — the relative 0 dB reference.
+6. Step the 11713A **0 → max (121 dB) in 1 dB steps**; at each step take a
    settled Tuned RF Level reading. **Attenuation = −(relative dB)**; error =
    measured − commanded.
-6. Report per-step measured attenuation and error, plus a worst-error PASS/FAIL.
+7. Report per-step measured attenuation and error, plus a worst-error PASS/FAIL.
 
 ### Expected result
 

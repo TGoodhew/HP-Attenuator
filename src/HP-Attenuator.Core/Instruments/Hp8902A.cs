@@ -345,6 +345,14 @@ namespace HpAttenuator.Instruments
             return ReadMeasurement();
         }
 
+        public double ReadTunedLevelDbm()
+        {
+            // Before SET REF the S4/LG Tuned RF Level reading IS the absolute level in dBm (SET REF
+            // later re-zeroes it to relative dB). Same settled-read path as ReadRelativeDb; the only
+            // difference is the caller reads it BEFORE taking the reference, for #16 leveling.
+            return ReadMeasurement();
+        }
+
         public double ReadSignalFrequencyMHz()
         {
             Send("M5");                       // RF Frequency measurement

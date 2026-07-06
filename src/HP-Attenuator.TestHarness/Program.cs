@@ -911,7 +911,7 @@ namespace HpAttenuator.TestHarness
 
             using (var csv = csvWriter)
             {
-                csv.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,commanded_db,command,measured_rel_db,measured_atten_db,expected_atten_db,error_db,error");
+                csv.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,leveled_ref_dbm,leveled_src_dbm,commanded_db,command,measured_rel_db,measured_atten_db,expected_atten_db,error_db,error");
 
                 foreach (double freq in frequencies)
                 {
@@ -937,6 +937,7 @@ namespace HpAttenuator.TestHarness
                         csv.WriteLine(string.Join(",", new[]
                         {
                             F(r.FreqMHz), r.Regime.ToString(), F(r.LoMHz), F(r.IfMHz),
+                            F(r.ReferencePowerDbm), F(r.LeveledSourcePowerDbm),
                             p.CommandedDb.ToString(CultureInfo.InvariantCulture), p.Command,
                             F(p.MeasuredRelativeDb), F(p.MeasuredAttenuationDb),
                             F(p.ExpectedAttenuationDb), F(p.ErrorDb),
@@ -977,7 +978,8 @@ namespace HpAttenuator.TestHarness
         {
             var header = $"{r.FreqMHz:0.###} MHz  {r.Regime}" +
                          (r.Regime == MeasurementRegime.Converted
-                             ? $"  LO={r.LoMHz:0.##} MHz IF={r.IfMHz:0.##} MHz" : "");
+                             ? $"  LO={r.LoMHz:0.##} MHz IF={r.IfMHz:0.##} MHz" : "") +
+                         LevelTag(r);
 
             var table = new Table().Border(TableBorder.Rounded).Title(header.EscapeMarkup());
             table.AddColumn(new TableColumn("Set dB").RightAligned());
@@ -1018,7 +1020,16 @@ namespace HpAttenuator.TestHarness
             // No square brackets in the plain text — Spectre would parse them as markup.
             AnsiConsole.MarkupLine(
                 $"{flag} {r.FreqMHz,9:0.###} MHz  {r.Regime,-9}  " +
-                $"max|err|={r.MaxAbsErrorDb:0.00} dB{warn}");
+                $"max|err|={r.MaxAbsErrorDb:0.00} dB{LevelTag(r)}{warn}");
+        }
+
+        /// <summary>Compact "ref X dBm @ src Y dBm" tag for the leveled 0 dB reference (#16); empty
+        /// when leveling was off / the reference level wasn't captured.</summary>
+        private static string LevelTag(FreqPointResult r)
+        {
+            if (double.IsNaN(r.ReferencePowerDbm)) return "";
+            string src = double.IsNaN(r.LeveledSourcePowerDbm) ? "" : $" @ src {r.LeveledSourcePowerDbm:+0.0;-0.0;0.0} dBm";
+            return $"  ref {r.ReferencePowerDbm:+0.0;-0.0;0.0} dBm{src}";
         }
 
         private static string F(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);

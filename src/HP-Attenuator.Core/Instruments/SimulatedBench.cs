@@ -202,6 +202,14 @@ namespace HpAttenuator.Instruments
             return level - reference;   // ≤ 0 as attenuation increases
         }
 
+        public double ReadTunedLevelDbm()
+        {
+            // Absolute level in dBm (pre-SET REF equivalent) — what #16 leveling reads to place the
+            // reference. Mirrors real hardware: Error 96 when the source is off / no signal.
+            if (!_bench.SourceRfOn) throw new Hp8902AException(96, Hp8902AException.Describe(96));
+            return _bench.MeasuredLevelDbm();
+        }
+
         public double ReadSignalFrequencyMHz()
         {
             if (!_bench.SourceRfOn) throw new Hp8902AException(96, Hp8902AException.Describe(96));
