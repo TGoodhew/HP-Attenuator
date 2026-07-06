@@ -248,11 +248,18 @@ namespace HpAttenuator.Measurement
                         // relative reference, so continuing would only log garbage. Waiting for
                         // measurement completion instead of a blind timeout is issue #10.
                         try { _receiver.ReleaseBus(); } catch { /* best effort */ }
+
+                        // DIAGNOSTIC (#9 vs #10): the bus is now free but we don't know WHY the read
+                        // hung. Re-establish the context and do an M5 RF-frequency read — the counter
+                        // sees a signal at lower levels than a settled Tuned RF Level, so it tells us
+                        // whether the receiver still has the signal (level just wouldn't settle → a
+                        // re-range / #10 completion problem) or lost it entirely (Error 96 → lost lock).
+                        string probe = ProbeSignalAfterHang(freqMHz, plan);
+                        point.Error = $"{point.Error} | {probe}";
                         result.Points.Add(point);
                         onPoint?.Invoke(++index, total, point);
                         result.Warning = $"stopped at {atten} dB — the 8902A read timed out and held the " +
-                                         "GPIB bus; released it and ended the sweep (deeper points are " +
-                                         "unmeasurable at the fixed read timeout).";
+                                         $"GPIB bus; released it and ended the sweep. {probe}";
                         break;
                     }
 
@@ -264,6 +271,41 @@ namespace HpAttenuator.Measurement
                 onPoint?.Invoke(++index, total, point);
             }
             return result;
+        }
+
+        /// <summary>
+        /// Diagnostic probe (issues #9/#10): after a read timed out and <see cref="IMeasuringReceiver.ReleaseBus"/>
+        /// reset the receiver, re-establish the measurement context and do an M5 RF-frequency read as a
+        /// signal-presence check at the failing attenuation. The frequency counter detects a signal at
+        /// lower levels than a settled Tuned RF Level, so this separates two very different faults:
+        /// "signal PRESENT — the level measurement just wouldn't settle / re-ranged" (points at #10, the
+        /// measurement-completion handshake) versus "signal LOST (Error 96) — the receiver lost lock"
+        /// (points at needing the boundary CALIBRATE / lock-holding). Returns a short human string for
+        /// the point's error text; never throws (best-effort diagnostic).
+        /// </summary>
+        private string ProbeSignalAfterHang(double freqMHz, LoPlan plan)
+        {
+            try
+            {
+                _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz);
+                Settle();
+                double f = _receiver.ReadSignalFrequencyMHz();
+                double tolMHz = System.Math.Max(1.0, freqMHz * 0.001);
+                return System.Math.Abs(f - freqMHz) <= tolMHz
+                    ? $"post-hang probe: signal PRESENT (M5={f:F3} MHz) — receiver still sees the signal, " +
+                      "the level measurement wouldn't settle (re-range / #10)"
+                    : $"post-hang probe: signal at {f:F3} MHz vs expected {freqMHz:F0} MHz — off-frequency/mistuned";
+            }
+            catch (Hp8902AException ex)
+            {
+                return ex.Code == 96
+                    ? "post-hang probe: signal LOST (Error 96) — receiver lost lock at this level"
+                    : $"post-hang probe: {ex.Message}";
+            }
+            catch (System.Exception ex)
+            {
+                return "post-hang probe failed: " + ex.GetType().Name;
+            }
         }
 
         /// <summary>

@@ -20,6 +20,10 @@ branch (its branch is noted). We merge back up the stack as each branch finishes
   drops the relative reference). Removed the now-dead `FloorStopCount` accumulation. The real cure
   (wait for measurement completion instead of a blind fixed timeout) is #10. Sim sweep unchanged
   (PASS, max|err| 0.05 dB).
+- **Diagnostic probe (#9 vs #10).** On a read timeout, after releasing the bus, re-establish the
+  context and do an M5 RF-frequency read as a signal-presence check at the failing attenuation
+  (`ProbeSignalAfterHang`). Logs "signal PRESENT — level wouldn't settle (re-range/#10)" vs "signal
+  LOST (Error 96) — lost lock", so the 43 dB hang classifies itself in the run output.
 
 ### branch `issue-9-recal-boundary-calibrate` (stacked on `test2-atten-sweep`)
 - **Fix #9 — CALIBRATE range boundaries on RECAL during the sweep, per the manual.** The 8902A
