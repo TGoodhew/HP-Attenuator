@@ -8,6 +8,23 @@ issue starts), a commit for **every change**, and a matching entry here. Branche
 merged to `main` until explicitly approved**. We merge back up the stack as each branch finishes;
 the branch sub-headings below record which branch each change came from.
 
+## Unreleased — not yet merged
+
+### branch `issue-4-debug-poll-falseflag` (off `main`) — #4
+- **Fix #4 — the `--debug` trace no longer false-flags a failed serial poll as an INSTRUMENT
+  ERROR.** `Hp8902A.Send`'s debug annotation ran the status-bit checks on the raw poll result, but a
+  failed/thrown poll leaves `sb = -1`, and `-1 & 0x04 == 0x04` in two's-complement — so *every*
+  failed poll printed `<-- INSTRUMENT ERROR (0x04)` (and would have false-flagged RECAL/UNCAL too).
+  The checks are now guarded to `sb >= 0`; a `-1` prints `<-- serial poll failed (instrument busy?)`
+  instead. The poll transiently fails on the first `27.3SP<LO>MZ` (frequency-offset entry) right
+  after `S4` because the 8902A is briefly busy reconfiguring (benign — every later command polls
+  cleanly and the measurement proceeds), so a new `PollStatusForTrace` retries the poll once after a
+  200 ms settle, which usually catches the settled `SB=0x00`. Debug-path only — no change to the
+  measurement hot path. Validated against the real `Hp8902A.Send` with a stub link: a failed poll
+  reads "serial poll failed" (not INSTRUMENT ERROR), a fail-then-succeed poll recovers to `SB=0x00`,
+  a genuine `0x04` still flags INSTRUMENT ERROR, and `0x20` still annotates RECAL/UNCAL. Sim sweep
+  PASS (no regression). Full-hardware `--debug` trace confirmation pending.
+
 ## 2026-07-06 — merged to main: #16 adaptive reference leveling
 
 ### branch `issue-16-adaptive-leveling` (off `main`) — #16

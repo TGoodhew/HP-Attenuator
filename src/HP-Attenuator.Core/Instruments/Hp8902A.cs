@@ -50,12 +50,47 @@ namespace HpAttenuator.Instruments
         {
             _link.Write(command);
             if (DebugLog == null) return;
-            int sb = -1;
-            try { sb = _link.SerialPoll(); } catch { /* ignore poll failure */ }
-            string flags = sb < 0 ? "?" : $"0x{sb:X2}";
-            string note = (sb & 0x04) != 0 ? "  <-- INSTRUMENT ERROR (0x04)"
-                        : (sb & 0x20) != 0 ? "  (RECAL/UNCAL 0x20)" : "";
+
+            int sb = PollStatusForTrace();
+
+            // A failed poll returns sb = -1. Do NOT run the flag checks on it: -1 & 0x04 == 0x04 in
+            // two's-complement, so the old code printed "INSTRUMENT ERROR" for *every* failed poll
+            // (and would have false-flagged RECAL/UNCAL too) — issue #4. A -1 means the poll didn't
+            // answer, not that the instrument errored, so label it as such.
+            string flags, note;
+            if (sb < 0)
+            {
+                flags = "?";
+                note = "  <-- serial poll failed (instrument busy?)";
+            }
+            else
+            {
+                flags = $"0x{sb:X2}";
+                note = (sb & 0x04) != 0 ? "  <-- INSTRUMENT ERROR (0x04)"
+                     : (sb & 0x20) != 0 ? "  (RECAL/UNCAL 0x20)" : "";
+            }
             DebugLog($"8902A < {command,-14} SB={flags}{note}");
+        }
+
+        /// <summary>Delay before the single debug-trace poll retry, ms (#4).</summary>
+        private const int TracePollRetryMs = 200;
+
+        /// <summary>
+        /// Serial-polls the status byte for the debug trace, retrying once after a short settle. The
+        /// poll transiently fails right after entering frequency-offset mode (<c>27.3SP&lt;LO&gt;MZ</c>
+        /// following <c>S4</c>): the 8902A is briefly busy reconfiguring and doesn't answer within the
+        /// VISA timeout (issue #4). It is benign — every later command polls cleanly and the
+        /// measurement proceeds — so a single retry usually catches the settled status. Returns -1 if
+        /// the poll still fails. Debug path only (never on the measurement hot path).
+        /// </summary>
+        private int PollStatusForTrace()
+        {
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                try { return _link.SerialPoll(); }
+                catch { if (attempt == 0) Thread.Sleep(TracePollRetryMs); }
+            }
+            return -1;
         }
 
         public void Initialize()
