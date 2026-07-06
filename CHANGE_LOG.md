@@ -25,9 +25,18 @@ the branch sub-headings below record which branch each change came from.
   (single SET REF, boundary CALIBRATE on RECAL cap 2, #16 leveling). Sim sweep 0–110 dB PASS on both
   detectors (the sim floor sits below both, so sim only exercises the command plumbing); the
   detector→command mapping (`4.0SP`/`4.4SP`) and full S4 setup sequence verified against the real
-  `Hp8902A`. **Hardware verification pending** — the open question is whether the Synchronous detector
-  holds lock through the 8673B-LO + 11793A converter path (why Average was chosen originally); if it
-  loses lock (Error 96), fall back to Average and the ~95 dB ceiling.
+  `Hp8902A`. **HARDWARE RESULT (2026-07-06, 3 GHz, 0–110 dB / 10 dB steps, `--sync-detector`):** the
+  Synchronous detector did **not** reach 110 dB — two distinct failures. (1) **Accuracy drift 80–90 dB**
+  (+1.44 / +2.68 dB, *positive and growing* = an uncalibrated deep RF range, not the noise floor): the
+  RECAL bit (0x20) **never set during the descent** (every read `SB=0x41`), so the mid-sweep boundary
+  CALIBRATE never fired and Range 2 (below −40 dBm) / Range 3 (below −80 dBm) ran on stale factors (the
+  resident ones are from the *Average* detector's different 0/−15/−50 ranges). Clean to ~70 dB (the
+  +0.4 baseline is the 8496 40-dB pad). (2) **Lost lock (Error 96) at 100 / 110 dB** (≈ −102 / −112 dBm):
+  the 200 Hz Synchronous loop can't hold the converter-degraded signal that deep (BC-retune couldn't
+  recover) — a converter-path signal-quality limit, not the −127 dBm sensitivity floor. Verdict FAIL
+  (2 error points, worst |err| 2.68 dB). Next: implement the manual's explicit sequential 3-range
+  CALIBRATE (0 / −40 / −80 dBm up front, per O&C Table 4-1) to fix the 80–95 dB drift; the 100–110 dB
+  region is likely not directly measurable through this converter path → #15 (per-section sum).
 
 ### branch `issue-4-debug-poll-falseflag` (off `main`) — #4
 - **Fix #4 — the `--debug` trace no longer false-flags a failed serial poll as an INSTRUMENT
