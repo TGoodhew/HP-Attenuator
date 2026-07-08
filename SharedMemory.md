@@ -3,6 +3,17 @@
 A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-07-09.
 (Personal per-machine notes live outside the repo; this file is the shared, committed record.)
 
+## Working model (author is traveling — away from the GPIB rig until back in Renton)
+
+- **`main` is the development trunk.** Issue work keeps merging here so combining solutions is never
+  blocked — which means **`main` may carry HW-unvalidated code**. What's unvalidated is tracked in
+  **[HardwareValidation.md](HardwareValidation.md)** — the step-by-step bench checklist to walk at home.
+- **Every HW-affecting change keeps its issue branch alive** (`issue-NN-slug`, on `origin`) so it can
+  be checked out and validated **in isolation**. **No branch is deleted/cleaned up** until it's
+  bench-validated and the author says so.
+- **Standing git default: commit + push** every change, branches included. No manual merge-to-`main`
+  gate anymore — combine freely; validation is deferred to the ledger, not blocked before merge.
+
 ## Where we are right now
 
 On **`main`** (b198f77). Goal of the current push: measure the 11713A + 8494/8496 step

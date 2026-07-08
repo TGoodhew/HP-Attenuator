@@ -3,10 +3,13 @@
 All notable changes to the HP-Attenuator project are recorded here.
 Newest entries first. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
-Working process: one branch **per issue** (stacked on the branch we're already on when a new
-issue starts), a commit for **every change**, and a matching entry here. Branches are **not
-merged to `main` until explicitly approved**. We merge back up the stack as each branch finishes;
-the branch sub-headings below record which branch each change came from.
+Working process (updated 2026-07-09, author traveling away from the GPIB rig): one branch **per
+issue**, a commit for **every change**, and a matching entry here. **`main` is the development
+trunk** — issue work merges freely so combining solutions isn't blocked, so `main` may carry
+HW-unvalidated code. Standing git default is **commit + push** (branches included); **branches are
+kept alive** (not deleted/cleaned up) until their change is bench-validated and the author says so.
+What's on `main` but not yet confirmed against the real hardware is tracked in
+**[HardwareValidation.md](HardwareValidation.md)** — the step-by-step bench checklist for Renton.
 
 ## Unreleased — not yet merged
 
