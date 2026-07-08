@@ -49,6 +49,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V7 | #3 — verify the automatic-tuning HP-IB code + acquire-then-hold sequence | `issue-3-tune-mode` | ⬜ | — |
 | V8 | #6 — empty/transient read recovers in place (auto-range boundary) instead of failing | `issue-6-empty-read-recovery` | ⬜ | — |
 | V9 | #2 — `--profile` gives the real wall-clock breakdown to drive sweep optimization | `issue-2-sweep-profiling` | ⬜ | — |
+| V10 | #8 — a CALIBRATE error (Error 35) is now polled + logged + surfaced, not silently latched | `issue-8-calibrate-error-surface` | ⬜ | — |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: loses lock through the converter (CHANGE_LOG) |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -251,6 +252,29 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
     profile tells you whether it's worth pursuing.
 - **Follow-up:** whatever the profile shows is the target for the next optimization pass — record the
   breakdown here so the optimization is driven by data.
+
+---
+
+## V10 — #8 CALIBRATE-error surfacing  ⬜ built, awaiting bench
+
+- **Branch:** `issue-8-calibrate-error-surface` (built; sim PASS — the cal error is hardware-only, sim's
+  Calibrate is a no-op). Also on `main`.
+- **What it does:** the ~2.5 s post-calibrate wait moved into `Hp8902A.Calibrate()`, which now polls the
+  status **after** the CALIBRATE completes, logs it under `--debug`, and throws on the instrument-error
+  bit — so an Error 35 (level error during calibration) that was previously latched-but-invisible now
+  surfaces and the sweep doesn't silently trust a bad reference.
+- **Isolate & run** (the marginal-level converter case where the SRQ latched — 5 GHz):
+  ```powershell
+  git checkout issue-8-calibrate-error-surface   # (or run from main — it's merged)
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+    --freq 5000 --astop 30 --astep 10 --debug --out DebugResults/v10-cal.csv
+  ```
+- **Expect:** the `--debug` trace now shows `8902A CALIBRATE complete, status = 0x..` after each
+  CALIBRATE (no longer `0x00` everywhere). If the SRQ annunciator lights, the log now says whether it was
+  a real `INSTRUMENT ERROR (0x04)` (→ the point/cal shows the failure and the sweep recovers via
+  ClearError) or a clean status (→ cosmetic RQS latch). Cross-check against the 8902A front-panel error.
+- **If a real Error 35 shows:** that's a genuine marginal-level cal failure (too little signal to
+  calibrate that range) — the honest ceiling is shallower there; relates to #1/#7 and the #13 floor.
 
 ---
 

@@ -74,6 +74,14 @@ namespace HpAttenuator.Instruments
         public static Hp8902AException EmptyRead() =>
             new Hp8902AException("8902A empty/short read — transient (retrying)", uncal: false, empty: true);
 
+        /// <summary>A CALIBRATE (C1) raised the instrument-error bit after it completed — sampled during
+        /// the post-calibrate settle, where it was previously invisible (#8). The specific code (often
+        /// Error 35, level error during calibration) shows on the 8902A front panel.</summary>
+        public static Hp8902AException CalibrateError(int statusByte) =>
+            new Hp8902AException($"CALIBRATE raised an instrument error (status 0x{statusByte:X2}) — read " +
+                "the 8902A front panel for the code (e.g. Error 35, level error during calibration)",
+                uncal: false, empty: false);
+
         /// <summary>Known 8902A operating-error messages (Operation manual, p.3-286).</summary>
         public static string Describe(int code)
         {

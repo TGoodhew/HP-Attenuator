@@ -464,8 +464,6 @@ namespace HpAttenuator.Measurement
             return result;
         }
 
-        /// <summary>Wait after a CALIBRATE before re-reading; the cal takes a few seconds.</summary>
-        private const int PostCalibrateWaitMs = 2500;
 
         /// <summary>
         /// Reads the relative dB robustly, up to <paramref name="maxAttempts"/> times, recovering and
@@ -570,7 +568,7 @@ namespace HpAttenuator.Measurement
                         // fired. The attenuator is already set + settled, so the level is steady for C1.
                         if (_options.RangeCalibrate && boundaryCals < MaxBoundaryCalibrations)
                         {
-                            try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); boundaryCals++; }
+                            try { _receiver.Calibrate(); boundaryCals++; }   // Calibrate() waits + surfaces a cal error (#8)
                             catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
                         }
                     }
@@ -590,8 +588,9 @@ namespace HpAttenuator.Measurement
         /// (RECAL, status bit 0x20) and we haven't already used our <see cref="MaxBoundaryCalibrations"/>
         /// budget for this frequency. Per O&amp;C 3-115 the level must be held steady during CALIBRATE and
         /// allowed to settle to a valid measurement afterwards; the caller has already set + settled the
-        /// attenuator, and <see cref="PostCalibrateWaitMs"/> covers the settle. Only fires on RECAL, so
-        /// a pure UNCAL (too deep/weak to calibrate) is skipped — that is where a bad factor came from.
+        /// attenuator, and <see cref="IMeasuringReceiver.Calibrate"/> waits for completion (and now
+        /// surfaces a raised cal error, #8). Only fires on RECAL, so a pure UNCAL (too deep/weak to
+        /// calibrate) is skipped — that is where a bad factor came from.
         /// </summary>
         private void MaybeCalibrateBoundary(ref int boundaryCals)
         {
@@ -603,8 +602,7 @@ namespace HpAttenuator.Measurement
 
             try
             {
-                _receiver.Calibrate();                 // C1 — hold steady (attenuator already settled)
-                Thread.Sleep(PostCalibrateWaitMs);     // let it settle to a valid measurement
+                _receiver.Calibrate();                 // C1 — waits for completion + surfaces a cal error (#8)
                 boundaryCals++;
             }
             catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
@@ -733,7 +731,7 @@ namespace HpAttenuator.Measurement
                 PanelWatch?.Invoke(uncal
                     ? $"the CALIBRATE at {db} dB — RECAL/UNCAL should be lit on the panel now"
                     : $"the forced CALIBRATE at {db} dB — note whether RECAL/UNCAL is lit (it may not be)");
-                try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); cals++; }
+                try { _receiver.Calibrate(); cals++; }   // Calibrate() waits + surfaces a cal error (#8)
                 catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
                 PanelReview?.Invoke($"After the CALIBRATE at {db} dB — did the reading stay valid (and any RECAL/UNCAL clear)?");
             }

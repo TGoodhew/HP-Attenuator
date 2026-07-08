@@ -380,10 +380,27 @@ namespace HpAttenuator.Instruments
 
         public int PollStatusByte() => _link.SerialPoll();
 
+        /// <summary>Time to let a CALIBRATE (C1) actually complete before sampling its result, ms. The
+        /// CALIBRATE runs for ~seconds and finishes during this window; sampling the status only after it
+        /// (not just after issuing C1, when the poll still reads 0x00) is what makes a raised error — e.g.
+        /// Error 35, "level error during calibration" — visible instead of silently latched (#8).</summary>
+        private const int CalibrateSettleMs = 2500;
+
         public void Calibrate()
         {
             Send("C1");
-            Settle();
+            Thread.Sleep(CalibrateSettleMs);   // CALIBRATE completes during this window
+
+            // #8: sample AFTER completion. The immediate post-C1 poll (in Send under --debug) still reads
+            // 0x00 because the CALIBRATE hasn't finished; any error it raises appears only now. Surface it
+            // so the caller's cal-failure path (ClearError + carry on / don't trust the reference) runs,
+            // instead of silently proceeding on a bad 0 dB calibration that would corrupt the whole sweep.
+            int sb = -1;
+            try { sb = _link.SerialPoll(); } catch { /* poll failed; leave sb = -1 (unknown) */ }
+            bool err = sb >= 0 && (sb & InstrErrorBit) != 0;
+            DebugLog?.Invoke($"8902A CALIBRATE complete, status = 0x{(sb < 0 ? 0 : sb):X2}" +
+                             (err ? "  <-- INSTRUMENT ERROR (0x04) — reference/boundary cal FAILED" : ""));
+            if (err) throw Hp8902AException.CalibrateError(sb);
         }
 
         public void SetReference()

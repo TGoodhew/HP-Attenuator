@@ -82,7 +82,12 @@ to 0.01 dB). This sidesteps the sub-floor measurement entirely.
 - **#2 (BUILT, on `main`, awaiting bench — ledger V9):** sweep timing profiler (`--profile`) attributes
   wall-clock by category (read / range-cal / settle / atten-set / other) so optimization targets the
   measured hotspot. Pure instrumentation, no measurement change. Sim renders it. Bench: HardwareValidation.md V9.
-- Others (not yet built): #8 latched SRQ.
+- **#8 (BUILT, on `main`, awaiting bench — ledger V10):** the post-CALIBRATE settle moved into
+  `Hp8902A.Calibrate()`, which now polls after completion, logs the status under `--debug`, and throws on
+  a raised cal error (Error 35) instead of leaving it latched-but-invisible. Sim PASS. Bench: HardwareValidation.md V10.
+
+All originally-listed issues (#2/#3/#4/#6/#8/#13/#14/#15/#16/#17) are now built + merged. Remaining work is
+bench validation (HardwareValidation.md V1–V10) in Renton.
 
 ## What's DONE and validated
 

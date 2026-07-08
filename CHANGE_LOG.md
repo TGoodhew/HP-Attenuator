@@ -13,6 +13,22 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased — not yet merged
 
+### branch `issue-8-calibrate-error-surface` (off `main`) — #8
+- **#8 — surface a CALIBRATE error that was invisible during the post-calibrate settle.** On a hardware
+  sweep the SRQ annunciator could light with every `--debug` status poll reading `0x00`, because the
+  CALIBRATE runs for ~seconds and *completes during the 2.5 s post-calibrate sleep* — and nothing sampled
+  the status in that window. So an **Error 35** ("level error during calibration") raised by a bad 0 dB /
+  boundary cal was latched but invisible, and the sweep silently proceeded on a corrupt reference. Fix
+  (issue's proposed fix #2, applied to every calibrate site): the ~2.5 s settle moved *into*
+  `Hp8902A.Calibrate()` (as `CalibrateSettleMs`), which then **serial-polls after completion**, logs
+  `CALIBRATE complete, status = 0x.. [<-- INSTRUMENT ERROR]` under `--debug`, and **throws**
+  `Hp8902AException.CalibrateError(status)` when the instrument-error bit (0x04) is set — so the callers'
+  existing `catch { ClearError(); }` cal-failure path actually runs instead of trusting the bad cal. The
+  three engine calibrate sites (`CalibrateRfRanges`, `ReadStepWithBoundaryCal`, `MaybeCalibrateBoundary`)
+  dropped their now-redundant `Thread.Sleep(PostCalibrateWaitMs)` (const removed); `SimulatedBench.Calibrate`
+  stays a no-op (sim unaffected). **Build clean; sim `--atten-sweep` PASS (0.04 dB, no regression).** The
+  latched-SRQ / Error-35 surfacing is hardware-only → bench-validated per HardwareValidation.md row **V10**.
+
 ### branch `issue-2-sweep-profiling` (off `main`) — #2
 - **#2 — profile the sweep: attribute wall-clock by category before optimizing.** The sweep is slow, but
   the fix is to *measure the hotspot first* rather than guess. New `SweepTiming` accumulator + `--profile`
