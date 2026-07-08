@@ -1,19 +1,20 @@
 # Shared Memory — HP-Attenuator working state
 
-A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-07-06.
+A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-07-09.
 (Personal per-machine notes live outside the repo; this file is the shared, committed record.)
 
 ## Where we are right now
 
-Active branch: **`issue-14-synchronous-deep-sweep`**. Goal of the current push: measure the
-11713A + 8494/8496 step attenuator's attenuation accurately across its full range.
+On **`main`** (b198f77). Goal of the current push: measure the 11713A + 8494/8496 step
+attenuator's attenuation accurately across its full range.
 
-**Branch stack (not merged):**
+**Stack MERGED to main (2026-07-09):** the #4 + #14 stack fast-forwarded onto `main` (build + sim
+sweep green). `main` now carries the #4 debug-poll fix, the #14 direct-method work (detector
+selection, 3-range cal pass, adaptive leveling), and the `--panel-review` / `--track-mode` tooling.
 ```
-main (39ca0df)
-  └─ issue-4-debug-poll-falseflag (950093c)   — #4 fix, sim+stub validated
-       └─ issue-14-synchronous-deep-sweep (a32982f) — #14 work + tooling
+main (b198f77)  ← #4 (950093c) + #14 (…a32982f) + handoff (b198f77), all merged
 ```
+Next issue work starts on a fresh branch off `main`. Not yet pushed to origin (main is local-only).
 
 **Bench:** ATTEN X = HP 8494 (0–11 dB, 1 dB steps), ATTEN Y = HP 8496 (0–110 dB, 10 dB steps),
 11713A @ GPIB 27. Source 8340B @ 20, LO 8673B @ 19, receiver 8902A @ 14, via 11793A converter
@@ -94,6 +95,8 @@ until Tony approves**. Never claim a hardware result Tony hasn't confirmed.
 
 ## Suggested next step
 
-Merge the #4 + #14 stack (both validated to their scope), then start **#15** (per-section sum) for the
-full 110 dB — after deciding whether to fix **#17** first so the direct method's ranges are genuinely
-calibrated (vs relying on resident factors).
+Stack is merged (done 2026-07-09). Remaining decision: fix **#17** first (so the direct method's
+ranges are genuinely calibrated vs relying on resident factors — cheap, sim-testable, makes the
+≤90 dB claim honest) or go straight to **#15** (per-section characterize + sum — the actual path to
+the full 110 dB, since #17 does NOT lift the ~95 dB converter floor). Either way, start on a new
+branch off `main`.
