@@ -59,6 +59,16 @@ namespace HpAttenuator.Measurement
         public int CalStepDb { get; set; } = 10;
 
         /// <summary>
+        /// Force a per-RF-range CALIBRATE during the pre-SET-REF descent even when the 8902A does
+        /// NOT raise RECAL/UNCAL (issue #17). Resident range factors suppress the natural RECAL, so
+        /// the default UNCAL-gated descent can fire zero CALIBRATEs and silently ride stale factors;
+        /// when set, one unconditional CALIBRATE is issued per range at the approximate boundary
+        /// depths. Off by default (preserves the validated Average-detector path); opt-in for the
+        /// bench A/B that tells us whether a genuine fresh calibration improves the 80–95 dB accuracy.
+        /// </summary>
+        public bool ForceRangeCal { get; set; } = false;
+
+        /// <summary>
         /// Which 8902A IF detector the Tuned RF Level sweep uses. Average (default, floor ≈ −100 dBm)
         /// is robust through the converter/LO path; Synchronous (floor ≈ −127 dBm) is needed to reach
         /// the full 110 dB but can lose lock on a drifty signal (#14).

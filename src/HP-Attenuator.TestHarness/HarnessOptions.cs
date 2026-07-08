@@ -111,6 +111,7 @@ namespace HpAttenuator.TestHarness
                     case "--astop": o.Sweep.AttenStopDb = I(Need(args, ++i)); o.ExplicitAstop = true; break;
                     case "--astep": o.Sweep.AttenStepDb = I(Need(args, ++i)); o.ExplicitAstep = true; break;
                     case "--cal-step": o.Sweep.CalStepDb = I(Need(args, ++i)); break;
+                    case "--force-range-cal": o.Sweep.ForceRangeCal = true; break;
                     case "--settle": o.Sweep.SettleMs = I(Need(args, ++i)); break;
                     case "--addr-source": o.AddrSource = Need(args, ++i); break;
                     case "--addr-lo": o.AddrLo = Need(args, ++i); break;
@@ -182,6 +183,10 @@ Usage: HP-Attenuator.TestHarness [options]
   --load-cal           Load the converter cal factors into the 8902A (both the Normal and
                        Frequency-Offset tables) and exit. Non-interactive.
   --no-cal-pass        Skip the 8902A 3-point range-calibration pass.
+  --force-range-cal    Force one CALIBRATE per RF range during the pre-SET-REF descent even when the
+                       8902A doesn't raise RECAL/UNCAL (resident factors suppress it — issue #17).
+                       Off by default. Pair with --debug to see the per-step range-cal trace and the
+                       no-op/CALIBRATE-count summary; with --panel-review to watch each CALIBRATE.
   --sensor-cal         Interactive: upload cal factors + zero, prompt you to attach the
                        sensor to the CAL output, then calibrate. (Run this one yourself.)
   --sensor-zero        Upload cal factors and ZERO the 8902A power sensor, then stop.

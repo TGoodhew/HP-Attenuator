@@ -41,7 +41,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | # | Change | Branch | Status | Blocked by |
 |---|--------|--------|--------|-----------|
 | V1 | #4 — `--debug` no longer false-flags a failed serial poll | `issue-4-debug-poll-falseflag` | ⬜ | — |
-| V2 | #17 — real pre-`SET REF` 3-range CALIBRATE (fix the no-op descent) | _needs branch_ | 🔨 | — |
+| V2 | #17 — real pre-`SET REF` 3-range CALIBRATE (`--force-range-cal`) + descent observability | `issue-17-range-cal-observability` | ⬜ | — |
 | V3 | `--panel-review` actually pauses on each CALIBRATE | `issue-14-synchronous-deep-sweep` | 🔒 | V2 |
 | V4 | #14 — 3-range cal genuinely improves 80–95 dB accuracy | `issue-14-synchronous-deep-sweep` | 🔒 | V2 |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: loses lock through the converter (CHANGE_LOG) |
@@ -66,25 +66,35 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 - **If it fails:** fix on `issue-4-debug-poll-falseflag`, commit + push, re-run. Cosmetic — does not
   gate other rows.
 
-## V2 — #17 real 3-range CALIBRATE  🔨 needs code
+## V2 — #17 real 3-range CALIBRATE + descent observability  ⬜ built, awaiting bench
 
-- **Branch:** _create `issue-17-...` off `main` when building._
-- **Problem (from #17):** `CalibrateRfRanges` fires nothing — no read throws UNCAL during the
-  pre-`SET REF` descent, so zero CALIBRATEs happen; the ~90 dB accuracy is riding on **resident**
-  range factors, not a fresh calibration. `--panel-review` proved it never prompts.
-- **Build target:** clear the TRFL range cal factors to force a fresh CALIBRATE on each of the 3 RF
-  ranges (and/or detect range crossings by reading-jump); add observability so a no-op descent is
-  visible in the trace.
-- **Isolate & run** (validate with `--panel-review` so you can *watch* each CALIBRATE on the 8902A
-  front panel):
+- **Branch:** `issue-17-range-cal-observability` (built; sim PASS, worst |err| 0.04 dB).
+- **Problem (from #17):** `CalibrateRfRanges` fired nothing — no read throws UNCAL during the
+  pre-`SET REF` descent (resident range factors suppress RECAL), so zero CALIBRATEs happen; the ~90 dB
+  accuracy rode **resident** factors, not a fresh calibration. `--panel-review` proved it never prompts.
+- **What was built:** (1) full descent **observability** — `--debug` now traces every step and prints a
+  loud `range-cal: NO-OP — 0 CALIBRATEs fired … RESIDENT factors (#17)` summary (or the CALIBRATE count);
+  (2) **`--force-range-cal`** — issues one unconditional CALIBRATE per RF range at approximate boundary
+  depths (0/20/55 dB — bench-tunable), since with resident factors nothing natural gates a CALIBRATE.
+- **Step A — confirm the no-op (baseline, default behaviour):** run WITHOUT `--force-range-cal` and read
+  the yellow trace. Expect the `NO-OP — 0 CALIBRATEs fired` summary — this reproduces/confirms #17 on the
+  actual bench.
   ```powershell
-  git checkout issue-17-...   # the branch you build it on
+  git checkout issue-17-range-cal-observability
   dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
-    --freq 3000 --astop 110 --astep 10 --panel-review --debug --out DebugResults/v2-cal.csv
+    --freq 3000 --astop 110 --astep 10 --debug --out DebugResults/v2-noop.csv
   ```
-- **Expect (PASS):** `--panel-review` prompts **3 times** (one per RF range); the debug trace shows 3
-  CALIBRATEs actually firing (RECAL bit set), not an empty descent.
-- **If it fails:** fix on the `issue-17` branch, commit + push, re-run.
+- **Step B — force the calibration and watch it (the fix):**
+  ```powershell
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+    --freq 3000 --astop 110 --astep 10 --force-range-cal --panel-review --debug --out DebugResults/v2-forced.csv
+  ```
+- **Expect (PASS):** with `--force-range-cal`, `--panel-review` prompts **3 times** (one per range) and
+  the trace shows `3 CALIBRATE(s) fired`. Note on the panel whether RECAL was actually lit at each forced
+  CALIBRATE — that tells us if the 0/20/55 dB boundary depths line up with the real range breaks (tune
+  `ForceCalDepthsDb` if not).
+- **If it fails:** fix on `issue-17-range-cal-observability`, commit + push, re-run. Feeds **V4** (does the
+  forced cal actually improve 80–95 dB accuracy?).
 
 ## V3 — `--panel-review` pauses on each CALIBRATE  🔒 blocked by V2
 

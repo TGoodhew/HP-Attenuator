@@ -13,6 +13,28 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased — not yet merged
 
+### branch `issue-17-range-cal-observability` (off `main`) — #17
+- **#17 — make the pre-`SET REF` 3-range CALIBRATE observable, and add an opt-in force.** The range-cal
+  descent (`CalibrateRfRanges`) was a silent no-op: it only CALIBRATEs when a read throws UNCAL, but
+  with **resident** range factors the 8902A never raises RECAL/UNCAL, so zero CALIBRATEs fired and the
+  ~90 dB accuracy rode stale factors (proven earlier: `--panel-review` never prompted). Two changes,
+  both sim-safe and off the validated path:
+  - **Observability (the core of #17):** every descent step is now traced via a new engine
+    `MeasurementEngine.Trace` sink (harness wires it on `--debug`, yellow) — commanded depth, absolute
+    read, an off-trend *jump* marker (reused the previously-vestigial `RangeStepThresholdDb`), and
+    whether a CALIBRATE fired — and the pass ends with an explicit summary. A descent that fires zero
+    CALIBRATEs now prints a loud **"NO-OP — 0 CALIBRATEs fired … RESIDENT factors (issue #17)"** line,
+    so the symptom is visible on the bench instead of silent.
+  - **`--force-range-cal` (opt-in workaround):** `SweepOptions.ForceRangeCal` issues one *unconditional*
+    CALIBRATE per RF range at approximate boundary depths (`ForceCalDepthsDb = {0, 20, 55}` dB — the
+    AVG detector's ~0/−15/−50 dBm range breaks; bench-tunable), since with resident factors neither
+    UNCAL nor an off-trend jump ever appears to gate on. Default OFF (preserves the validated
+    Average-detector ≤90 dB path); when on, `--panel-review` should prompt 3× (once per range).
+  - Removed the dead `RangeCalStepDb` const (the pass uses `SweepOptions.CalStepDb`). **Build clean;
+    sim `--atten-sweep --force-range-cal --debug` PASS (worst |err| 0.04 dB — no regression).** The
+    descent logic is hardware-only (sim disables the cal pass), so it is bench-validated per
+    HardwareValidation.md rows **V2/V3/V4**; the flag/plumbing is what sim exercises.
+
 ### branch `issue-14-synchronous-deep-sweep` (stacked on `issue-4-debug-poll-falseflag`) — #14
 - **#14 — selectable IF detector; Synchronous detector to reach the full 110 dB.** Consulting the
   8902A O&C manual (Chapter 5, *Attenuator Measurement*) settled the approach: the manual's

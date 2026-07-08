@@ -34,7 +34,12 @@ namespace HpAttenuator.TestHarness
 
             VisaInstrumentLink.BeepOnCommand = !opt.NoBeep;
             if (opt.Debug)
+            {
                 Hp8902A.DebugLog = s => AnsiConsole.MarkupLine($"[grey]  {s.EscapeMarkup()}[/]");
+                // Engine-level range-cal trace + the #17 no-op warning (distinct colour from the raw
+                // 8902A command trace so the descent summary stands out).
+                MeasurementEngine.Trace = s => AnsiConsole.MarkupLine($"[yellow]  {s.EscapeMarkup()}[/]");
+            }
 
             var disposables = new List<IDisposable>();
             try

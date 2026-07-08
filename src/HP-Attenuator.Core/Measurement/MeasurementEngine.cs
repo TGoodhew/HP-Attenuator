@@ -33,20 +33,25 @@ namespace HpAttenuator.Measurement
         private const int RangeCalReachDb = 80;
 
         /// <summary>
-        /// Step size (dB) for the range-cal pass. Fine enough to land on each RF-range boundary
-        /// so RECAL is caught and that range calibrated; a coarse step skips boundaries and
-        /// leaves bands uncalibrated (UNCAL) during measurement.
-        /// </summary>
-        private const int RangeCalStepDb = 2;
-
-        /// <summary>
-        /// A step-to-step change in the relative reading that deviates from the expected
-        /// per-step attenuation by more than this (dB) means the receiver crossed into an
-        /// UNCALIBRATED RF range (the reading jumps by the range factor). It's the reliable
-        /// range-change signal — the RECAL status bit is polled but is often missed — so we
-        /// CALIBRATE that range and re-read when the reading jumps this far off trend.
+        /// During the pre-SET-REF descent the read is the ABSOLUTE level (dBm), so between two steps
+        /// it should fall by the attenuation added (<see cref="SweepOptions.CalStepDb"/>). A deviation
+        /// larger than this (dB) means the receiver crossed into a different RF range and the reading
+        /// jumped by the range factor — a diagnostic marker in the trace. (A jump only appears when the
+        /// entered range is UNcalibrated; with resident factors there is no jump AND no RECAL, which is
+        /// exactly the #17 no-op that <see cref="SweepOptions.ForceRangeCal"/> works around.)
         /// </summary>
         private const double RangeStepThresholdDb = 2.0;
+
+        /// <summary>
+        /// Approximate depths (dB below the 0 dB reference) at which each successive RF measurement
+        /// range is entered. The Average detector's input ranges break near 0 / −15 / −50 dBm (O&amp;C
+        /// 3-115), so from a ~0 dBm reference the 2nd and 3rd ranges begin ~15 and ~50 dB down; the
+        /// values here sit comfortably inside each range so a forced CALIBRATE has signal to reference.
+        /// Used ONLY by <see cref="SweepOptions.ForceRangeCal"/> to place one unconditional CALIBRATE
+        /// per range when resident factors suppress the natural RECAL/UNCAL (#17). Approximate and
+        /// bench-tunable — confirm against where RECAL actually lights on the panel.
+        /// </summary>
+        private static readonly int[] ForceCalDepthsDb = { 0, 20, 55 };
 
         /// <summary>
         /// Maximum range-to-range CALIBRATEs per frequency during the sweep. The 8902A stores
@@ -72,6 +77,13 @@ namespace HpAttenuator.Measurement
         /// operator what the front panel showed and return their typed answer. Null = skipped.
         /// </summary>
         public static Func<string, string> PanelReview;
+
+        /// <summary>
+        /// Optional engine diagnostic sink (the harness wires this on <c>--debug</c>): the step-by-step
+        /// range-calibration trace and the loud NO-OP warning that makes issue #17 visible — i.e. that a
+        /// descent fired zero CALIBRATEs and the RF ranges are riding resident factors. Null = silent.
+        /// </summary>
+        public static Action<string> Trace;
 
         private readonly ISignalSource _source;
         private readonly ILocalOscillator _lo;
@@ -569,37 +581,78 @@ namespace HpAttenuator.Measurement
         /// so it never calibrates deeper than the signal can reference (a deep/weak CALIBRATE stores a
         /// bad factor). Stops early on lost lock (Error 96) — that is past the ~-100 dBm converter
         /// floor. Leaves the attenuator deep; the caller returns it to 0 dB for SET REF.
+        ///
+        /// <para>Observability (#17): every step is traced via <see cref="Trace"/> (commanded depth,
+        /// absolute read, off-trend jump, and whether a CALIBRATE fired), and the pass ends with an
+        /// explicit summary — a loud NO-OP warning when zero CALIBRATEs fired, which is the #17 symptom
+        /// (resident range factors suppress the natural RECAL/UNCAL, so the descent silently rides stale
+        /// factors). <see cref="SweepOptions.ForceRangeCal"/> works around that by issuing one
+        /// UNCONDITIONAL CALIBRATE per range at the <see cref="ForceCalDepthsDb"/> boundaries, since with
+        /// resident factors neither UNCAL nor an off-trend jump ever appears to gate on.</para>
         /// </summary>
         private void CalibrateRfRanges()
         {
             int cals = 0;
             int start = _options.AttenStartDb;
+            int forceIdx = 0;              // next ForceCalDepthsDb boundary awaiting a forced CALIBRATE
+            double prev = double.NaN;      // previous absolute read, for the off-trend jump marker
+            bool force = _options.ForceRangeCal;
+
+            Trace?.Invoke($"range-cal descent: start={start} dB, reach={RangeCalReachDb} dB, step={_options.CalStepDb} dB — " +
+                          (force ? "FORCE (one unconditional CALIBRATE per range)" : "UNCAL-gated (natural RECAL only)"));
+
             for (int db = start; db <= start + RangeCalReachDb && cals < MaxRfRangeCalibrations; db += _options.CalStepDb)
             {
                 try { _attenuator.SetAttenuationDb(db); }
                 catch { break; }                       // beyond the attenuator's range — done
                 Settle();
 
-                try { _receiver.ReadRelativeDb(); }    // triggers; throws UNCAL if this range needs calibrating
-                catch (Hp8902AException ex) when (ex.IsUncal)
-                {
-                    // RECAL/UNCAL at this level — CALIBRATE this range (level held steady by the fixed
-                    // atten). --panel-review wraps THIS step tightly: pause immediately before the
-                    // CALIBRATE (the annunciator should be lit right now) and immediately after (it
-                    // should clear to a valid reading), so the operator confirms this exact step.
-                    PanelWatch?.Invoke($"the CALIBRATE at {db} dB — RECAL/UNCAL should be lit on the panel now");
-                    try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); cals++; }
-                    catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
-                    PanelReview?.Invoke($"After the CALIBRATE at {db} dB — did RECAL/UNCAL go off and a valid level return?");
-                }
+                double read = double.NaN;
+                bool uncal = false;
+                try { read = _receiver.ReadRelativeDb(); }  // triggers; throws UNCAL if this range needs calibrating
+                catch (Hp8902AException ex) when (ex.IsUncal) { uncal = true; }
                 catch (Hp8902AException ex) when (ex.Code == 96)
                 {
                     // Lost lock — below the ~-100 dBm converter floor; no point calibrating deeper.
+                    Trace?.Invoke($"  {db,3} dB: lost lock (Error 96) — below the converter floor; stop descent");
                     try { _receiver.ClearError(); } catch { /* keep going */ }
                     break;
                 }
-                catch { /* other transient read — keep descending */ }
+                catch { Trace?.Invoke($"  {db,3} dB: transient read — continue"); continue; }
+
+                // Off-trend jump = crossed into a different (uncalibrated) RF range. Diagnostic only.
+                bool jumped = !double.IsNaN(read) && !double.IsNaN(prev)
+                              && System.Math.Abs((read - prev) - (-_options.CalStepDb)) > RangeStepThresholdDb;
+                if (!double.IsNaN(read)) prev = read;
+
+                // Force mode calibrates the moment the descent reaches each range boundary, whether or
+                // not the receiver volunteered RECAL (with resident factors it never does — that's #17).
+                bool forceHere = force && forceIdx < ForceCalDepthsDb.Length && db >= start + ForceCalDepthsDb[forceIdx];
+                bool doCal = uncal || forceHere;
+
+                string tag = uncal ? "UNCAL" : jumped ? "jump" : "ok";
+                string level = double.IsNaN(read) ? "UNCAL" : read.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " dBm";
+                Trace?.Invoke($"  {db,3} dB: read={level}  [{tag}]{(doCal ? (forceHere && !uncal ? "  -> CALIBRATE (forced)" : "  -> CALIBRATE") : "")}");
+
+                if (!doCal) continue;
+                if (forceHere) forceIdx++;
+
+                // --panel-review wraps THIS step tightly: pause immediately before the CALIBRATE and
+                // immediately after, so the operator confirms this exact step against the front panel.
+                PanelWatch?.Invoke(uncal
+                    ? $"the CALIBRATE at {db} dB — RECAL/UNCAL should be lit on the panel now"
+                    : $"the forced CALIBRATE at {db} dB — note whether RECAL/UNCAL is lit (it may not be)");
+                try { _receiver.Calibrate(); Thread.Sleep(PostCalibrateWaitMs); cals++; }
+                catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
+                PanelReview?.Invoke($"After the CALIBRATE at {db} dB — did the reading stay valid (and any RECAL/UNCAL clear)?");
             }
+
+            if (cals == 0)
+                Trace?.Invoke("range-cal: NO-OP — 0 CALIBRATEs fired. The RF ranges are running on RESIDENT " +
+                              "factors, not a fresh calibration (issue #17). Add --force-range-cal to force a " +
+                              "per-range CALIBRATE, or check that RECAL lights on the panel during the descent.");
+            else
+                Trace?.Invoke($"range-cal: {cals} CALIBRATE(s) fired.");
         }
 
         /// <summary>
