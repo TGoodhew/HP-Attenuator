@@ -114,6 +114,8 @@ namespace HpAttenuator.TestHarness
                     case "--astep": o.Sweep.AttenStepDb = I(Need(args, ++i)); o.ExplicitAstep = true; break;
                     case "--cal-step": o.Sweep.CalStepDb = I(Need(args, ++i)); break;
                     case "--force-range-cal": o.Sweep.ForceRangeCal = true; break;
+                    case "--floor-dbm": o.Sweep.FloorDbm = D(Need(args, ++i)); break;
+                    case "--no-floor-detect": o.Sweep.FloorDetect = false; break;
                     case "--settle": o.Sweep.SettleMs = I(Need(args, ++i)); break;
                     case "--addr-source": o.AddrSource = Need(args, ++i); break;
                     case "--addr-lo": o.AddrLo = Need(args, ++i); break;
@@ -225,6 +227,11 @@ Usage: HP-Attenuator.TestHarness [options]
                                  instead of losing lock partway (#14). Implies the Average detector.
   --lo-power dBm                 8673B LO drive into the 11793A (default 8; the converter wants
                                  +8..+13 dBm — try +10..+13 to cut conversion loss).
+  --floor-dbm dBm                #13: absolute level at/below which a deep reading is treated as sitting
+                                 on the ~-100 dBm converter floor (default -98). Such saturated points
+                                 are flagged FLOOR and excluded from the accuracy verdict, not failed.
+  --no-floor-detect              Disable #13 floor/plateau detection; count every point's error
+                                 (the pre-#13 behaviour — deep floored points then fail the sweep).
   --settle ms                    Settle per attenuator step (default 100).
   --tolerance dB                 Pass/fail threshold (default 1.5).
   --read-timeout-ms ms           8902A read timeout (default 60000). Low-level Tuned RF

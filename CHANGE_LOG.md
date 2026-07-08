@@ -13,6 +13,26 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased — not yet merged
 
+### branch `issue-13-floor-detection` (off `main`) — #13
+- **#13 — floor/plateau detection: flag saturated deep points instead of failing them.** Past the
+  ~95–98 dB usable depth of the 11793A path, a deep sweep point reads the −100 dBm converter floor and
+  stops tracking — a 100/110 dB point saturates near −98 dBm and so **under-reads** its target (the
+  −2.4 / −12 dB "errors" from the #14 run). Those aren't a DUT or sweep fault, they're the measurement
+  floor, so charging them against the verdict wrongly FAILs an otherwise-good sweep. Now a classifier
+  (`MeasurementEngine.ClassifyFloorLimited`) marks such points `AttenPointResult.FloorLimited`: a point
+  is flagged only when it **under-reads its target by > `FloorMarginDb`** AND either (a) its absolute
+  level (leveled reference + relative reading) sits at/below `FloorDbm` (default −98 dBm), or (b) it
+  **plateaued** — the reading didn't rise past the deepest attenuation genuinely tracked so far. The AND
+  with under-reading keeps an accurate deep point near the floor from being mistaken for saturation.
+  Floor-limited points are **excluded** from `MaxAbsErrorDb` and the sweep verdict, shown as `FLOOR` in
+  the table / `(N floor, deepest X dB)` on the summary line, carried in a new CSV `floor_limited` column,
+  and summarised ("Floor-limited (#13): N point(s) … Deepest measured: X dB"). New `FreqPointResult`
+  helpers `FloorLimitedCount` / `DeepestMeasuredDb`. Flags: `--floor-dbm dBm` (threshold, default −98)
+  and `--no-floor-detect` (restore the pre-#13 count-everything behaviour). **Build clean; sim
+  `--atten-sweep --astop 110` PASS with no false flags** (sim never saturates, so the AND-gate correctly
+  flags nothing — the no-false-positive check). Floor-flagging itself needs a saturating read →
+  bench-validated per HardwareValidation.md row **V6**.
+
 ### branch `issue-15-per-section-sum` (off `main`) — #15
 - **#15 — per-section characterize + SUM: the path to a validated full 110/121 dB.** The full range
   can't be measured **directly** — the 11793A converter path floors at −100 dBm, so with the reference

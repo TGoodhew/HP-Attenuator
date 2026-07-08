@@ -68,6 +68,20 @@ namespace HpAttenuator.Measurement
         /// </summary>
         public bool ForceRangeCal { get; set; } = false;
 
+        /// <summary>#13: flag deep points that saturated at the converter floor (they stop tracking the
+        /// attenuation) as FLOOR instead of counting them as measurement errors. On by default.</summary>
+        public bool FloorDetect { get; set; } = true;
+
+        /// <summary>#13: absolute level (dBm) at/below which a reading is treated as sitting on the
+        /// converter floor. The 11793A path floors near −100 dBm and readings saturate ~−98.7 dBm
+        /// (SharedMemory.md); default −98 with <see cref="FloorMarginDb"/> of headroom.</summary>
+        public double FloorDbm { get; set; } = -98.0;
+
+        /// <summary>#13: dB band used by the floor classifier — the headroom above <see cref="FloorDbm"/>
+        /// counted as "at floor", the plateau non-advance threshold, and the under-read threshold a
+        /// point must exceed (measured &lt; target − this) before it can be flagged FLOOR.</summary>
+        public double FloorMarginDb { get; set; } = 1.0;
+
         /// <summary>
         /// Which 8902A IF detector the Tuned RF Level sweep uses. Average (default, floor ≈ −100 dBm)
         /// is robust through the converter/LO path; Synchronous (floor ≈ −127 dBm) is needed to reach
@@ -140,6 +154,14 @@ namespace HpAttenuator.Measurement
         public double ExpectedAttenuationDb { get; set; }
         public double ErrorDb { get; set; }
         public string Error { get; set; }                 // set if the 8902A reported an error
+
+        /// <summary>
+        /// #13: this point saturated at the converter floor — the reading stopped tracking the
+        /// attenuation (a deep point reads ~the floor and so under-reads its target). It's the
+        /// measurement floor, not a DUT/sweep fault, so it's excluded from the accuracy verdict and
+        /// reported as FLOOR rather than a failure. Set by the floor/plateau classifier.
+        /// </summary>
+        public bool FloorLimited { get; set; }
     }
 
     /// <summary>Result of a signal-presence check at one frequency.</summary>
@@ -193,14 +215,41 @@ namespace HpAttenuator.Measurement
 
         public List<AttenPointResult> Points { get; } = new List<AttenPointResult>();
 
+        /// <summary>Worst |error| over the ACCURATE points — floor-limited points (#13) are excluded, as
+        /// they read the measurement floor rather than the attenuation and would otherwise dominate.</summary>
         public double MaxAbsErrorDb
         {
             get
             {
                 double m = 0;
                 foreach (var p in Points)
-                    if (System.Math.Abs(p.ErrorDb) > m) m = System.Math.Abs(p.ErrorDb);
+                    if (!p.FloorLimited && System.Math.Abs(p.ErrorDb) > m) m = System.Math.Abs(p.ErrorDb);
                 return m;
+            }
+        }
+
+        /// <summary>Count of points flagged as floor-limited (#13) at this frequency.</summary>
+        public int FloorLimitedCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (var p in Points) if (p.FloorLimited) n++;
+                return n;
+            }
+        }
+
+        /// <summary>Deepest attenuation (dB) actually tracked — the largest measured attenuation among
+        /// points NOT flagged floor-limited. NaN if none measured. The honest usable depth at this freq.</summary>
+        public double DeepestMeasuredDb
+        {
+            get
+            {
+                double d = double.NaN;
+                foreach (var p in Points)
+                    if (!p.FloorLimited && p.Error == null && !double.IsNaN(p.MeasuredAttenuationDb))
+                        d = double.IsNaN(d) ? p.MeasuredAttenuationDb : System.Math.Max(d, p.MeasuredAttenuationDb);
+                return d;
             }
         }
     }

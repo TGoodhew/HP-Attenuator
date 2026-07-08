@@ -67,8 +67,10 @@ to 0.01 dB). This sidesteps the sub-floor measurement entirely.
 - **#15 (BUILT, on `main`, awaiting bench — ledger V5):** per-section characterize + sum → the path to
   the full 110 dB. `--section-sum` measures each section alone (≤40 dB, above the floor) and sums to
   synthesize the deep totals. Sim PASS (full scale 120.83 dB @ nominal 121). Bench check: HardwareValidation.md V5.
-- **#13:** floor/plateau detection — flag saturated deep points (100/110 dB read the floor, reported
-  as −2.4/−12 dB errors) instead of failing them.
+- **#13 (BUILT, on `main`, awaiting bench — ledger V6):** floor/plateau detection — deep points that
+  saturate at the converter floor (100/110 dB read the floor, the −2.4/−12 dB errors) are now flagged
+  **FLOOR** and excluded from the verdict instead of failing it; `--floor-dbm`/`--no-floor-detect`.
+  Sim PASS (no false flags). Bench check: HardwareValidation.md V6.
 - **#4 (fixed on branch `issue-4-debug-poll-falseflag`):** `--debug` no longer false-flags a failed
   serial poll as INSTRUMENT ERROR. Sim+stub validated; hardware `--debug` trace confirm pending (cosmetic).
 - Others: #2 sweep speed, #6 empty-read recovery, #8 latched SRQ, #3 manual/auto tune UI.

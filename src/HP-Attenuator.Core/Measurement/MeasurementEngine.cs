@@ -296,7 +296,46 @@ namespace HpAttenuator.Measurement
                 result.Points.Add(point);
                 onPoint?.Invoke(++index, total, point);
             }
+
+            ClassifyFloorLimited(result);
             return result;
+        }
+
+        /// <summary>
+        /// #13 — flags deep sweep points that saturated at the converter floor. Past the 11793A path
+        /// floor (~−100 dBm; with the reference near −2 dBm the usable depth is ~95–98 dB) the reading
+        /// stops tracking: a 100/110 dB point reads the floor (~−98 dBm) and so UNDER-reads its target by
+        /// a growing amount (the −2.4 / −12 dB "errors"). Those are the measurement floor, not a DUT or
+        /// sweep fault, so they're marked <see cref="AttenPointResult.FloorLimited"/> and excluded from
+        /// the accuracy verdict instead of failing it. A point is flagged only when it UNDER-reads its
+        /// target by more than <see cref="SweepOptions.FloorMarginDb"/> AND either (a) its absolute level
+        /// (reference + relative) sits at/below <see cref="SweepOptions.FloorDbm"/>, or (b) it plateaued —
+        /// its reading didn't rise past the deepest attenuation genuinely tracked so far. The AND with
+        /// under-reading keeps an accurate deep point near the floor from being mistakenly flagged.
+        /// </summary>
+        private void ClassifyFloorLimited(FreqPointResult result)
+        {
+            if (!_options.FloorDetect) return;
+
+            double floorDbm = _options.FloorDbm;
+            double margin = _options.FloorMarginDb;
+            double refDbm = result.ReferencePowerDbm;    // NaN when leveling was off / unread
+            double bestAtten = double.NegativeInfinity;   // deepest attenuation genuinely tracked so far
+
+            foreach (var p in result.Points)              // Points are in ascending target order
+            {
+                if (p.Error != null || double.IsNaN(p.MeasuredAttenuationDb)) continue;
+
+                bool underReads = p.MeasuredAttenuationDb < p.ExpectedAttenuationDb - margin;
+                bool atFloorAbs = !double.IsNaN(refDbm)
+                                  && (refDbm + p.MeasuredRelativeDb) <= floorDbm + margin;
+                bool plateau = p.MeasuredAttenuationDb <= bestAtten + margin;   // didn't rise meaningfully
+
+                p.FloorLimited = underReads && (atFloorAbs || plateau);
+
+                if (!p.FloorLimited)
+                    bestAtten = System.Math.Max(bestAtten, p.MeasuredAttenuationDb);
+            }
         }
 
         /// <summary>

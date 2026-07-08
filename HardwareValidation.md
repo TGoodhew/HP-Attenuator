@@ -45,6 +45,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V3 | `--panel-review` actually pauses on each CALIBRATE | `issue-14-synchronous-deep-sweep` | 🔒 | V2 |
 | V4 | #14 — 3-range cal genuinely improves 80–95 dB accuracy | `issue-14-synchronous-deep-sweep` | 🔒 | V2 |
 | V5 | #15 — per-section characterize + sum reaches a validated full 110/121 dB | `issue-15-per-section-sum` | ⬜ | — |
+| V6 | #13 — deep saturated points flagged FLOOR (not failed); verdict/depth honest | `issue-13-floor-detection` | ⬜ | — |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: loses lock through the converter (CHANGE_LOG) |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -149,6 +150,30 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 - **If a section reads the floor / errors:** it means that section alone is below the floor (shouldn't
   happen at ≤40 dB) or a path issue — investigate before trusting the deep sums. Fix on
   `issue-15-per-section-sum`, commit + push, re-run.
+
+## V6 — #13 floor/plateau detection  ⬜ built, awaiting bench
+
+- **Branch:** `issue-13-floor-detection` (built; sim PASS, no false flags). Also on `main`.
+- **What it does:** a deep direct sweep past ~95 dB reads the converter floor and under-reads the
+  target (the −2.4 / −12 dB errors at 100 / 110 dB). #13 flags those points **FLOOR** and excludes them
+  from the accuracy verdict, so a good sweep isn't failed by the known measurement floor. It also reports
+  the honest "deepest measured" depth.
+- **Isolate & run** (the classic deep direct sweep that produced the −2.4 / −12 dB points):
+  ```powershell
+  git checkout issue-13-floor-detection   # (or run from main — it's merged)
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+    --freq 3000 --astop 110 --astep 10 --debug --out DebugResults/v6-floor.csv
+  ```
+- **Expect (PASS):** points to ~90 dB read accurately (green); 100 / 110 dB show **FLOOR** (yellow), are
+  excluded from "Worst |error|", and the summary shows "Floor-limited (#13): 2 point(s)" with
+  "Deepest measured ~90 dB". Verdict PASS instead of the old FAIL.
+- **Tune if needed:** if the floor cut is in the wrong place (a good point flagged, or a saturated one
+  missed), adjust `--floor-dbm` (default −98) to match where the reading actually saturates on the day,
+  and confirm the `floor_limited` column in the CSV. `--no-floor-detect` restores the old behaviour for
+  comparison.
+- **Cross-check with #15 (V5):** the points #13 marks FLOOR here (100 / 110 dB) are exactly the ones
+  `--section-sum` synthesizes by summation — so V6 tells you the direct method's honest ceiling and V5
+  provides the validated number above it.
 
 ---
 

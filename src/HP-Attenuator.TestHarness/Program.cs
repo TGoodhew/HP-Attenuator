@@ -1103,6 +1103,8 @@ namespace HpAttenuator.TestHarness
             double worstError = 0;
             int measured = 0;
             int errorPoints = 0;
+            int floorPoints = 0;                       // #13: points that saturated at the converter floor
+            double deepestMeasured = double.NaN;       // deepest attenuation actually tracked, across freqs
             string worstWhere = "";
 
             StreamWriter csvWriter;
@@ -1115,7 +1117,7 @@ namespace HpAttenuator.TestHarness
 
             using (var csv = csvWriter)
             {
-                csv.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,leveled_ref_dbm,leveled_src_dbm,commanded_db,command,measured_rel_db,measured_atten_db,expected_atten_db,error_db,error");
+                csv.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,leveled_ref_dbm,leveled_src_dbm,commanded_db,command,measured_rel_db,measured_atten_db,expected_atten_db,error_db,floor_limited,error");
 
                 foreach (double freq in frequencies)
                 {
@@ -1145,16 +1147,20 @@ namespace HpAttenuator.TestHarness
                             p.CommandedDb.ToString(CultureInfo.InvariantCulture), p.Command,
                             F(p.MeasuredRelativeDb), F(p.MeasuredAttenuationDb),
                             F(p.ExpectedAttenuationDb), F(p.ErrorDb),
+                            p.FloorLimited ? "1" : "0",
                             (p.Error ?? "").Replace(",", ";")
                         }));
 
                         if (p.Error != null) errorPoints++;
+                        else if (p.FloorLimited) floorPoints++;    // #13: measurement floor, not an error
                         else if (Math.Abs(p.ErrorDb) > worstError)
                         {
                             worstError = Math.Abs(p.ErrorDb);
                             worstWhere = $"{r.FreqMHz:0.###} MHz @ {p.CommandedDb} dB";
                         }
                     }
+                    if (!double.IsNaN(r.DeepestMeasuredDb))
+                        deepestMeasured = Math.Max(deepestMeasured, r.DeepestMeasuredDb);
 
                     // Small detailed runs get a table; large ones already streamed progress.
                     if (detailed && r.Points.Count <= 15) RenderFrequencyTable(r, opt.ToleranceDb);
@@ -1170,6 +1176,12 @@ namespace HpAttenuator.TestHarness
             summary.AddRow("Frequencies measured", measured.ToString());
             summary.AddRow("Worst |error|", $"{worstError:0.00} dB  ({worstWhere})");
             if (errorPoints > 0) summary.AddRow("8902A errors", $"[red]{errorPoints} point(s)[/]");
+            if (floorPoints > 0)
+            {
+                summary.AddRow("Floor-limited (#13)", $"[yellow]{floorPoints} point(s)[/] — saturated at the " +
+                    $"~{opt.Sweep.FloorDbm:0} dBm converter floor; excluded from the verdict");
+                summary.AddRow("Deepest measured", double.IsNaN(deepestMeasured) ? "—" : $"{deepestMeasured:0.0} dB");
+            }
             summary.AddRow("Tolerance", $"±{opt.ToleranceDb:0.#} dB");
             summary.AddRow("CSV", Path.GetFullPath(opt.CsvPath).EscapeMarkup());
             summary.AddRow("Verdict", pass ? "[green]PASS[/]" : "[red]FAIL[/]");
@@ -1201,7 +1213,9 @@ namespace HpAttenuator.TestHarness
                     continue;
                 }
                 string err = $"{p.ErrorDb:+0.00;-0.00;0.00}";
-                string errCell = Math.Abs(p.ErrorDb) <= tol ? $"[green]{err}[/]" : $"[red]{err}[/]";
+                string errCell = p.FloorLimited
+                    ? $"[yellow]FLOOR {err}[/]"                                   // #13: saturated, not an error
+                    : Math.Abs(p.ErrorDb) <= tol ? $"[green]{err}[/]" : $"[red]{err}[/]";
                 table.AddRow(
                     p.CommandedDb.ToString(),
                     p.Command.EscapeMarkup(),
@@ -1221,10 +1235,14 @@ namespace HpAttenuator.TestHarness
             string warn = string.IsNullOrEmpty(r.Warning)
                 ? ""
                 : " [yellow](" + (r.Warning.Length > 60 ? r.Warning.Substring(0, 60) + "…" : r.Warning).EscapeMarkup() + ")[/]";
+            // #13: note floor-limited points (excluded from max|err|) and the honest usable depth.
+            string floor = r.FloorLimitedCount > 0
+                ? $" [yellow]({r.FloorLimitedCount} floor, deepest {r.DeepestMeasuredDb:0.0} dB)[/]"
+                : "";
             // No square brackets in the plain text — Spectre would parse them as markup.
             AnsiConsole.MarkupLine(
                 $"{flag} {r.FreqMHz,9:0.###} MHz  {r.Regime,-9}  " +
-                $"max|err|={r.MaxAbsErrorDb:0.00} dB{LevelTag(r)}{warn}");
+                $"max|err|={r.MaxAbsErrorDb:0.00} dB{LevelTag(r)}{floor}{warn}");
         }
 
         /// <summary>Compact "ref X dBm @ src Y dBm" tag for the leveled 0 dB reference (#16); empty
