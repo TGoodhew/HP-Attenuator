@@ -47,6 +47,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V5 | #15 — per-section characterize + sum reaches a validated full 110/121 dB | `issue-15-per-section-sum` | ⬜ | — |
 | V6 | #13 — deep saturated points flagged FLOOR (not failed); verdict/depth honest | `issue-13-floor-detection` | ⬜ | — |
 | V7 | #3 — verify the automatic-tuning HP-IB code + acquire-then-hold sequence | `issue-3-tune-mode` | ⬜ | — |
+| V8 | #6 — empty/transient read recovers in place (auto-range boundary) instead of failing | `issue-6-empty-read-recovery` | ⬜ | — |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: loses lock through the converter (CHANGE_LOG) |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -201,6 +202,28 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
   (the default, everything else) is unaffected either way.
 - **Low priority:** we command the source, so the frequency is always known — manual is the right default
   for production. Auto is a convenience for uncertain/drifting sources; validate when convenient.
+
+---
+
+## V8 — #6 empty/transient read recovery  ⬜ built, awaiting bench
+
+- **Branch:** `issue-6-empty-read-recovery` (built; sim PASS — the glitch is hardware-only, sim can't
+  reproduce it). Also on `main`.
+- **What it does:** an empty/short read (transient GPIB race across an RF-range auto-range) now gets its
+  own settle+re-trigger retry budget and recovers in place, instead of burning the 3 quick retries on the
+  same glitch and failing the point. Reclassified as a distinct transient, not "unrecognized" data.
+- **Isolate & run** (the original repro — a converter sweep across the ~15–16 dB auto-range boundary):
+  ```powershell
+  git checkout issue-6-empty-read-recovery   # (or run from main — it's merged)
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+    --freq 5000 --astop 30 --astep 1 --debug --out DebugResults/v8-empty.csv
+  ```
+- **Expect (PASS):** where the old run showed `Unrecognized 8902A reading: '' [SB=0x41]` and failed the
+  point, the trace now shows `empty/short read — transient (retry n/5)` and the point reads a valid value
+  after the settle — the sweep no longer has holes at the auto-range boundary. Watch for the 15/16 dB
+  region specifically.
+- **If it still fails there:** the boundary may need more than 5 empty retries or a longer settle — bump
+  `EmptyReadRetries` / `TransientReadSettleMs`, commit + push, re-run.
 
 ---
 

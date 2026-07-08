@@ -24,6 +24,11 @@ namespace HpAttenuator.Measurement
         /// auto-range (which briefly returns empty/garbled reads) has time to settle before re-read.</summary>
         private const int TransientReadSettleMs = 1200;
 
+        /// <summary>Extra settle+re-trigger retries granted specifically to an empty/short read (#6) —
+        /// a transient GPIB race across an auto-range boundary. These do NOT consume the main read
+        /// attempts, so a cluster of glitches recovers in place instead of failing the point.</summary>
+        private const int EmptyReadRetries = 5;
+
         /// <summary>
         /// How far below the source level the range CALIBRATE may go, in dB. CALIBRATE needs
         /// the signal still measurable; past ~this depth it raises Error 35 ("level error
@@ -459,20 +464,35 @@ namespace HpAttenuator.Measurement
         private double ReadRelativeDbWithRetry(int maxAttempts)
         {
             System.Exception last = null;
-            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            int empties = 0;
+            for (int attempt = 1; attempt <= maxAttempts; )
             {
                 try { return _receiver.ReadRelativeDb(); }
                 catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
                 {
                     last = ex;
+                    var he = ex as Hp8902AException;
+
+                    // Empty/short read (#6): a transient GPIB race (read raced Data Ready / an auto-range),
+                    // not bad data. Settle + re-trigger on its OWN budget so a cluster of glitches across a
+                    // range boundary doesn't burn the real attempts. No CL — it isn't an error condition.
+                    if (he != null && he.IsEmpty && empties < EmptyReadRetries)
+                    {
+                        empties++;
+                        Trace?.Invoke($"empty/short read — transient (retry {empties}/{EmptyReadRetries}); settle {TransientReadSettleMs} ms + re-trigger");
+                        Thread.Sleep(TransientReadSettleMs);
+                        continue;                           // does NOT consume a main attempt
+                    }
+
                     // Error 96 = the tuned receiver lost lock at a range boundary. CL alone clears the
                     // error but does NOT re-acquire the signal, so every subsequent read re-throws 96 —
                     // a whole-sweep cascade. BC (blue+CLEAR) forces a VCO retune and recaptures the
                     // signal (manual O&C 3-116), which is what lets the sweep continue past the boundary.
-                    bool lostLock = (ex as Hp8902AException)?.Code == 96;
+                    bool lostLock = he?.Code == 96;
                     try { if (lostLock) _receiver.RetuneToSignal(); else _receiver.ClearError(); }
                     catch { /* keep going */ }
                     if (attempt < maxAttempts) Thread.Sleep(TransientReadSettleMs);
+                    attempt++;
                 }
             }
             throw last;
@@ -491,7 +511,8 @@ namespace HpAttenuator.Measurement
         private double ReadStepWithBoundaryCal(int maxAttempts, ref int boundaryCals)
         {
             System.Exception last = null;
-            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            int empties = 0;
+            for (int attempt = 1; attempt <= maxAttempts; )
             {
                 // Honour a pending RECAL before reading — calibrate the boundary at this steady level.
                 MaybeCalibrateBoundary(ref boundaryCals);
@@ -503,6 +524,18 @@ namespace HpAttenuator.Measurement
                 {
                     last = ex;
                     var he = ex as Hp8902AException;
+
+                    // Empty/short read (#6): transient GPIB race, not bad data. Settle + re-trigger on its
+                    // own budget (no CL, no calibrate) so a cluster across an auto-range boundary doesn't
+                    // burn the real attempts — the exact 15/16 dB double-empty this issue reported.
+                    if (he != null && he.IsEmpty && empties < EmptyReadRetries)
+                    {
+                        empties++;
+                        Trace?.Invoke($"empty/short read at step — transient (retry {empties}/{EmptyReadRetries}); settle {TransientReadSettleMs} ms + re-trigger");
+                        Thread.Sleep(TransientReadSettleMs);
+                        continue;                           // does NOT consume a main attempt
+                    }
+
                     if (he != null && he.Code == 96)
                     {
                         // Lost lock: VCO retune (BC) to recapture (manual O&C 3-116).
@@ -528,6 +561,7 @@ namespace HpAttenuator.Measurement
                         try { _receiver.ClearError(); } catch { /* keep going */ }
                     }
                     if (attempt < maxAttempts) Thread.Sleep(TransientReadSettleMs);
+                    attempt++;
                 }
             }
             throw last;

@@ -490,10 +490,16 @@ namespace HpAttenuator.Instruments
         /// </summary>
         internal static double ParseReading(string raw)
         {
+            // A read that raced Data Ready / an RF-range auto-range can come back empty or as a stray
+            // control byte that renders as '' — a transient timing glitch, not bad data (#6). Strip
+            // control chars and treat a no-numeric-content read as a retriable EMPTY read, distinct from
+            // genuinely unrecognized (non-numeric but printable) data.
             if (string.IsNullOrWhiteSpace(raw))
-                throw new FormatException("Empty reading from 8902A.");
+                throw Hp8902AException.EmptyRead();
 
-            string s = raw.Trim();
+            string s = Regex.Replace(raw, @"[\x00-\x1F\x7F]", "").Trim();
+            if (s.Length == 0)
+                throw Hp8902AException.EmptyRead();
 
             // UNCAL fill: instead of a number the 8902A returns a run of repeated letters when the
             // current RF range is uncalibrated — 'CCCC…' (RF Power) or 'AAAA…'/'aaaa…' (Tuned RF
@@ -501,6 +507,11 @@ namespace HpAttenuator.Instruments
             // response itself and surface it as UNCAL so the caller can CALIBRATE at this level.
             if (Regex.IsMatch(s, "^[A-Za-z]+$"))
                 throw Hp8902AException.Uncal();
+
+            // No numeric content at all (after stripping control chars) is a transient/short read, not
+            // "unrecognized" — retry it rather than failing the point (#6).
+            if (!Regex.IsMatch(s, "[0-9]"))
+                throw Hp8902AException.EmptyRead();
 
             double v;
             if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v))

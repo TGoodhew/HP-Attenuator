@@ -47,20 +47,32 @@ namespace HpAttenuator.Instruments
         /// </summary>
         public bool IsUncal { get; }
 
+        /// <summary>
+        /// True when the read came back empty / had no numeric content (a transient GPIB timing glitch:
+        /// the read raced Data Ready or an RF-range auto-range). It is retriable — settle + re-trigger —
+        /// NOT genuinely bad data, so it should be recovered rather than failing the point (issue #6).
+        /// </summary>
+        public bool IsEmpty { get; }
+
         public Hp8902AException(int code, string message) : base($"8902A Error {code}: {message}")
         {
             Code = code;
         }
 
-        private Hp8902AException(string message) : base(message)
+        private Hp8902AException(string message, bool uncal, bool empty) : base(message)
         {
             Code = -1;
-            IsUncal = true;
+            IsUncal = uncal;
+            IsEmpty = empty;
         }
 
         /// <summary>An uncalibrated ("CCCC") reading — the receiver needs calibration at this level.</summary>
         public static Hp8902AException Uncal() =>
-            new Hp8902AException("8902A reading uncalibrated (RECAL) — needs CALIBRATE at this level");
+            new Hp8902AException("8902A reading uncalibrated (RECAL) — needs CALIBRATE at this level", uncal: true, empty: false);
+
+        /// <summary>An empty / no-numeric-content read — a transient timing glitch, retriable (#6).</summary>
+        public static Hp8902AException EmptyRead() =>
+            new Hp8902AException("8902A empty/short read — transient (retrying)", uncal: false, empty: true);
 
         /// <summary>Known 8902A operating-error messages (Operation manual, p.3-286).</summary>
         public static string Describe(int code)

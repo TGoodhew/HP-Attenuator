@@ -13,6 +13,23 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased — not yet merged
 
+### branch `issue-6-empty-read-recovery` (off `main`) — #6
+- **#6 — recover an empty/transient read instead of failing the point.** A sweep point could fail on an
+  empty/garbage read (`Unrecognized 8902A reading: ''  [SB=0x41]`) that is really a transient GPIB race
+  — the read raced Data Ready or an RF-range auto-range (the reported 15/16 dB double-empty at a range
+  boundary, with the sweep recovering by itself at 17 dB). The three quick retries all caught the same
+  glitch, so the point failed. Fix: (1) `ParseReading` now strips control characters and classifies a
+  **no-numeric-content** read (including a stray control byte that renders as `''`) as a distinct
+  **transient EMPTY read** — `Hp8902AException.EmptyRead()` / `IsEmpty` — not the same "unrecognized"
+  bucket as genuinely bad data. (2) Both read-retry loops (`ReadRelativeDbWithRetry`,
+  `ReadStepWithBoundaryCal`) give an empty read its **own** settle+re-trigger budget (`EmptyReadRetries`
+  = 5, `TransientReadSettleMs` apart) that does **not** consume the main attempts and does **not** CL/
+  calibrate — so a cluster of glitches across an auto-range recovers in place. Logged as
+  `empty/short read — transient (retry n/5)` via the `--debug` trace, distinct from an unrecognized-data
+  failure. Timeouts (genuine below-floor) stay a separate path and still stop the sweep. **Build clean;
+  sim `--atten-sweep` PASS (0.04 dB, no regression).** The empty-read glitch is hardware-only (sim never
+  produces one), so recovery is bench-validated per HardwareValidation.md row **V8**.
+
 ### branch `issue-3-tune-mode` (off `main`) — #3
 - **#3 — selectable manual vs automatic Tuned RF Level tuning.** The 8902A can tune to the signal two
   ways (O&C manual): **manual** — enter the frequency directly (`<freq>MZ`), fast/deterministic when the

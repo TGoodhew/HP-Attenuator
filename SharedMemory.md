@@ -76,7 +76,10 @@ to 0.01 dB). This sidesteps the sub-floor measurement entirely.
 - **#3 (BUILT, on `main`, awaiting bench — ledger V7):** selectable manual/auto Tuned RF Level tuning
   (`--manual-tune` default / `--auto-tune`). Auto-tune HP-IB code is bench-UNVERIFIED (OCR-ambiguous
   manual) — verify on the 8902A. Sim PASS (plumbing only).
-- Others (not yet built): #2 sweep speed, #6 empty-read recovery, #8 latched SRQ.
+- **#6 (BUILT, on `main`, awaiting bench — ledger V8):** empty/transient read at an auto-range boundary
+  now recovers in place (own settle+re-trigger budget, `EmptyReadRetries`) instead of failing the point;
+  reclassified as a distinct transient. Sim PASS. Bench check: HardwareValidation.md V8.
+- Others (not yet built): #2 sweep speed, #8 latched SRQ.
 
 ## What's DONE and validated
 
