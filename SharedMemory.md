@@ -16,22 +16,21 @@ A cross-machine handoff snapshot so work can continue from anywhere. Updated 202
 
 ## Where we are right now
 
-On **`main`** (b198f77). Goal of the current push: measure the 11713A + 8494/8496 step
-attenuator's attenuation accurately across its full range.
+On **`main`** (`635755a`, pushed to origin). Goal: measure the 11713A + 8494/8496 step attenuator's
+attenuation accurately across its full range.
 
-**Stack MERGED to main (2026-07-09):** the #4 + #14 stack fast-forwarded onto `main` (build + sim
-sweep green). `main` now carries the #4 debug-poll fix, the #14 direct-method work (detector
-selection, 3-range cal pass, adaptive leveling), and the `--panel-review` / `--track-mode` tooling.
-```
-main (b198f77)  ← #4 (950093c) + #14 (…a32982f) + handoff (b198f77), all merged
-```
-Next issue work starts on a fresh branch off `main`. Not yet pushed to origin (main is local-only).
+**Milestone (2026-07-09): every substantive issue is built + merged to `main`; nothing left to build
+away from the hardware.** The remaining work is **bench validation in Renton** — walk
+[HardwareValidation.md](HardwareValidation.md) rows **V1–V10** (V1 first). Each built-but-unverified
+issue also carries the GitHub **`needs-verification`** label (#2, #3, #6, #8, #13, #15, #17). Issue **#18**
+(P0/Required) is the bench task to run V1 first. Issue **#14 is CLOSED** (not planned / superseded — see
+its finding below). `gh` CLI is installed + authenticated (TGoodhew) — use it for issues/PRs.
 
 **Bench:** ATTEN X = HP 8494 (0–11 dB, 1 dB steps), ATTEN Y = HP 8496 (0–110 dB, 10 dB steps),
 11713A @ GPIB 27. Source 8340B @ 20, LO 8673B @ 19, receiver 8902A @ 14, via 11793A converter
 (>1300 MHz) + 11792A sensor. Default test freq 3 GHz (attenuators rated DC–4 GHz).
 
-## The big finding (#14): direct measurement is floor-limited to ~95 dB
+## The big finding (#14, now CLOSED-superseded): direct measurement is floor-limited to ~95 dB
 
 The full 110 dB **cannot be measured directly** through this chain. The **11793A converter path
 floor is −100 dBm** (Microwave Product Note, verbatim: "any power level may be measured between
@@ -50,20 +49,24 @@ readings saturate at ~−97.6 dB rel (≈ −98.7 dBm absolute), matching the �
   SET REF (produced garbage: 68 dB at a 10 dB step). Left as an off-by-default `--track-mode` flag.
 
 **Correct direct method (per O&C Table 4-1 / Ch.5 + Product Note):** Average detector (`4.4SP`),
-single SET REF at 0 dB, CALIBRATE the 3 RF ranges. **BUT see #17** — our pre-SET-REF 3-range
-CALIBRATE currently fires nothing (no UNCAL detected); the ~90 dB accuracy is riding on resident
-range factors, not a fresh calibration.
+single SET REF at 0 dB, CALIBRATE the 3 RF ranges. **#17 addressed the no-op cal descent** — the pre-SET-REF
+3-range CALIBRATE was firing nothing (no UNCAL; ~90 dB accuracy rode resident factors). Now observable, with
+opt-in `--force-range-cal` to force a real per-range CALIBRATE (bench-verify: V2/V4).
+
+**#14 disposition:** the issue's original ask (segmented *re-referencing* sweep) is physically non-viable —
+`SET REF` re-zeroes only the *relative* frame, not the absolute converter floor — so it was closed as
+superseded. Its sync/track experiments were HW-tested dead-ends; the full-110 goal is #15.
 
 **→ The real path to a validated full 110 dB is #15: per-section characterize + SUM** (measure each
 8496/8494 section where the signal is strong, sum — `--section-test` proved the sections add linearly
 to 0.01 dB). This sidesteps the sub-floor measurement entirely.
 
-## Open issues
+## Open issues — ALL BUILT + MERGED, awaiting bench (labeled `needs-verification`)
 
-- **#17 (NEW, blocks #14 accuracy claim):** the pre-SET-REF 3-range CALIBRATE descent
-  (`CalibrateRfRanges`) is a no-op — no read throws UNCAL, so zero CALIBRATEs fire (proven: `--panel-review`
-  never prompted). Fix: clear TRFL range cal factors to force a fresh calibration, and/or detect range
-  crossings by reading-jump; add observability so a no-op descent is visible.
+- **#17 (BUILT, ledger V2/V3/V4):** the pre-SET-REF 3-range CALIBRATE descent was a silent no-op (no UNCAL
+  → zero CALIBRATEs; ~90 dB rode resident factors). Now every descent step is traced with a loud
+  `NO-OP — 0 CALIBRATEs fired` summary, and `--force-range-cal` issues one unconditional CALIBRATE per RF
+  range. Sim PASS. Bench: does the forced cal fire 3× (panel-review) and improve 80–95 dB accuracy.
 - **#15 (BUILT, on `main`, awaiting bench — ledger V5):** per-section characterize + sum → the path to
   the full 110 dB. `--section-sum` measures each section alone (≤40 dB, above the floor) and sums to
   synthesize the deep totals. Sim PASS (full scale 120.83 dB @ nominal 121). Bench check: HardwareValidation.md V5.
@@ -86,8 +89,7 @@ to 0.01 dB). This sidesteps the sub-floor measurement entirely.
   `Hp8902A.Calibrate()`, which now polls after completion, logs the status under `--debug`, and throws on
   a raised cal error (Error 35) instead of leaving it latched-but-invisible. Sim PASS. Bench: HardwareValidation.md V10.
 
-All originally-listed issues (#2/#3/#4/#6/#8/#13/#14/#15/#16/#17) are now built + merged. Remaining work is
-bench validation (HardwareValidation.md V1–V10) in Renton.
+Remaining work is **bench validation (HardwareValidation.md V1–V10)** in Renton — no more building needed.
 
 ## What's DONE and validated
 
@@ -96,36 +98,52 @@ bench validation (HardwareValidation.md V1–V10) in Renton.
 - **Test 1 / Test 2 / completion-handshake read** (issues #1/#5/#7/#9/#10/#11/#12, MERGED): the
   relative Tuned RF Level attenuation sweep, hardware-validated 0→~90 dB at 3 GHz.
 
-## Tooling (on the branch)
+## Tooling (all on `main`)
 
-- **`--panel-review`** — pauses to have the operator read the 8902A front panel; wraps a specific step
-  tightly (pause immediately before + after), via `MeasurementEngine.PanelWatch`/`PanelReview` hooks
-  wired to `FrontPanelReview`. Attended hardware only. NOTE: currently only wired around the (no-op)
-  cal descent → doesn't prompt (that's #17).
+- **`--section-sum`** (#15) — characterize each attenuator section alone (≤40 dB, above the floor), then
+  SUM to synthesize the full 110/121 dB that can't be measured directly. The real full-range path.
+- **`--force-range-cal`** (#17) — force one CALIBRATE per RF range in the pre-SET-REF descent (default off);
+  pair with `--debug` for the descent trace / no-op summary and `--panel-review` to watch each CALIBRATE.
+- **`--profile`** (#2) — attribute sweep wall-clock by category (read / range-cal / settle / atten-set /
+  other) to find the real hotspot before optimizing. Run WITHOUT `--debug` (its per-command poll distorts).
+- **`--floor-dbm dBm` / `--no-floor-detect`** (#13) — deep points saturated at the converter floor are
+  flagged FLOOR and excluded from the verdict (default on, threshold −98 dBm).
+- **`--manual-tune` (default) / `--auto-tune`** (#3) — TRFL signal acquisition. Auto-tune HP-IB code is
+  bench-UNVERIFIED (`Hp8902A.AutoTuneSpecialFunction = 7.1SP`).
+- **`--panel-review`** — pauses to have the operator read the 8902A front panel; wraps a step tightly via
+  `MeasurementEngine.PanelWatch`/`PanelReview` → `FrontPanelReview`. Attended hardware only. Now prompts
+  around each forced CALIBRATE when `--force-range-cal` is on (#17).
 - **`--detector avg|sync`, `--sync-detector`, `--track-mode`, `--lo-power dBm`** — TRFL detector / mode
-  / LO drive selectors (Average is correct; sync + track are dead ends kept as flags).
-- **`DebugResults/`** — all run artifacts / result CSVs go here (git-ignored as a whole). Harness
-  writes there by default (`--out DebugResults/<name>.csv`).
-- **`SpecFiles/8494G_8496G_series_attenuation_ranges.csv`** — per-dB pass/fail limits 0–121 dB; the
-  spec the sweep should validate against (a future refinement so DUT pad tolerance isn't charged to
-  the measurement).
+  / LO drive selectors (Average is correct; sync + track are HW-tested dead ends kept as flags).
+- **`--debug`** — traces every 8902A command + status byte; also drives `MeasurementEngine.Trace` (yellow
+  range-cal descent lines, #17) and now the post-CALIBRATE status line (#8). Slows a run (per-command poll).
+- **`DebugResults/`** — all run artifacts / CSVs (git-ignored). Harness writes there by default.
+- **`SpecFiles/8494G_8496G_series_attenuation_ranges.csv`** — per-dB pass/fail limits 0–121 dB (a future
+  refinement so DUT pad tolerance isn't charged to the measurement).
 
 ## How to run (hardware)
 
 ```powershell
 # Sensor cal is reused within 8 h (marker in %TEMP%); add --recal after a power-cycle.
-# The correct direct method — Average detector, full range:
+# Direct method — Average detector, sweep (honest to ~90 dB; deep points flagged FLOOR by #13):
 dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
   --freq 3000 --astop 110 --astep 10 --debug --out DebugResults/run.csv
+
+# Full-range path (#15) — per-section characterize + sum, reaches a validated 110/121 dB:
+dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --section-sum `
+  --freq 3000 --debug --out DebugResults/sectionsum.csv
 ```
 
-Working process: one branch per issue, a commit per change, CHANGE_LOG.md updated on each, **no merge
-until Tony approves**. Never claim a hardware result Tony hasn't confirmed.
+Working process (current): one branch per issue, a commit per change, CHANGE_LOG.md updated on each.
+**`main` is the dev trunk — issue work merges freely (ff)**; branches are kept alive (not deleted) until
+bench-validated. Standing git default is commit + push. Never claim a hardware result Tony hasn't confirmed
+(only mark HardwareValidation.md rows ✅ from real-hardware runs).
 
 ## Suggested next step
 
-Stack is merged (done 2026-07-09). Remaining decision: fix **#17** first (so the direct method's
-ranges are genuinely calibrated vs relying on resident factors — cheap, sim-testable, makes the
-≤90 dB claim honest) or go straight to **#15** (per-section characterize + sum — the actual path to
-the full 110 dB, since #17 does NOT lift the ~95 dB converter floor). Either way, start on a new
-branch off `main`.
+**Nothing left to build away from the hardware.** Next step is bench validation in Renton: open
+[HardwareValidation.md](HardwareValidation.md) and walk **V1 first** (#4 `--debug`, the low-risk warm-up →
+issue #18), then V2 (#17 `--force-range-cal`), … through V10. Each row has the exact isolation command,
+pass criterion, and where the fix goes. Mark rows ✅ as they pass and drop the `needs-verification` label
+(and/or close the issue) once confirmed. If a row fails, fix on its surviving `issue-NN` branch, commit +
+push, re-run.
