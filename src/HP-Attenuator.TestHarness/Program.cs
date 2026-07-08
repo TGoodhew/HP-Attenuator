@@ -134,6 +134,16 @@ namespace HpAttenuator.TestHarness
                     return RunSectionTest(opt, secEngine, config);
                 }
 
+                // #15: per-section characterize + sum. Measure each section alone (each stays above the
+                // ~95 dB converter floor), then sum to synthesize the full 110/121 dB that cannot be
+                // measured directly. The real path to a validated full-range number.
+                if (opt.SectionSum)
+                {
+                    var sumAttn = bench.MakeAttenuator(config);
+                    var sumEngine = new MeasurementEngine(bench.Source, bench.Lo, sumAttn, bench.Receiver, opt.Sweep);
+                    return RunSectionSum(opt, sumEngine, config);
+                }
+
                 // Test 2: a single-frequency relative attenuation sweep in 1 dB steps from
                 // 0 dB to the attenuator's maximum. It reuses the Tuned RF Level relative
                 // method (SET REF at 0 dB normalises the path loss); only the frequency and
@@ -839,6 +849,181 @@ namespace HpAttenuator.TestHarness
                 "fine and the deep-boundary step is in the MEASUREMENT. If one 40 dB section reads off, that section is the culprit.[/]");
             return 0;
         }
+
+        // ---- #15: per-section characterize + sum ---------------------------
+
+        /// <summary>The ~dB above which a total can't be measured DIRECTLY through the 11793A path
+        /// (its floor is −100 dBm; with the reference near −2 dBm that caps direct reads at ~95–98 dB —
+        /// SharedMemory.md / Microwave Product Note). Above this, only the section SUM is valid.</summary>
+        private const double DirectFloorDb = 95.0;
+
+        /// <summary>
+        /// #15 — per-section characterize + SUM. Measures each attenuator section on its own (every
+        /// section is ≤40 dB, so each read stays well above the ~95 dB direct floor), then sums the
+        /// measured sections to synthesize the totals — including the full 110/121 dB that cannot be
+        /// measured directly through the converter. Sections add linearly (proved by --section-test to
+        /// 0.01 dB), so the sum is a valid full-range measurement. Prints a per-section characterization
+        /// table and a synthesized-total table (nominal vs summed), and writes both to CSV.
+        /// </summary>
+        private static int RunSectionSum(HarnessOptions opt, MeasurementEngine engine, AttenuatorConfig config)
+        {
+            double freq = opt.RfPowerFreqMHz;
+
+            // One setting per physical section, engaged alone against the 0 dB reference.
+            var sections = config.AllSections.OrderBy(s => s.Digit).ToList();
+            var settings = sections
+                .Select(s => new AttenSetting(SectionLabel(config, s), s.Decibels, new[] { s.Digit }))
+                .ToList();
+
+            AnsiConsole.MarkupLine(
+                $"[grey]Per-section characterize + sum (#15):[/] {freq:0.###} MHz — measuring each of the " +
+                $"{sections.Count} sections alone (all ≤40 dB, above the ~{DirectFloorDb:0} dB direct floor), then " +
+                "summing to synthesize totals that can't be measured directly.");
+            AnsiConsole.WriteLine();
+
+            Action<int, int, AttenPointResult> prog = (i, n, p) =>
+            {
+                string body = p.Error != null
+                    ? $"[red]{p.Error.EscapeMarkup()}[/]"
+                    : $"meas {p.MeasuredAttenuationDb,7:0.00} dB  (err {p.ErrorDb:+0.00;-0.00;0.00})";
+                AnsiConsole.MarkupLine($"  {i,2}/{n}  {p.Group.EscapeMarkup()}  nominal {p.CommandedDb,3} dB -> {body}");
+            };
+
+            FreqPointResult r = engine.MeasureSettings(freq, settings, prog);
+
+            // digit -> measured section attenuation (NaN if that section's read errored).
+            var measured = new Dictionary<int, double>();
+            for (int i = 0; i < sections.Count; i++)
+                measured[sections[i].Digit] = r.Points[i].Error != null ? double.NaN : r.Points[i].MeasuredAttenuationDb;
+
+            // --- per-section characterization table ---
+            var secTable = new Table().Border(TableBorder.Rounded)
+                .Title($"{freq:0.###} MHz  {r.Regime}  — per-section".EscapeMarkup());
+            secTable.AddColumn("Section"); secTable.AddColumn(new TableColumn("Nominal dB").RightAligned());
+            secTable.AddColumn("Cmd"); secTable.AddColumn(new TableColumn("Meas dB").RightAligned());
+            secTable.AddColumn(new TableColumn("Error dB").RightAligned());
+
+            double worstSection = 0; int sectionErrors = 0;
+            for (int i = 0; i < sections.Count; i++)
+            {
+                var p = r.Points[i];
+                if (p.Error != null)
+                {
+                    sectionErrors++;
+                    secTable.AddRow(p.Group.EscapeMarkup(), p.CommandedDb.ToString(), p.Command.EscapeMarkup(),
+                        "[red]—[/]", $"[red]{p.Error.EscapeMarkup()}[/]");
+                    continue;
+                }
+                worstSection = Math.Max(worstSection, Math.Abs(p.ErrorDb));
+                string ec = $"{p.ErrorDb:+0.00;-0.00;0.00}";
+                string errCell = Math.Abs(p.ErrorDb) <= opt.ToleranceDb ? $"[green]{ec}[/]" : $"[red]{ec}[/]";
+                secTable.AddRow(p.Group.EscapeMarkup(), p.CommandedDb.ToString(), p.Command.EscapeMarkup(),
+                    $"{p.MeasuredAttenuationDb:0.00}", errCell);
+            }
+            AnsiConsole.Write(secTable);
+
+            // Characterized full scale = sum of every section, synthesized entirely from in-range reads.
+            bool anyMissing = sections.Any(s => double.IsNaN(measured[s.Digit]));
+            double fullScale = anyMissing ? double.NaN : sections.Sum(s => measured[s.Digit]);
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine(anyMissing
+                ? "[yellow]Full-scale sum unavailable — at least one section read failed.[/]"
+                : $"[grey]Characterized full scale (Σ all sections):[/] [green]{fullScale:0.00} dB[/] " +
+                  $"(nominal {config.MaxDecibels}) — synthesized from reads that never went below the direct floor.");
+            AnsiConsole.WriteLine();
+
+            // --- validation by SUM: totals synthesized from the measured sections ---
+            var targets = new List<int>();
+            for (int v = 10; v <= config.MaxDecibels; v += 10) targets.Add(v);
+            if (targets.Count == 0 || targets[targets.Count - 1] != config.MaxDecibels) targets.Add(config.MaxDecibels);
+
+            var sumTable = new Table().Border(TableBorder.Rounded).Title("Synthesized totals (Σ measured sections)");
+            sumTable.AddColumn(new TableColumn("Target dB").RightAligned());
+            sumTable.AddColumn("Sections (dB)");
+            sumTable.AddColumn(new TableColumn("Summed dB").RightAligned());
+            sumTable.AddColumn(new TableColumn("Error dB").RightAligned());
+            sumTable.AddColumn("Direct?");
+
+            var allSections = config.AllSections.ToList();
+            double worstSum = 0; int sumErrors = 0;
+            var sumRows = new List<(int target, string parts, double summed, double error, bool beyond, bool failed)>();
+            foreach (int target in targets)
+            {
+                var digits = CommandBuilder.Solve(allSections, target);
+                if (digits == null) continue;                    // unreachable total — skip
+                string parts = string.Join("+", digits.OrderByDescending(d => config.ForDigit(d).Decibels)
+                                                       .Select(d => config.ForDigit(d).Decibels.ToString()));
+                bool beyond = target >= DirectFloorDb;
+                bool failed = digits.Any(d => double.IsNaN(measured[d]));
+                double summed = failed ? double.NaN : digits.Sum(d => measured[d]);
+                double error = summed - target;
+
+                if (failed)
+                {
+                    sumErrors++;
+                    sumTable.AddRow(target.ToString(), parts, "[red]—[/]", "[red]section read failed[/]",
+                        beyond ? "[yellow]sum only[/]" : "yes");
+                }
+                else
+                {
+                    worstSum = Math.Max(worstSum, Math.Abs(error));
+                    string ec = $"{error:+0.00;-0.00;0.00}";
+                    // Error vs nominal folds in DUT pad tolerance, not just measurement — flag (yellow),
+                    // don't fail, when it exceeds the per-point tolerance.
+                    string errCell = Math.Abs(error) <= opt.ToleranceDb ? $"[green]{ec}[/]" : $"[yellow]{ec}[/]";
+                    sumTable.AddRow(target.ToString(), parts, $"{summed:0.00}", errCell,
+                        beyond ? "[yellow]no (sum only)[/]" : "yes");
+                }
+                sumRows.Add((target, parts, summed, error, beyond, failed));
+            }
+            AnsiConsole.Write(sumTable);
+
+            // --- CSV (per-section rows then synthesized-total rows) ---
+            try
+            {
+                using var csv = OpenCsvWriter(opt.CsvPath);
+                csv.WriteLine("kind,label_or_target,command_or_parts,measured_or_summed_db,error_db,beyond_direct_floor,error");
+                for (int i = 0; i < sections.Count; i++)
+                {
+                    var p = r.Points[i];
+                    csv.WriteLine(string.Join(",", new[]
+                    {
+                        "section", (p.Group ?? "").Replace(",", ";"), p.Command,
+                        F(p.MeasuredAttenuationDb), F(p.ErrorDb), "", (p.Error ?? "").Replace(",", ";")
+                    }));
+                }
+                foreach (var s in sumRows)
+                    csv.WriteLine(string.Join(",", new[]
+                    {
+                        "sum", s.target.ToString(CultureInfo.InvariantCulture), s.parts,
+                        F(s.summed), F(s.error), s.beyond ? "1" : "0", s.failed ? "section read failed" : ""
+                    }));
+            }
+            catch (Exception ex) { AnsiConsole.MarkupLine($"[yellow]CSV not written: {ex.Message.EscapeMarkup()}[/]"); }
+
+            // Verdict: #15 succeeds when every section read cleanly (so a valid full-scale sum exists).
+            // Absolute accuracy vs the nominal labels is a DUT+bench matter, surfaced for the operator.
+            AnsiConsole.WriteLine();
+            bool pass = sectionErrors == 0 && sumErrors == 0;
+            var summary = new Table().Border(TableBorder.Heavy);
+            summary.AddColumn("Result"); summary.AddColumn("");
+            summary.AddRow("Method", "#15 per-section characterize + sum");
+            summary.AddRow("Frequency", $"{freq:0.###} MHz  ({r.Regime})".EscapeMarkup());
+            summary.AddRow("Sections read", $"{sections.Count - sectionErrors}/{sections.Count}");
+            summary.AddRow("Full scale (Σ)", double.IsNaN(fullScale) ? "[red]n/a[/]" : $"{fullScale:0.00} dB (nominal {config.MaxDecibels})");
+            summary.AddRow("Worst section |err vs nominal|", $"{worstSection:0.00} dB");
+            summary.AddRow("Worst sum |err vs nominal|", $"{worstSum:0.00} dB");
+            if (sectionErrors > 0) summary.AddRow("Section read failures", $"[red]{sectionErrors}[/]");
+            summary.AddRow("CSV", Path.GetFullPath(opt.CsvPath).EscapeMarkup());
+            summary.AddRow("Verdict", pass ? "[green]PASS[/]" : "[red]FAIL[/]");
+            AnsiConsole.Write(summary);
+
+            return pass ? 0 : 1;
+        }
+
+        /// <summary>Label for one section: its owning model (X = digits 1-4, Y = 5-8) and digit.</summary>
+        private static string SectionLabel(AttenuatorConfig config, HpAttenuator.Model.Section s) =>
+            $"{(s.Digit <= 4 ? config.XModel : config.YModel)} §{s.Digit}";
 
         // ---- Test 1: single-point RF power readback ------------------------
 

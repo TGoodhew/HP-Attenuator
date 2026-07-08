@@ -13,6 +13,25 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased — not yet merged
 
+### branch `issue-15-per-section-sum` (off `main`) — #15
+- **#15 — per-section characterize + SUM: the path to a validated full 110/121 dB.** The full range
+  can't be measured **directly** — the 11793A converter path floors at −100 dBm, so with the reference
+  near −2 dBm anything past ~95–98 dB reads the floor (the #14 finding). New `--section-sum` mode
+  sidesteps that: it measures **each attenuator section on its own** (the 8494's 1/2/4/4 dB and the
+  8496's 10/20/40/40 dB — every section ≤40 dB, so each read stays comfortably above the floor), then
+  **sums** the measured sections to synthesize any total, including the deep ones that can't be read
+  directly. Sections add linearly (proved by `--section-test` to 0.01 dB), so the sum is a valid
+  full-range measurement. Built entirely on the existing `MeasurementEngine.MeasureSettings` primitive
+  (0 dB SET REF, engage one section's digits, read relative) + `CommandBuilder.Solve` to map each target
+  total to its engaged sections. Output: a per-section characterization table (nominal vs measured vs
+  error), a **characterized full scale** (Σ all sections), and a synthesized-totals table that marks
+  which targets are directly measurable vs **"sum only"** (≥ 95 dB). Verdict passes when every section
+  reads cleanly (a valid full-scale sum exists); absolute error vs the nominal labels folds in DUT pad
+  tolerance, so it's surfaced, not failed. CSV carries both the section rows and the synthesized-total
+  rows. **Build clean; sim `--section-sum` PASS** — full scale 120.83 dB (nominal 121), worst section
+  |err| 0.04 dB, all 8 sections read, 100/110/120/121 dB correctly flagged "sum only". Bench-validated
+  per HardwareValidation.md row **V5**.
+
 ### branch `issue-17-range-cal-observability` (off `main`) — #17
 - **#17 — make the pre-`SET REF` 3-range CALIBRATE observable, and add an opt-in force.** The range-cal
   descent (`CalibrateRfRanges`) was a silent no-op: it only CALIBRATEs when a read throws UNCAL, but

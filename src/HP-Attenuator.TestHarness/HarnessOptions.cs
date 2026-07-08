@@ -19,6 +19,7 @@ namespace HpAttenuator.TestHarness
         public bool AttenSweep;     // --atten-sweep : Test 2 — 1 dB relative attenuation sweep at --freq
         public bool PerAtten;       // --per-atten : Test 3 — exercise each attenuator's settings individually
         public bool SectionTest;    // --section-test : isolate the 8496's two 40 dB sections (digit 7 vs 8)
+        public bool SectionSum;     // --section-sum : #15 — characterize each section alone, then SUM for the full range
         public bool CalDebug;       // --cal-debug : observe the 8902A status byte vs level (no CALIBRATE)
         public bool Debug;          // --debug : trace every 8902A command + status byte (find Error 35)
         public bool PanelReview;    // --panel-review : pause to have the operator read the 8902A front panel
@@ -75,6 +76,7 @@ namespace HpAttenuator.TestHarness
                     case "--atten-sweep": o.AttenSweep = true; break;
                     case "--per-atten": o.PerAtten = true; break;
                     case "--section-test": o.SectionTest = true; break;
+                    case "--section-sum": o.SectionSum = true; break;
                     case "--cal-debug": o.CalDebug = true; break;
                     case "--debug": o.Debug = true; break;
                     case "--panel-review": o.PanelReview = true; break;
@@ -177,6 +179,12 @@ Usage: HP-Attenuator.TestHarness [options]
   --per-atten          Test 3: exercise each attenuator's settings individually at --freq —
                        the 8494 at 1..11 dB and the 8496 at 10..110 dB (the other at 0),
                        ~22 points. Isolates each attenuator's accuracy.
+  --section-sum        #15: characterize each attenuator SECTION on its own (each <=40 dB, so
+                       every read stays above the ~95 dB direct-measurement floor of the 11793A
+                       path), then SUM the measured sections to synthesize totals — including the
+                       full 110/121 dB that cannot be measured directly. Prints a per-section table
+                       and a synthesized-total table (nominal vs summed). Sections add linearly
+                       (proved by --section-test), so the sum is a valid full-range measurement.
   --freq MHz           Frequency for --rf-power / --atten-sweep (default 3000 = 3 GHz;
                        the 8494G/8496G attenuators are rated DC-4 GHz).
   --atten dB           Attenuation for --rf-power (default 0).

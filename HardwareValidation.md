@@ -44,6 +44,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V2 | #17 — real pre-`SET REF` 3-range CALIBRATE (`--force-range-cal`) + descent observability | `issue-17-range-cal-observability` | ⬜ | — |
 | V3 | `--panel-review` actually pauses on each CALIBRATE | `issue-14-synchronous-deep-sweep` | 🔒 | V2 |
 | V4 | #14 — 3-range cal genuinely improves 80–95 dB accuracy | `issue-14-synchronous-deep-sweep` | 🔒 | V2 |
+| V5 | #15 — per-section characterize + sum reaches a validated full 110/121 dB | `issue-15-per-section-sum` | ⬜ | — |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: loses lock through the converter (CHANGE_LOG) |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -123,6 +124,31 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
   toward the <0.5 dB seen ≤70 dB), not the +1.4/+2.7 dB drift the uncalibrated deep ranges showed.
 - **If it fails:** the drift is a converter-path limit, not calibration → escalate to **#15**
   (per-section characterize + sum). Note the result here and in CHANGE_LOG.
+
+## V5 — #15 per-section characterize + sum  ⬜ built, awaiting bench
+
+- **Branch:** `issue-15-per-section-sum` (built; sim PASS — full scale 120.83 dB @ nominal 121, worst
+  section |err| 0.04 dB, all 8 sections read). Also on `main`.
+- **What it does:** measures each attenuator section alone (each ≤40 dB, so every read stays above the
+  ~95 dB converter floor) and **sums** them to synthesize the full range — including the 100–121 dB
+  totals that can't be measured directly. This is the real path to a validated full 110/121 dB.
+- **Isolate & run:**
+  ```powershell
+  git checkout issue-15-per-section-sum   # (or run from main — it's merged)
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --section-sum `
+    --freq 3000 --debug --out DebugResults/v5-sectionsum.csv
+  ```
+- **Expect (PASS):** all 8 sections read cleanly (none hit the floor — that's the whole point, each is
+  ≤40 dB); the per-section table shows each near its nominal; the **characterized full scale (Σ)** lands
+  near 121 dB (± the DUT pad tolerances, not measurement floor); the synthesized-totals table produces
+  100/110/120/121 dB rows flagged "sum only".
+- **Cross-check (the key validation):** for the totals that ARE directly measurable (≤ ~90 dB), the
+  synthesized sum should agree with a direct `--atten-sweep` reading at the same target — e.g. compare
+  the 70/80/90 dB sum rows here against `DebugResults/` from a direct sweep. Agreement there is what
+  licenses trusting the sum where direct can't reach.
+- **If a section reads the floor / errors:** it means that section alone is below the floor (shouldn't
+  happen at ≤40 dB) or a path issue — investigate before trusting the deep sums. Fix on
+  `issue-15-per-section-sum`, commit + push, re-run.
 
 ---
 

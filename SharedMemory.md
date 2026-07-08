@@ -64,7 +64,9 @@ to 0.01 dB). This sidesteps the sub-floor measurement entirely.
   (`CalibrateRfRanges`) is a no-op — no read throws UNCAL, so zero CALIBRATEs fire (proven: `--panel-review`
   never prompted). Fix: clear TRFL range cal factors to force a fresh calibration, and/or detect range
   crossings by reading-jump; add observability so a no-op descent is visible.
-- **#15:** per-section characterize + sum → the path to the full 110 dB. **Recommended next.**
+- **#15 (BUILT, on `main`, awaiting bench — ledger V5):** per-section characterize + sum → the path to
+  the full 110 dB. `--section-sum` measures each section alone (≤40 dB, above the floor) and sums to
+  synthesize the deep totals. Sim PASS (full scale 120.83 dB @ nominal 121). Bench check: HardwareValidation.md V5.
 - **#13:** floor/plateau detection — flag saturated deep points (100/110 dB read the floor, reported
   as −2.4/−12 dB errors) instead of failing them.
 - **#4 (fixed on branch `issue-4-debug-poll-falseflag`):** `--debug` no longer false-flags a failed
