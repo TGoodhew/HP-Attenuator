@@ -48,6 +48,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V6 | #13 — deep saturated points flagged FLOOR (not failed); verdict/depth honest | `issue-13-floor-detection` | ⬜ | — |
 | V7 | #3 — verify the automatic-tuning HP-IB code + acquire-then-hold sequence | `issue-3-tune-mode` | ⬜ | — |
 | V8 | #6 — empty/transient read recovers in place (auto-range boundary) instead of failing | `issue-6-empty-read-recovery` | ⬜ | — |
+| V9 | #2 — `--profile` gives the real wall-clock breakdown to drive sweep optimization | `issue-2-sweep-profiling` | ⬜ | — |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: loses lock through the converter (CHANGE_LOG) |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -224,6 +225,32 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
   region specifically.
 - **If it still fails there:** the boundary may need more than 5 empty retries or a longer settle — bump
   `EmptyReadRetries` / `TransientReadSettleMs`, commit + push, re-run.
+
+---
+
+## V9 — #2 sweep timing profile  ⬜ built, awaiting bench
+
+- **Branch:** `issue-2-sweep-profiling` (built; sim renders the breakdown, but sim has no real waits so
+  the numbers are ~0 — the real attribution only appears on hardware). Also on `main`.
+- **What it does:** `--profile` attributes the sweep's wall-clock to categories (settled read, range-cal
+  pre-pass, per-step settle, attenuator set, setup/other) so we optimize the measured hotspot, not a
+  guess. This is #2's required "profile first" step.
+- **Run** (a representative single-frequency deep sweep, WITHOUT --debug so per-command polling doesn't
+  distort the timing):
+  ```powershell
+  git checkout issue-2-sweep-profiling   # (or run from main — it's merged)
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+    --freq 5000 --astop 30 --astep 1 --profile --out DebugResults/v9-profile.csv
+  ```
+- **Read the breakdown → then optimize:**
+  - If **settled read** dominates (expected): it's hardware-bound; the win is fewer reads / smarter
+    retries, not shaving sleeps.
+  - If **range-cal pre-pass** or **per-step settle** is large: those are fixed `Thread.Sleep`s — replace
+    with poll-on-status waits (the post-calibrate wait is done in #8; extend the pattern to the settle).
+  - **Batching** only matters if per-command I/O shows up big, which normally needs `--debug`; the
+    profile tells you whether it's worth pursuing.
+- **Follow-up:** whatever the profile shows is the target for the next optimization pass — record the
+  breakdown here so the optimization is driven by data.
 
 ---
 

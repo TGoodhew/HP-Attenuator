@@ -79,7 +79,10 @@ to 0.01 dB). This sidesteps the sub-floor measurement entirely.
 - **#6 (BUILT, on `main`, awaiting bench — ledger V8):** empty/transient read at an auto-range boundary
   now recovers in place (own settle+re-trigger budget, `EmptyReadRetries`) instead of failing the point;
   reclassified as a distinct transient. Sim PASS. Bench check: HardwareValidation.md V8.
-- Others (not yet built): #2 sweep speed, #8 latched SRQ.
+- **#2 (BUILT, on `main`, awaiting bench — ledger V9):** sweep timing profiler (`--profile`) attributes
+  wall-clock by category (read / range-cal / settle / atten-set / other) so optimization targets the
+  measured hotspot. Pure instrumentation, no measurement change. Sim renders it. Bench: HardwareValidation.md V9.
+- Others (not yet built): #8 latched SRQ.
 
 ## What's DONE and validated
 

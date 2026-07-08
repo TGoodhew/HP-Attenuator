@@ -90,6 +90,11 @@ namespace HpAttenuator.Measurement
         /// </summary>
         public static Action<string> Trace;
 
+        /// <summary>Wall-clock attribution for the most recent <see cref="MeasureFrequency"/> (issue #2).
+        /// The harness aggregates it across frequencies and prints the breakdown under <c>--profile</c>.
+        /// Null until the first frequency is measured.</summary>
+        public SweepTiming Timing { get; private set; }
+
         private readonly ISignalSource _source;
         private readonly ILocalOscillator _lo;
         private readonly IStepAttenuator _attenuator;
@@ -192,6 +197,8 @@ namespace HpAttenuator.Measurement
         {
             int total = (_options.AttenStopDb - _options.AttenStartDb) / _options.AttenStepDb + 1;
             int index = 0;
+            Timing = new SweepTiming();                         // #2: attribute this frequency's wall-clock
+            var wall = System.Diagnostics.Stopwatch.StartNew();
             var plan = Prepare(freqMHz);
             _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector, _options.TrackMode, _options.Tuning);
 
@@ -208,7 +215,8 @@ namespace HpAttenuator.Measurement
             // then step the level down and CALIBRATE at each coarse step. The CALIBRATE is
             // CAPPED so it never goes deeper than the signal can be measured — calibrating
             // past that point is the "level error during calibration" (Error 35).
-            RunRangeCalibration(() => _attenuator.SetAttenuationDb(_options.AttenStartDb), result);
+            Timing.Time(SweepTiming.RangeCal,
+                () => RunRangeCalibration(() => _attenuator.SetAttenuationDb(_options.AttenStartDb), result));
 
             // The 8902A SET REF can leave a small residual offset, so we also normalise in
             // software: the reading at the start attenuation defines 0 dB and every reading
@@ -235,8 +243,8 @@ namespace HpAttenuator.Measurement
                     // mid-cycle — its handshake is inhibited until the cycle completes, O&C 3-22), this
                     // write itself times out. Left outside the try, that IOTimeoutException is unhandled
                     // and crashes the whole harness (issue #11).
-                    point.Command = _attenuator.SetAttenuationDb(atten);
-                    Settle();
+                    point.Command = Timing.Time(SweepTiming.AttenSet, () => _attenuator.SetAttenuationDb(atten));
+                    Timing.Time(SweepTiming.Settle, () => Settle());
 
                     // Per the manual's Attenuator Measurements procedure (O&C 3-115), the stepping
                     // points CALIBRATE each RF input range-to-range boundary the first time RECAL
@@ -244,9 +252,13 @@ namespace HpAttenuator.Measurement
                     // (its top range is calibrated by RunRangeCalibration + SET REF). The reference also
                     // gets extra read attempts since it anchors every other point.
                     bool isReference = atten == _options.AttenStartDb;
+                    // (ref boundaryCals can't be captured by a lambda, so time this read explicitly.)
+                    var swRead = System.Diagnostics.Stopwatch.StartNew();
                     double relDb = isReference
                         ? ReadRelativeDbWithRetry(ReferenceReadAttempts)
                         : ReadStepWithBoundaryCal(StepReadAttempts, ref boundaryCals);
+                    swRead.Stop();
+                    Timing.Add(SweepTiming.Read, swRead.ElapsedMilliseconds);
 
                     // Capture the start-attenuation reading as the software zero reference.
                     if (atten == _options.AttenStartDb) { baselineRelDb = relDb; haveBaseline = true; }
@@ -303,6 +315,12 @@ namespace HpAttenuator.Measurement
             }
 
             ClassifyFloorLimited(result);
+
+            // Attribute whatever wall-clock wasn't caught by a category (Prepare, Begin…, post-hang
+            // probe, overhead) so the --profile breakdown sums to the real elapsed time (#2).
+            wall.Stop();
+            long other = wall.ElapsedMilliseconds - Timing.TotalMs;
+            if (other > 0) Timing.Add("setup/other", other, 0);
             return result;
         }
 

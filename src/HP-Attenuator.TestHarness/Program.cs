@@ -1107,6 +1107,7 @@ namespace HpAttenuator.TestHarness
             int floorPoints = 0;                       // #13: points that saturated at the converter floor
             double deepestMeasured = double.NaN;       // deepest attenuation actually tracked, across freqs
             string worstWhere = "";
+            var timing = new SweepTiming();            // #2: aggregate wall-clock across all frequencies
 
             StreamWriter csvWriter;
             try { csvWriter = OpenCsvWriter(opt.CsvPath); }
@@ -1137,6 +1138,7 @@ namespace HpAttenuator.TestHarness
                     }
 
                     FreqPointResult r = engine.MeasureFrequency(freq, prog);
+                    timing.Merge(engine.Timing);       // #2: fold this frequency's wall-clock into the total
                     measured++;
 
                     foreach (var p in r.Points)
@@ -1188,7 +1190,35 @@ namespace HpAttenuator.TestHarness
             summary.AddRow("Verdict", pass ? "[green]PASS[/]" : "[red]FAIL[/]");
             AnsiConsole.Write(summary);
 
+            if (opt.Profile) RenderTimingProfile(timing);
+
             return pass ? 0 : 1;
+        }
+
+        /// <summary>#2: prints the sweep wall-clock attribution — where the time actually went — so
+        /// optimization targets the measured hotspot. Settled reads normally dominate; a large range-cal
+        /// pre-pass or per-step settle is the next candidate (poll-on-status instead of fixed sleeps, cf.
+        /// #8); per-command I/O only shows up big under --debug (its per-command serial poll).</summary>
+        private static void RenderTimingProfile(SweepTiming timing)
+        {
+            long total = timing.TotalMs;
+            AnsiConsole.WriteLine();
+            var t = new Table().Border(TableBorder.Rounded).Title("Timing profile (#2) — wall-clock by category");
+            t.AddColumn("Category");
+            t.AddColumn(new TableColumn("Time").RightAligned());
+            t.AddColumn(new TableColumn("%").RightAligned());
+            t.AddColumn(new TableColumn("Count").RightAligned());
+            foreach (var (category, ms, count) in timing.Breakdown())
+            {
+                double pct = total > 0 ? 100.0 * ms / total : 0;
+                t.AddRow(category.EscapeMarkup(), $"{ms / 1000.0:0.00} s", $"{pct:0.0}%", count > 0 ? count.ToString() : "—");
+            }
+            t.AddRow("[grey]total[/]", $"[grey]{total / 1000.0:0.00} s[/]", "[grey]100%[/]", "");
+            AnsiConsole.Write(t);
+            AnsiConsole.MarkupLine("[grey]Optimize the biggest bar first. Settled reads are hardware-bound (the 8902A settles);" +
+                " fixed waits (range-cal pre-pass, per-step settle) are the tunable targets — poll-on-status" +
+                " instead of blind sleeps (cf. #8 post-calibrate). Per-command GPIB I/O is negligible unless" +
+                " --debug is on (it polls after every command).[/]");
         }
 
         private static void RenderFrequencyTable(FreqPointResult r, double tol)

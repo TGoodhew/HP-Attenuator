@@ -22,6 +22,7 @@ namespace HpAttenuator.TestHarness
         public bool SectionSum;     // --section-sum : #15 — characterize each section alone, then SUM for the full range
         public bool CalDebug;       // --cal-debug : observe the 8902A status byte vs level (no CALIBRATE)
         public bool Debug;          // --debug : trace every 8902A command + status byte (find Error 35)
+        public bool Profile;        // --profile : attribute sweep wall-clock by category (#2)
         public bool PanelReview;    // --panel-review : pause to have the operator read the 8902A front panel
         public bool CalProbe;       // --cal-probe : force one Tuned RF Level CALIBRATE and trace it (hunt Error 35)
         public bool ExplicitAstop;  // user gave --astop (don't auto-fill the attenuator max)
@@ -79,6 +80,7 @@ namespace HpAttenuator.TestHarness
                     case "--section-sum": o.SectionSum = true; break;
                     case "--cal-debug": o.CalDebug = true; break;
                     case "--debug": o.Debug = true; break;
+                    case "--profile": o.Profile = true; break;
                     case "--panel-review": o.PanelReview = true; break;
                     case "--cal-probe": o.CalProbe = true; break;
                     case "--freq": o.RfPowerFreqMHz = D(Need(args, ++i)); break;
@@ -246,6 +248,11 @@ Usage: HP-Attenuator.TestHarness [options]
                                  Level reads near the floor take tens of seconds.
   --debug                        Trace every 8902A command + the status byte after it, to
                                  pinpoint which command sets an instrument error.
+  --profile                      #2: attribute sweep wall-clock by category (settled reads, range-cal
+                                 pre-pass, per-step settle, attenuator sets, setup/other) and print a
+                                 breakdown so the real hotspot is measured, not guessed, before
+                                 optimizing. Combine with --debug for per-command detail (note: --debug
+                                 itself adds a serial poll after every command and inflates timings).
   --panel-review                 Pause at key points to have YOU read the 8902A front panel and type
                                  what it shows (which annunciator lit, errors) — for questions only a
                                  human at the panel can answer. Pauses before the relevant commands

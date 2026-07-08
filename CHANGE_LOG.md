@@ -13,6 +13,24 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased — not yet merged
 
+### branch `issue-2-sweep-profiling` (off `main`) — #2
+- **#2 — profile the sweep: attribute wall-clock by category before optimizing.** The sweep is slow, but
+  the fix is to *measure the hotspot first* rather than guess. New `SweepTiming` accumulator + `--profile`
+  flag: `MeasureFrequency` now times each block — **settled read**, **range-cal pre-pass**, **per-step
+  settle**, **attenuator set**, and **setup/other** (the uninstrumented remainder, so the breakdown sums
+  to real elapsed time) — via `Stopwatch` (monotonic, no measurable overhead). The harness aggregates it
+  across frequencies and prints a breakdown table (time, %, count per category, busiest first) after the
+  sweep. This turns "it's slow" into a measured attribution that drives the actual optimization:
+  - **Settled reads** are expected to dominate and are hardware-bound (the 8902A settles).
+  - **Fixed `Thread.Sleep` waits** — the range-cal pre-pass and per-step settle — are the tunable targets:
+    replace blind sleeps with **poll-on-status** waits so we wait only as long as the hardware needs (the
+    post-calibrate wait is exactly this, addressed in #8). The profile output calls these out.
+  - **Per-command GPIB I/O (batching)** is negligible *unless* `--debug` is on (its per-command serial
+    poll inflates everything) — the profile confirms this so we don't micro-optimize a non-hotspot.
+  No measurement path changed — pure instrumentation. **Build clean; sim `--profile` PASS** (renders the
+  breakdown with correct counts — 12 points, 1 range-cal pre-pass; sim times are ~0 since sim has no real
+  waits). Run it on the bench to get the real breakdown → HardwareValidation.md row **V9**.
+
 ### branch `issue-6-empty-read-recovery` (off `main`) — #6
 - **#6 — recover an empty/transient read instead of failing the point.** A sweep point could fail on an
   empty/garbage read (`Unrecognized 8902A reading: ''  [SB=0x41]`) that is really a transient GPIB race
