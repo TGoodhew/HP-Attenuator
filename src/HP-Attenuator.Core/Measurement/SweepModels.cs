@@ -97,6 +97,10 @@ namespace HpAttenuator.Measurement
         /// </summary>
         public bool TrackMode { get; set; } = false;
 
+        /// <summary>Manual (default) or automatic signal acquisition for Tuned RF Level (#3). Manual
+        /// tunes to the commanded frequency directly; Auto searches/acquires first, then holds.</summary>
+        public TrflTuning Tuning { get; set; } = TrflTuning.Manual;
+
         public IEnumerable<double> Frequencies()
         {
             int n = (int)System.Math.Round((FreqStopMHz - FreqStartMHz) / FreqStepMHz) + 1;

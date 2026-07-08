@@ -70,6 +70,26 @@ namespace HpAttenuator.Instruments
         Synchronous
     }
 
+    /// <summary>
+    /// How the receiver tunes to the signal for a Tuned RF Level measurement (issue #3).
+    /// <list type="bullet">
+    /// <item><b>Manual</b> — enter the frequency directly (<c>&lt;freq&gt;MZ</c>); the receiver tunes to
+    /// exactly that frequency and holds it. Fast and deterministic when the frequency is known (our usual
+    /// case — we command the source). The default.</item>
+    /// <item><b>Auto</b> — let the receiver search for and acquire the signal, then drop to manual tune to
+    /// hold it, then re-enter TRFL (O&amp;C manual). Useful when the frequency is uncertain or the source
+    /// drifts; needs the signal present and strong enough to acquire.</item>
+    /// </list>
+    /// </summary>
+    public enum TrflTuning
+    {
+        /// <summary>Manual tuning — <c>&lt;freq&gt;MZ</c>, tune to exactly the commanded frequency (default).</summary>
+        Manual,
+
+        /// <summary>Automatic tuning — search/acquire the signal, then hold it and re-enter TRFL (#3).</summary>
+        Auto
+    }
+
     /// <summary>The two 11713A attenuator ports.</summary>
     public enum AttenuatorBank
     {
@@ -121,10 +141,12 @@ namespace HpAttenuator.Instruments
         /// When <paramref name="trackMode"/> is set, the receiver uses Track Mode (8902A SF 32.9,
         /// the Microwave Product Note's low-level converter method) to hold lock on the drifting
         /// converted signal; Track Mode implies the Average detector and supersedes
-        /// <paramref name="detector"/>.
+        /// <paramref name="detector"/>. <paramref name="tuning"/> selects manual (default) or automatic
+        /// signal acquisition (#3).
         /// </summary>
         void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
-            TrflDetector detector = TrflDetector.Average, bool trackMode = false);
+            TrflDetector detector = TrflDetector.Average, bool trackMode = false,
+            TrflTuning tuning = TrflTuning.Manual);
 
         /// <summary>
         /// Begins an absolute RF Power measurement at the given RF frequency, in the

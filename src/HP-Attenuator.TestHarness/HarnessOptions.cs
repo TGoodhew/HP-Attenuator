@@ -108,6 +108,8 @@ namespace HpAttenuator.TestHarness
                     case "--detector": o.Sweep.Detector = ParseDetector(Need(args, ++i)); break;
                     case "--sync-detector": o.Sweep.Detector = TrflDetector.Synchronous; break;
                     case "--track-mode": o.Sweep.TrackMode = true; break;
+                    case "--auto-tune": o.Sweep.Tuning = TrflTuning.Auto; break;
+                    case "--manual-tune": o.Sweep.Tuning = TrflTuning.Manual; break;
                     case "--lo-power": o.Sweep.LoPowerDbm = D(Need(args, ++i)); break;
                     case "--astart": o.Sweep.AttenStartDb = I(Need(args, ++i)); break;
                     case "--astop": o.Sweep.AttenStopDb = I(Need(args, ++i)); o.ExplicitAstop = true; break;
@@ -225,6 +227,12 @@ Usage: HP-Attenuator.TestHarness [options]
                                  low-level converter method: keeps the receiver locked onto the
                                  drifting converted signal so it holds toward the ~-100 dBm floor
                                  instead of losing lock partway (#14). Implies the Average detector.
+  --manual-tune / --auto-tune    #3: Tuned RF Level signal acquisition. manual (default) tunes to the
+                                 commanded frequency directly (<freq>MZ) — fast, deterministic, our usual
+                                 case since we command the source. auto lets the 8902A search/acquire the
+                                 signal first, then holds it — for an uncertain/drifting frequency. NOTE:
+                                 the auto-tune HP-IB code is bench-unverified (OCR-ambiguous manual); pair
+                                 with --debug to see the sequence. Verify per HardwareValidation.md V7.
   --lo-power dBm                 8673B LO drive into the 11793A (default 8; the converter wants
                                  +8..+13 dBm — try +10..+13 to cut conversion loss).
   --floor-dbm dBm                #13: absolute level at/below which a deep reading is treated as sitting

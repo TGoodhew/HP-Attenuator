@@ -1093,9 +1093,10 @@ namespace HpAttenuator.TestHarness
                 ? "track mode (32.9SP, AVG)"
                 : opt.Sweep.Detector == TrflDetector.Synchronous
                     ? "synchronous (4.0SP, ~-127 dBm)" : "average (4.4SP, ~-100 dBm)";
+            string tuneTag = opt.Sweep.Tuning == TrflTuning.Auto ? "auto-tune (#3, unverified)" : "manual-tune";
             AnsiConsole.MarkupLine(
                 $"[grey]Sweep:[/] {frequencies.Count} freqs, attenuation {opt.Sweep.AttenStartDb}-{opt.Sweep.AttenStopDb} dB " +
-                $"step {opt.Sweep.AttenStepDb}, source {opt.Sweep.SourcePowerDbm:0.#} dBm, {detectorTag} detector, " +
+                $"step {opt.Sweep.AttenStepDb}, source {opt.Sweep.SourcePowerDbm:0.#} dBm, {detectorTag} detector, {tuneTag}, " +
                 $"tolerance ±{opt.ToleranceDb:0.#} dB");
             AnsiConsole.WriteLine();
 

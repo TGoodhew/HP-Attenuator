@@ -46,6 +46,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V4 | #14 — 3-range cal genuinely improves 80–95 dB accuracy | `issue-14-synchronous-deep-sweep` | 🔒 | V2 |
 | V5 | #15 — per-section characterize + sum reaches a validated full 110/121 dB | `issue-15-per-section-sum` | ⬜ | — |
 | V6 | #13 — deep saturated points flagged FLOOR (not failed); verdict/depth honest | `issue-13-floor-detection` | ⬜ | — |
+| V7 | #3 — verify the automatic-tuning HP-IB code + acquire-then-hold sequence | `issue-3-tune-mode` | ⬜ | — |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: loses lock through the converter (CHANGE_LOG) |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -174,6 +175,32 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 - **Cross-check with #15 (V5):** the points #13 marks FLOOR here (100 / 110 dB) are exactly the ones
   `--section-sum` synthesizes by summation — so V6 tells you the direct method's honest ceiling and V5
   provides the validated number above it.
+
+---
+
+## V7 — #3 automatic-tuning HP-IB codes  ⬜ built, awaiting bench
+
+- **Branch:** `issue-3-tune-mode` (built; sim PASS — flag/threading/header only, sim ignores tuning).
+  Also on `main`.
+- **What it does:** adds `--auto-tune` (vs the default `--manual-tune`). Manual is unchanged current
+  behaviour (`<freq>MZ`). Auto issues an acquire → wait → hold → re-enter-TRFL sequence.
+- **⚠ The reason this row exists:** the auto-tune special function (`AutoTuneSpecialFunction`, currently
+  `7.1SP` in `Hp8902A`) and the acquire-then-hold sequence are **NOT verified** — the Operation manual's
+  SF-7 tuning codes are OCR-ambiguous in the scan. This row is to confirm/correct them on the real 8902A.
+- **Isolate & run** (watch the panel + the debug trace to see what the SF actually does):
+  ```powershell
+  git checkout issue-3-tune-mode   # (or run from main — it's merged)
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+    --freq 3000 --astop 30 --astep 10 --auto-tune --panel-review --debug --out DebugResults/v7-autotune.csv
+  ```
+- **Verify:** (1) does `7.1SP` actually select Auto Tuning on the panel? If not, read the correct SF from
+  the 8902A Operation manual and fix `AutoTuneSpecialFunction`. (2) After auto-acquire, does `<freq>MZ`
+  hold and the TRFL reading come up valid? (3) Tune `AutoTuneAcquireMs` (default 3000) to the real
+  acquire time. (4) Below the auto-tune signal threshold it must fall back to manual — note the behaviour.
+- **If wrong:** correct the SF/sequence on `issue-3-tune-mode`, commit + push, re-run. Manual tuning
+  (the default, everything else) is unaffected either way.
+- **Low priority:** we command the source, so the frequency is always known — manual is the right default
+  for production. Auto is a convenience for uncertain/drifting sources; validate when convenient.
 
 ---
 

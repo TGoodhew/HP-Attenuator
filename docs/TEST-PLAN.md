@@ -170,6 +170,18 @@ detector's −100 dBm floor. Re-referencing cannot help: `SET REF` only re-zeroe
 `--sync-detector` (or `--detector sync`); if it can't hold lock through the converter
 path, fall back to Average and accept the ~95 dB ceiling.
 
+#### Tuning: manual vs automatic (`--manual-tune` / `--auto-tune`, #3)
+
+How the 8902A acquires the signal for Tuned RF Level is selectable:
+
+- **Manual** (default) — enter the frequency directly (`<freq>MZ`); the receiver tunes to exactly that
+  frequency and holds it. Fast and deterministic, and correct for this harness since we command the
+  source, so the frequency is always known.
+- **Automatic** (`--auto-tune`) — the receiver searches for and acquires the signal first, then drops to
+  manual tune to hold it and re-enters TRFL (O&C manual). For an uncertain or drifting frequency; needs
+  the signal present and strong enough to acquire. **The auto-tune HP-IB code is bench-unverified** (the
+  Operation manual's SF-7 tuning codes are OCR-ambiguous), so it's opt-in — see HardwareValidation.md V7.
+
 ### Preconditions
 
 Same as Test 1: sensor zeroed + calibrated, both cal-factor tables loaded (done

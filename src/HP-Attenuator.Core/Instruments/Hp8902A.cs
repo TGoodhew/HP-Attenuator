@@ -254,8 +254,18 @@ namespace HpAttenuator.Instruments
             return reference;         // watts, ≈ 1e-3
         }
 
+        /// <summary>HP-IB special function that selects AUTOMATIC tuning for Tuned RF Level (#3). The
+        /// Operation-manual SF-7 tuning codes are OCR-ambiguous in the scan, so this is a BEST-EFFORT
+        /// value to confirm/correct on the bench — which is why auto tuning is opt-in (manual is the
+        /// default). See HardwareValidation.md V7.</summary>
+        private const string AutoTuneSpecialFunction = "7.1SP";
+
+        /// <summary>Time to let AUTOMATIC tuning search for and acquire the signal before holding it, ms.</summary>
+        private const int AutoTuneAcquireMs = 3000;
+
         public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
-            TrflDetector detector = TrflDetector.Average, bool trackMode = false)
+            TrflDetector detector = TrflDetector.Average, bool trackMode = false,
+            TrflTuning tuning = TrflTuning.Manual)
         {
             // Manual "Attenuator Measurements" (relative Tuned RF Level, O&C 3-115): S4, tune, pick
             // the detector/mode, then SET REF (done by the engine).
@@ -264,7 +274,19 @@ namespace HpAttenuator.Instruments
                 Send("27.3SP" + Fmt(loMHz) + "MZ");  // frequency-offset: external LO
             else
                 Send("27.0SP");                      // direct / normal mode
-            Send(Fmt(rfMHz) + "MZ");   // manual tune to the fixed frequency
+
+            if (tuning == TrflTuning.Auto)
+            {
+                // Automatic tuning (#3): let the receiver SEARCH for and acquire the signal, wait for it
+                // to lock, then drop to manual tune to HOLD it and re-enter TRFL — the O&C manual's
+                // "select Auto Tuning … then press MHz to select Manual Tuning and re-enter TRFL"
+                // sequence. AutoTuneSpecialFunction is an unverified SF (OCR-ambiguous — verify on bench).
+                DebugLog?.Invoke($"8902A AUTO-TUNE via {AutoTuneSpecialFunction} (UNVERIFIED SF — #3; confirm on bench), " +
+                                 $"acquire {AutoTuneAcquireMs} ms, then hold at {Fmt(rfMHz)} MHz");
+                Send(AutoTuneSpecialFunction);     // search + acquire
+                Thread.Sleep(AutoTuneAcquireMs);   // give it time to lock onto the signal
+            }
+            Send(Fmt(rfMHz) + "MZ");   // tune to the fixed frequency (manual, or HOLD after auto-acquire)
 
             if (trackMode)
             {

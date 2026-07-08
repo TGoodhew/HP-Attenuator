@@ -73,7 +73,10 @@ to 0.01 dB). This sidesteps the sub-floor measurement entirely.
   Sim PASS (no false flags). Bench check: HardwareValidation.md V6.
 - **#4 (fixed on branch `issue-4-debug-poll-falseflag`):** `--debug` no longer false-flags a failed
   serial poll as INSTRUMENT ERROR. Sim+stub validated; hardware `--debug` trace confirm pending (cosmetic).
-- Others: #2 sweep speed, #6 empty-read recovery, #8 latched SRQ, #3 manual/auto tune UI.
+- **#3 (BUILT, on `main`, awaiting bench — ledger V7):** selectable manual/auto Tuned RF Level tuning
+  (`--manual-tune` default / `--auto-tune`). Auto-tune HP-IB code is bench-UNVERIFIED (OCR-ambiguous
+  manual) — verify on the 8902A. Sim PASS (plumbing only).
+- Others (not yet built): #2 sweep speed, #6 empty-read recovery, #8 latched SRQ.
 
 ## What's DONE and validated
 

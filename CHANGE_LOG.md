@@ -13,6 +13,22 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased — not yet merged
 
+### branch `issue-3-tune-mode` (off `main`) — #3
+- **#3 — selectable manual vs automatic Tuned RF Level tuning.** The 8902A can tune to the signal two
+  ways (O&C manual): **manual** — enter the frequency directly (`<freq>MZ`), fast/deterministic when the
+  frequency is known (our usual case, we command the source); **automatic** — let the receiver search
+  for and acquire the signal, then drop to manual tune to hold it and re-enter TRFL, for an uncertain or
+  drifting frequency. New `TrflTuning` enum (Manual/Auto); `IMeasuringReceiver.BeginAttenuationMeasurement`
+  gains a `tuning` parameter (threaded from `SweepOptions.Tuning` through every engine call site);
+  harness `--manual-tune` (default) / `--auto-tune`; the sweep header names the mode. `Hp8902A` implements
+  the auto branch as *acquire (auto-tune SF) → wait `AutoTuneAcquireMs` → hold (`<freq>MZ`) → continue
+  TRFL*, and logs the sequence under `--debug`. **The auto-tune HP-IB code (`AutoTuneSpecialFunction`,
+  currently `7.1SP`) is BENCH-UNVERIFIED** — the Operation manual's SF-7 tuning codes are OCR-ambiguous in
+  the scan, which is exactly why auto tuning is opt-in and manual stays the default (no behaviour change).
+  **Build clean; sim `--auto-tune` PASS** (sim's SimulatedBench ignores tuning — the sim never drifts — so
+  it exercises flag/threading/header only; the SF sequence runs against the real `Hp8902A`). Bench-verify
+  the auto-tune codes per HardwareValidation.md row **V7**.
+
 ### branch `issue-13-floor-detection` (off `main`) — #13
 - **#13 — floor/plateau detection: flag saturated deep points instead of failing them.** Past the
   ~95–98 dB usable depth of the 11793A path, a deep sweep point reads the −100 dBm converter floor and

@@ -163,11 +163,12 @@ namespace HpAttenuator.Instruments
         public double CalibrateSensor() => 1.0e-3; // 1.000 mW reference, watts
 
         public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
-            TrflDetector detector = TrflDetector.Average, bool trackMode = false)
+            TrflDetector detector = TrflDetector.Average, bool trackMode = false,
+            TrflTuning tuning = TrflTuning.Manual)
         {
             // The sim floor (-130 dBm) sits below the real floors and the sim never drifts / loses
-            // lock, so detector and Track Mode don't change simulated readings — they only exercise
-            // the command plumbing / flag wiring.
+            // lock, so detector, Track Mode, and manual-vs-auto tuning don't change simulated readings —
+            // they only exercise the command plumbing / flag wiring. The sim "acquires" instantly.
             _tunedMHz = rfMHz;
             _haveReference = false;
         }
