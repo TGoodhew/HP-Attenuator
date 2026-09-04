@@ -1,6 +1,7 @@
 # Shared Memory — HP-Attenuator working state
 
-A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-07-09.
+A cross-machine handoff snapshot so work can continue from anywhere. Content current as of 2026-07-09;
+status/accuracy pass 2026-09-04 (no code change — the bench queue below is still the open work).
 (Personal per-machine notes live outside the repo; this file is the shared, committed record.)
 
 ## Working model (author is traveling — away from the GPIB rig until back in Renton)
@@ -16,7 +17,7 @@ A cross-machine handoff snapshot so work can continue from anywhere. Updated 202
 
 ## Where we are right now
 
-On **`main`** (`635755a`, pushed to origin). Goal: measure the 11713A + 8494/8496 step attenuator's
+On **`main`** (tip pushed to origin — see `git log`). Goal: measure the 11713A + 8494/8496 step attenuator's
 attenuation accurately across its full range.
 
 **Milestone (2026-07-09): every substantive issue is built + merged to `main`; nothing left to build
@@ -74,8 +75,9 @@ to 0.01 dB). This sidesteps the sub-floor measurement entirely.
   saturate at the converter floor (100/110 dB read the floor, the −2.4/−12 dB errors) are now flagged
   **FLOOR** and excluded from the verdict instead of failing it; `--floor-dbm`/`--no-floor-detect`.
   Sim PASS (no false flags). Bench check: HardwareValidation.md V6.
-- **#4 (fixed on branch `issue-4-debug-poll-falseflag`):** `--debug` no longer false-flags a failed
-  serial poll as INSTRUMENT ERROR. Sim+stub validated; hardware `--debug` trace confirm pending (cosmetic).
+- **#4 (CLOSED — completed; bench check lives on as ledger V1 / issue #18):** `--debug` no longer
+  false-flags a failed serial poll as INSTRUMENT ERROR. Sim+stub validated; the hardware `--debug`
+  trace confirm is the V1 warm-up row, tracked by #18 rather than by #4 itself.
 - **#3 (BUILT, on `main`, awaiting bench — ledger V7):** selectable manual/auto Tuned RF Level tuning
   (`--manual-tune` default / `--auto-tune`). Auto-tune HP-IB code is bench-UNVERIFIED (OCR-ambiguous
   manual) — verify on the 8902A. Sim PASS (plumbing only).

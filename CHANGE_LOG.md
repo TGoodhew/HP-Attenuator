@@ -11,7 +11,12 @@ kept alive** (not deleted/cleaned up) until their change is bench-validated and 
 What's on `main` but not yet confirmed against the real hardware is tracked in
 **[HardwareValidation.md](HardwareValidation.md)** — the step-by-step bench checklist for Renton.
 
-## Unreleased — not yet merged
+## Merged to `main` — awaiting bench validation
+
+Everything in this section is **merged into `main`** and green in CI; what it still lacks is a
+**real-hardware run**. Each branch below is kept alive on `origin` so its change can be validated in
+isolation — see the matching row (V1–V10) in [HardwareValidation.md](HardwareValidation.md).
+The "off `main`" note on each heading records where the branch was cut from, not that it is unmerged.
 
 ### branch `issue-8-calibrate-error-surface` (off `main`) — #8
 - **#8 — surface a CALIBRATE error that was invisible during the post-calibrate settle.** On a hardware
@@ -347,7 +352,7 @@ read path.
   deep/weak calibrate that stored the bad factor bf6ba51 was chasing. Sim sweep unchanged
   (PASS, max|err| 0.05 dB); hardware verification pending.
 
-### branch `test2-atten-sweep` (not yet merged)
+### branch `test2-atten-sweep` (merged to `main`)
 - Test 1 — single-point absolute RF power readback (8902A RF Power via the 11793A + LO).
 - Test 2 — relative Tuned RF Level attenuation sweep following the O&C manual's "Attenuator
   Measurements" procedure.
