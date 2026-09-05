@@ -41,6 +41,11 @@ namespace HpAttenuator.TestHarness
         public bool AskAtten;       // --ask      : prompt for the X/Y attenuator assignment
         public int? XAttenSteps;    // --x-atten 8494|8496 : declare ATTEN X attenuator (skip auto-id)
 
+        /// <summary>#24: pass/fail band for a SINGLE attenuator step's own error, dB. Tighter than the
+        /// cumulative --tolerance: one 1 dB step missing by 0.5 dB is a real fault even though the
+        /// cumulative total is still inside spec.</summary>
+        public double StepToleranceDb = 0.25;
+
         public double ToleranceDb = 1.5;
         // Run artifacts live in DebugResults/ (git-ignored as a whole), not the repo root.
         public string CsvPath = "DebugResults/harness-results.csv";
@@ -99,6 +104,7 @@ namespace HpAttenuator.TestHarness
                     case "--ask": o.AskAtten = true; break;
                     case "--x-atten": o.XAttenSteps = Need(args, ++i) == "8496" ? 10 : 1; break;
                     case "--tolerance": o.ToleranceDb = D(Need(args, ++i)); break;
+                    case "--step-tolerance": o.StepToleranceDb = D(Need(args, ++i)); break;
                     case "--read-timeout-ms": o.ReceiverTimeoutMs = I(Need(args, ++i)); break;
                     case "--out": o.CsvPath = Need(args, ++i); break;
                     case "--fstart": o.Sweep.FreqStartMHz = D(Need(args, ++i)); o.ExplicitFreq = true; break;
@@ -269,7 +275,9 @@ Usage: HP-Attenuator.TestHarness [options]
   --no-floor-detect              Disable #13 floor/plateau detection; count every point's error
                                  (the pre-#13 behaviour — deep floored points then fail the sweep).
   --settle ms                    Settle per attenuator step (default 100).
-  --tolerance dB                 Pass/fail threshold (default 1.5).
+  --tolerance dB                 Pass/fail threshold on the CUMULATIVE error (default 1.5).
+  --step-tolerance dB            #24: pass/fail band for a single step's own error in the per-step
+                                 increment table (default 0.25).
   --read-timeout-ms ms           8902A read timeout (default 60000). Low-level Tuned RF
                                  Level reads near the floor take tens of seconds.
   --debug                        Trace every 8902A command + the status byte after it, to

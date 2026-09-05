@@ -353,6 +353,7 @@ namespace HpAttenuator.Measurement
             }
 
             ClassifyFloorLimited(result);
+            ComputeStepDeltas(result);
 
             // Attribute whatever wall-clock wasn't caught by a category (Prepare, Begin…, post-hang
             // probe, overhead) so the --profile breakdown sums to the real elapsed time (#2).
@@ -360,6 +361,41 @@ namespace HpAttenuator.Measurement
             long other = wall.ElapsedMilliseconds - Timing.TotalMs;
             if (other > 0) Timing.Add("setup/other", other, 0);
             return result;
+        }
+
+        /// <summary>
+        /// #24 — works out what each individual attenuator step actually did to the signal, by
+        /// differencing consecutive measured points. The cumulative error column cannot answer that:
+        /// it carries every earlier step's contribution, so one bad section makes every later point
+        /// look wrong. The per-step delta isolates each transition, which is what tells you whether a
+        /// given step applies its nominal value.
+        ///
+        /// Differences are taken against the previous point that actually produced a reading, so a
+        /// skipped (#21) or floored (#13) point doesn't corrupt the chain — the nominal is taken from
+        /// the same pair, so the comparison stays honest across a gap in the plan (e.g. 80 → 90 dB).
+        /// </summary>
+        private static void ComputeStepDeltas(FreqPointResult result)
+        {
+            bool havePrev = false;
+            double prevMeasured = 0, prevCommanded = 0;
+
+            foreach (var p in result.Points)
+            {
+                // Excluded covers skipped (#21), floor-saturated (#13), errored and unreadable points.
+                // A floor-limited reading is a real number but not a real measurement — including it
+                // would report the saturation as though it were a step's own error.
+                if (p.Excluded) continue;
+
+                if (havePrev)
+                {
+                    p.StepDeltaDb = p.MeasuredAttenuationDb - prevMeasured;
+                    p.NominalStepDb = p.CommandedDb - prevCommanded;
+                    p.StepErrorDb = p.StepDeltaDb - p.NominalStepDb;
+                }
+                prevMeasured = p.MeasuredAttenuationDb;
+                prevCommanded = p.CommandedDb;
+                havePrev = true;
+            }
         }
 
         /// <summary>
@@ -851,9 +887,21 @@ namespace HpAttenuator.Measurement
         /// </summary>
         private double LevelReference(FreqPointResult result)
         {
-            double power = _options.SourcePowerDbm;   // Prepare() already commanded this baseline
             double target = _options.TargetReferenceDbm;
             double achieved = double.NaN;
+            double grid = _options.LevelFineStepDb;   // the source's own amplitude resolution
+
+            // Command only values the source can actually produce. The 8340B quantizes to 0.05 dB, so
+            // anything finer is silently rounded and the leveller chases a level it cannot command.
+            System.Func<double, double> quantize = v => System.Math.Round(v / grid) * grid;
+
+            double power = quantize(_options.SourcePowerDbm);   // Prepare() commanded this baseline
+
+            // The source grid rarely lands exactly on the target, so remember the best reading at or
+            // below it. Once a step crosses above the target we have the target bracketed within one
+            // grid step and no further move can improve on that best — the leveller returns to it.
+            double bestBelowLevel = double.NaN, bestBelowPower = double.NaN;
+            bool sawAbove = false;
 
             for (int iter = 0; iter <= _options.MaxLevelIterations; iter++)
             {
@@ -876,26 +924,54 @@ namespace HpAttenuator.Measurement
                 // there is no headroom above it, so any positive excess is an over-range and is always
                 // corrected down, however small — a symmetric window would happily settle above the
                 // ceiling. Converging from below also means the last move is always a reduction.
-                if (delta >= 0 && delta <= _options.LevelToleranceDb) break;
+                if (delta >= 0)
+                {
+                    // At or below the target: remember it if it's the closest such reading so far.
+                    if (double.IsNaN(bestBelowLevel) || level > bestBelowLevel)
+                    {
+                        bestBelowLevel = level;
+                        bestBelowPower = power;
+                    }
+                    // Within one grid step of the target is as close as the source can place it.
+                    if (delta <= grid) break;
+                }
+                else
+                {
+                    sawAbove = true;
+                }
 
-                // Two-phase approach. A single jump of the whole delta lands wherever the source's own
-                // step accuracy puts it, which is how the reference settled 0.059 dB low. So: jump to
-                // one fine step SHORT of the target while the error is large, then creep up in
-                // LevelFineStepDb (0.01 dB, inside the 8340B's 3-decimal resolution) increments until
-                // the reading is within one step below the target. A reading ABOVE the target is not a
-                // near-miss at the 0 dBm ceiling — it is an over-range, so that case jumps straight back
-                // down rather than creeping.
+                // Both sides seen: the source's 0.05 dB grid straddles the target, so no further move
+                // can do better than the best reading at or below it. Go back to that power and stop —
+                // this is what previously oscillated forever between 1.12 and 1.13 dBm.
+                if (sawAbove && !double.IsNaN(bestBelowPower))
+                {
+                    if (System.Math.Abs(power - bestBelowPower) > 1e-9)
+                    {
+                        power = bestBelowPower;
+                        _source.SetPowerDbm(power);
+                        Settle();
+                    }
+                    achieved = bestBelowLevel;
+                    Trace?.Invoke($"level: source grid ({grid:0.###} dB) straddles the target — settling on the " +
+                                  $"closest reachable point below it, {achieved:+0.000;-0.000;0.000} dBm.");
+                    break;
+                }
+
+                // Two-phase approach. While the error is large, jump to one grid step SHORT of the
+                // target so the final approach is always upward from below; then creep one grid step at
+                // a time. A reading ABOVE the target is not a near-miss at the 0 dBm ceiling — it is an
+                // over-range — so that case steps back down rather than creeping.
                 double step;
                 if (delta < 0)
-                    step = delta;                                             // over target — back off now
+                    step = -grid;                                             // over target — back off
                 else if (delta > _options.LevelFineWindowDb)
-                    step = delta - _options.LevelFineStepDb;                  // coarse, landing just under
+                    step = delta - grid;                                      // coarse, landing just under
                 else
-                    step = _options.LevelFineStepDb;                          // fine creep, from below
+                    step = grid;                                              // fine creep, from below
 
-                double next = System.Math.Max(_options.SourcePowerMinDbm,
-                              System.Math.Min(_options.SourcePowerMaxDbm, power + step));
-                if (System.Math.Abs(next - power) < 1e-4) break;              // clamped — no further move
+                double next = quantize(System.Math.Max(_options.SourcePowerMinDbm,
+                              System.Math.Min(_options.SourcePowerMaxDbm, power + step)));
+                if (System.Math.Abs(next - power) < 1e-9) break;              // clamped — no further move
                 power = next;
                 _source.SetPowerDbm(power);
                 Settle();

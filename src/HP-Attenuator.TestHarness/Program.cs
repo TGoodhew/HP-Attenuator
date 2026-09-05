@@ -1128,7 +1128,7 @@ namespace HpAttenuator.TestHarness
 
             using (var csv = csvWriter)
             {
-                csv.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,leveled_ref_dbm,leveled_src_dbm,commanded_db,command,measured_rel_db,measured_atten_db,expected_atten_db,error_db,floor_limited,out_of_range,predicted_level_dbm,error");
+                csv.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,leveled_ref_dbm,leveled_src_dbm,commanded_db,command,measured_rel_db,measured_atten_db,expected_atten_db,error_db,step_nominal_db,step_actual_db,step_error_db,floor_limited,out_of_range,predicted_level_dbm,error");
 
                 foreach (double freq in frequencies)
                 {
@@ -1161,6 +1161,7 @@ namespace HpAttenuator.TestHarness
                             p.CommandedDb.ToString(CultureInfo.InvariantCulture), p.Command,
                             F(p.MeasuredRelativeDb), F(p.MeasuredAttenuationDb),
                             F(p.ExpectedAttenuationDb), F(p.ErrorDb),
+                            F(p.NominalStepDb), F(p.StepDeltaDb), F(p.StepErrorDb),
                             p.FloorLimited ? "1" : "0",
                             p.OutOfRange ? "1" : "0",
                             F(p.PredictedLevelDbm),
@@ -1186,7 +1187,11 @@ namespace HpAttenuator.TestHarness
                     // Small detailed runs get a table; large ones already streamed progress.
                     // Roomy enough for a coarse grid plus a #22 fine region (e.g. 21 points for
                     // 0-110/10 with 1 dB steps 90-100) — a single-frequency run still gets the table.
-                    if (detailed && r.Points.Count <= 40) RenderFrequencyTable(r, opt.ToleranceDb);
+                    if (detailed && r.Points.Count <= 40)
+                    {
+                        RenderFrequencyTable(r, opt.ToleranceDb);
+                        RenderStepTable(r, opt.StepToleranceDb);   // #24
+                    }
                     else RenderFrequencyLine(r, opt.ToleranceDb);
                 }
             }
@@ -1290,6 +1295,51 @@ namespace HpAttenuator.TestHarness
             if (!string.IsNullOrEmpty(r.Warning))
                 table.Caption(("! " + r.Warning).EscapeMarkup());
             AnsiConsole.Write(table);
+        }
+
+        /// <summary>
+        /// #24 — what each attenuator step actually did to the signal. One row per transition: the
+        /// relay pattern before and after, the dB the step was commanded to add, the dB the signal
+        /// actually moved, and that step's own error. Unlike the cumulative error column this isolates
+        /// each step, so a section that doesn't apply its nominal value shows up on its own row instead
+        /// of shifting every point after it.
+        /// </summary>
+        private static void RenderStepTable(FreqPointResult r, double stepTol)
+        {
+            var rows = r.Points.FindAll(p => !double.IsNaN(p.StepErrorDb));
+            if (rows.Count == 0) return;
+
+            var t = new Table().Border(TableBorder.Rounded)
+                .Title($"Per-step increments — what each step actually applied ({r.FreqMHz:0.###} MHz)".EscapeMarkup());
+            t.AddColumn(new TableColumn("Step").RightAligned());
+            t.AddColumn("Relays");
+            t.AddColumn(new TableColumn("Nominal dB").RightAligned());
+            t.AddColumn(new TableColumn("Actual dB").RightAligned());
+            t.AddColumn(new TableColumn("Step err dB").RightAligned());
+
+            double worst = 0; string worstWhere = "";
+            foreach (var p in rows)
+            {
+                int from = (int)Math.Round(p.CommandedDb - p.NominalStepDb);
+                string err = $"{p.StepErrorDb:+0.00;-0.00;0.00}";
+                string cell = Math.Abs(p.StepErrorDb) <= stepTol ? $"[green]{err}[/]" : $"[red]{err}[/]";
+                if (Math.Abs(p.StepErrorDb) > worst)
+                {
+                    worst = Math.Abs(p.StepErrorDb);
+                    worstWhere = $"{from}->{p.CommandedDb} dB";
+                }
+                t.AddRow(
+                    $"{from} -> {p.CommandedDb}",
+                    (p.Command ?? "—").EscapeMarkup(),
+                    $"{p.NominalStepDb:0.0}",
+                    $"{p.StepDeltaDb:0.00}",
+                    cell);
+            }
+            AnsiConsole.Write(t);
+            AnsiConsole.MarkupLine($"[grey]Worst single-step error: [/]{worst:0.00} dB ({worstWhere}). " +
+                                   $"[grey]Rows over ±{stepTol:0.##} dB are red. A step's error is independent of " +
+                                   $"every step before it.[/]");
+            AnsiConsole.WriteLine();
         }
 
         private static void RenderFrequencyLine(FreqPointResult r, double tol)

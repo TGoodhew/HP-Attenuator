@@ -42,18 +42,15 @@ namespace HpAttenuator.Measurement
         /// </summary>
         public double TargetReferenceDbm { get; set; } = 0.0;
 
-        /// <summary>How far BELOW <see cref="TargetReferenceDbm"/> the reference may sit and still be
-        /// accepted, dB — one fine step. A reading ABOVE the target is never accepted (at the 0 dBm
-        /// ceiling that is an over-range), however small the excess.</summary>
-        public double LevelToleranceDb { get; set; } = 0.01;
-
         /// <summary>
-        /// Source-power increment used on the final approach to the target, dB. The 8340B takes three
-        /// decimals, so 0.01 dB is well inside its resolution. Once the reference is within
-        /// <see cref="LevelFineWindowDb"/> of the target the leveller creeps up one of these at a time
-        /// rather than jumping, so it lands as close under the target as the hardware allows.
+        /// Source-power increment used on the final approach to the target, dB — one step of the
+        /// source's own amplitude grid. The HP 8340B's power resolution is <b>0.05 dB</b> (8340B/41B
+        /// User manual: "resolution of 0.05 dB"), so this is its full granularity and the finest the
+        /// reference can be placed. Commanding finer than this does nothing: 0.01 dB steps were
+        /// observed to quantize into a single 0.049 dB jump (source 1.12 dBm read −0.040, 1.13 dBm
+        /// read +0.009), which made the leveller oscillate instead of converging.
         /// </summary>
-        public double LevelFineStepDb { get; set; } = 0.01;
+        public double LevelFineStepDb { get; set; } = 0.05;
 
         /// <summary>Remaining error (dB) below which the leveller switches from a single corrective jump
         /// to <see cref="LevelFineStepDb"/> creeping. The coarse jump deliberately lands one fine step
@@ -300,6 +297,23 @@ namespace HpAttenuator.Measurement
         /// <summary>#21: the absolute level this point would have produced, dBm (reference − target
         /// attenuation). NaN when the reference level is unknown, in which case limits aren't enforced.</summary>
         public double PredictedLevelDbm { get; set; } = double.NaN;
+
+        /// <summary>
+        /// The dB the signal ACTUALLY moved between the previous measured point and this one (#24) —
+        /// the increment this attenuator step contributed. NaN on the first measured point of a sweep
+        /// and on any point that produced no reading. This is what answers "does each step apply its
+        /// nominal value", which the cumulative error column cannot: a cumulative error carries every
+        /// earlier step's contribution with it.
+        /// </summary>
+        public double StepDeltaDb { get; set; } = double.NaN;
+
+        /// <summary>#24: the increment this step was COMMANDED to make, dB (this point's target minus
+        /// the previous measured point's target).</summary>
+        public double NominalStepDb { get; set; } = double.NaN;
+
+        /// <summary>#24: <see cref="StepDeltaDb"/> − <see cref="NominalStepDb"/> — how far this single
+        /// step missed its own nominal value, independent of everything before it.</summary>
+        public double StepErrorDb { get; set; } = double.NaN;
 
         /// <summary>True if this point yielded no usable measurement — never attempted (#21), flagged at
         /// the floor (#13), errored, or unreadable. Such points are excluded from the accuracy verdict.</summary>
