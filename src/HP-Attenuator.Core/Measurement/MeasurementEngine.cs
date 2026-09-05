@@ -218,6 +218,20 @@ namespace HpAttenuator.Measurement
             Timing.Time(SweepTiming.RangeCal,
                 () => RunRangeCalibration(() => _attenuator.SetAttenuationDb(_options.AttenStartDb), result));
 
+            // #21: the measurable level window of the path actually in use, from the instrument specs
+            // (see LevelLimits) — 11793A converted floors at −100 dBm; the 8902A direct path floors at
+            // −100 dBm on the IF average detector and −127 dBm on the synchronous one. With the achieved
+            // reference known, any target deeper than (reference − floor) lands below the floor, where
+            // the receiver cannot track the signal at all: it under-reads and raises a real Error 01
+            // (signal out of IF range). Those points are skipped rather than measured and failed.
+            result.LevelWindow = _options.LevelWindowFor(plan.Regime);
+            double pathFloorDbm = _options.EffectiveFloorDbm(plan.Regime);
+            double referenceDbm = result.ReferencePowerDbm;   // NaN when leveling is off / unreadable
+            bool enforceLimits = _options.EnforceLevelLimits && !double.IsNaN(referenceDbm);
+            if (_options.EnforceLevelLimits && double.IsNaN(referenceDbm))
+                Trace?.Invoke("level-limits: reference level unknown — cannot predict per-point levels, " +
+                              "limits NOT enforced (#21); falling back to post-hoc floor detection (#13).");
+
             // The 8902A SET REF can leave a small residual offset, so we also normalise in
             // software: the reading at the start attenuation defines 0 dB and every reading
             // is reported relative to it (substitution method, attenuation = reading0 −
@@ -235,6 +249,27 @@ namespace HpAttenuator.Measurement
                     CommandedDb = atten,
                     ExpectedAttenuationDb = expected
                 };
+
+                // #21: skip a point whose level would fall outside the path's measurable window. Not a
+                // failure and not a measurement — the hardware simply cannot report it, so record what
+                // it would have been and move on without commanding the attenuator or reading.
+                if (enforceLimits)
+                {
+                    double predicted = referenceDbm - expected;
+                    if (predicted < pathFloorDbm)
+                    {
+                        point.OutOfRange = true;
+                        point.PredictedLevelDbm = predicted;
+                        point.MeasuredRelativeDb = double.NaN;
+                        point.MeasuredAttenuationDb = double.NaN;
+                        point.ErrorDb = double.NaN;
+                        Trace?.Invoke($"level-limits: skip {atten} dB — predicted {predicted:0.0} dBm is " +
+                                      $"below the {result.LevelWindow.PathName} floor {pathFloorDbm:0.0} dBm (#21).");
+                        result.Points.Add(point);
+                        onPoint?.Invoke(++index, total, point);
+                        continue;
+                    }
+                }
 
                 try
                 {
@@ -332,7 +367,8 @@ namespace HpAttenuator.Measurement
         /// sweep fault, so they're marked <see cref="AttenPointResult.FloorLimited"/> and excluded from
         /// the accuracy verdict instead of failing it. A point is flagged only when it UNDER-reads its
         /// target by more than <see cref="SweepOptions.FloorMarginDb"/> AND either (a) its absolute level
-        /// (reference + relative) sits at/below <see cref="SweepOptions.FloorDbm"/>, or (b) it plateaued —
+        /// (reference + relative) sits at/below the effective floor (<see cref="SweepOptions.EffectiveFloorDbm"/>),
+        /// or (b) it plateaued —
         /// its reading didn't rise past the deepest attenuation genuinely tracked so far. The AND with
         /// under-reading keeps an accurate deep point near the floor from being mistakenly flagged.
         /// </summary>
@@ -340,14 +376,14 @@ namespace HpAttenuator.Measurement
         {
             if (!_options.FloorDetect) return;
 
-            double floorDbm = _options.FloorDbm;
+            double floorDbm = _options.EffectiveFloorDbm(result.Regime);   // #21: spec limit, or --floor-dbm
             double margin = _options.FloorMarginDb;
             double refDbm = result.ReferencePowerDbm;    // NaN when leveling was off / unread
             double bestAtten = double.NegativeInfinity;   // deepest attenuation genuinely tracked so far
 
             foreach (var p in result.Points)              // Points are in ascending target order
             {
-                if (p.Error != null || double.IsNaN(p.MeasuredAttenuationDb)) continue;
+                if (p.OutOfRange || p.Error != null || double.IsNaN(p.MeasuredAttenuationDb)) continue;
 
                 bool underReads = p.MeasuredAttenuationDb < p.ExpectedAttenuationDb - margin;
                 bool atFloorAbs = !double.IsNaN(refDbm)

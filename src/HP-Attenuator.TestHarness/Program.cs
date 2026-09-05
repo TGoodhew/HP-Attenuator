@@ -1105,6 +1105,7 @@ namespace HpAttenuator.TestHarness
             int measured = 0;
             int errorPoints = 0;
             int floorPoints = 0;                       // #13: points that saturated at the converter floor
+            int outOfRangePoints = 0;                  // #21: points skipped as outside the path's level window
             double deepestMeasured = double.NaN;       // deepest attenuation actually tracked, across freqs
             string worstWhere = "";
             var timing = new SweepTiming();            // #2: aggregate wall-clock across all frequencies
@@ -1119,7 +1120,7 @@ namespace HpAttenuator.TestHarness
 
             using (var csv = csvWriter)
             {
-                csv.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,leveled_ref_dbm,leveled_src_dbm,commanded_db,command,measured_rel_db,measured_atten_db,expected_atten_db,error_db,floor_limited,error");
+                csv.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,leveled_ref_dbm,leveled_src_dbm,commanded_db,command,measured_rel_db,measured_atten_db,expected_atten_db,error_db,floor_limited,out_of_range,predicted_level_dbm,error");
 
                 foreach (double freq in frequencies)
                 {
@@ -1129,7 +1130,9 @@ namespace HpAttenuator.TestHarness
                     {
                         prog = (i, n, p) =>
                         {
-                            string body = p.Error != null
+                            string body = p.OutOfRange
+                                ? $"[yellow]SKIP — {p.PredictedLevelDbm:0.0} dBm is below the path floor (#21)[/]"
+                                : p.Error != null
                                 ? $"[red]{p.Error.EscapeMarkup()}[/]"
                                 : $"meas {p.MeasuredAttenuationDb,7:0.00} dB  (err {p.ErrorDb:+0.00;-0.00;0.00})";
                             // No square brackets in the plain text — Spectre parses them as markup.
@@ -1151,10 +1154,13 @@ namespace HpAttenuator.TestHarness
                             F(p.MeasuredRelativeDb), F(p.MeasuredAttenuationDb),
                             F(p.ExpectedAttenuationDb), F(p.ErrorDb),
                             p.FloorLimited ? "1" : "0",
+                            p.OutOfRange ? "1" : "0",
+                            F(p.PredictedLevelDbm),
                             (p.Error ?? "").Replace(",", ";")
                         }));
 
-                        if (p.Error != null) errorPoints++;
+                        if (p.OutOfRange) outOfRangePoints++;      // #21: never attempted — outside the path
+                        else if (p.Error != null) errorPoints++;
                         else if (p.FloorLimited) floorPoints++;    // #13: measurement floor, not an error
                         else if (Math.Abs(p.ErrorDb) > worstError)
                         {
@@ -1162,8 +1168,12 @@ namespace HpAttenuator.TestHarness
                             worstWhere = $"{r.FreqMHz:0.###} MHz @ {p.CommandedDb} dB";
                         }
                     }
+                    // Math.Max(NaN, x) is NaN, so seed the running max explicitly on the first frequency
+                    // that produced a measured depth — otherwise "Deepest measured" always reports "—".
                     if (!double.IsNaN(r.DeepestMeasuredDb))
-                        deepestMeasured = Math.Max(deepestMeasured, r.DeepestMeasuredDb);
+                        deepestMeasured = double.IsNaN(deepestMeasured)
+                            ? r.DeepestMeasuredDb
+                            : Math.Max(deepestMeasured, r.DeepestMeasuredDb);
 
                     // Small detailed runs get a table; large ones already streamed progress.
                     if (detailed && r.Points.Count <= 15) RenderFrequencyTable(r, opt.ToleranceDb);
@@ -1182,7 +1192,13 @@ namespace HpAttenuator.TestHarness
             if (floorPoints > 0)
             {
                 summary.AddRow("Floor-limited (#13)", $"[yellow]{floorPoints} point(s)[/] — saturated at the " +
-                    $"~{opt.Sweep.FloorDbm:0} dBm converter floor; excluded from the verdict");
+                    $"measurement floor; excluded from the verdict");
+                summary.AddRow("Deepest measured", double.IsNaN(deepestMeasured) ? "—" : $"{deepestMeasured:0.0} dB");
+            }
+            if (outOfRangePoints > 0)
+            {
+                summary.AddRow("Out of range (#21)", $"[yellow]{outOfRangePoints} point(s)[/] — not attempted; " +
+                    "below the measurable floor of the path in use");
                 summary.AddRow("Deepest measured", double.IsNaN(deepestMeasured) ? "—" : $"{deepestMeasured:0.0} dB");
             }
             summary.AddRow("Tolerance", $"±{opt.ToleranceDb:0.#} dB");
@@ -1237,9 +1253,16 @@ namespace HpAttenuator.TestHarness
 
             foreach (var p in r.Points)
             {
+                // #21: never attempted — no command was issued, so there is no Cmd/reading to show.
+                if (p.OutOfRange)
+                {
+                    table.AddRow(p.CommandedDb.ToString(), "[grey]—[/]", "[grey]—[/]", "[grey]—[/]",
+                        $"[yellow]SKIP  {p.PredictedLevelDbm:0.0} dBm below floor[/]");
+                    continue;
+                }
                 if (p.Error != null)
                 {
-                    table.AddRow(p.CommandedDb.ToString(), p.Command.EscapeMarkup(),
+                    table.AddRow(p.CommandedDb.ToString(), (p.Command ?? "—").EscapeMarkup(),
                         "[red]—[/]", "[red]—[/]", $"[red]{p.Error.EscapeMarkup()}[/]");
                     continue;
                 }
@@ -1270,10 +1293,14 @@ namespace HpAttenuator.TestHarness
             string floor = r.FloorLimitedCount > 0
                 ? $" [yellow]({r.FloorLimitedCount} floor, deepest {r.DeepestMeasuredDb:0.0} dB)[/]"
                 : "";
+            // #21: note points skipped as outside the path's measurable window.
+            string skipped = r.OutOfRangeCount > 0
+                ? $" [yellow]({r.OutOfRangeCount} out of range)[/]"
+                : "";
             // No square brackets in the plain text — Spectre would parse them as markup.
             AnsiConsole.MarkupLine(
                 $"{flag} {r.FreqMHz,9:0.###} MHz  {r.Regime,-9}  " +
-                $"max|err|={r.MaxAbsErrorDb:0.00} dB{LevelTag(r)}{floor}{warn}");
+                $"max|err|={r.MaxAbsErrorDb:0.00} dB{LevelTag(r)}{floor}{skipped}{warn}");
         }
 
         /// <summary>Compact "ref X dBm @ src Y dBm" tag for the leveled 0 dB reference (#16); empty
@@ -1282,7 +1309,10 @@ namespace HpAttenuator.TestHarness
         {
             if (double.IsNaN(r.ReferencePowerDbm)) return "";
             string src = double.IsNaN(r.LeveledSourcePowerDbm) ? "" : $" @ src {r.LeveledSourcePowerDbm:+0.0;-0.0;0.0} dBm";
-            return $"  ref {r.ReferencePowerDbm:+0.0;-0.0;0.0} dBm{src}";
+            // #21: state the path's spec floor and the measurement depth it allows from this reference.
+            string limit = r.LevelWindow == null ? ""
+                : $"  |  {r.LevelWindow.PathName} floor {r.LevelWindow.MinDbm:0} dBm -> usable {r.UsableDepthDb:0.0} dB";
+            return $"  ref {r.ReferencePowerDbm:+0.0;-0.0;0.0} dBm{src}{limit}";
         }
 
         private static string F(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);

@@ -72,12 +72,36 @@ namespace HpAttenuator.Measurement
         /// attenuation) as FLOOR instead of counting them as measurement errors. On by default.</summary>
         public bool FloorDetect { get; set; } = true;
 
-        /// <summary>#13: absolute level (dBm) at/below which a reading is treated as sitting on the
-        /// converter floor. The 11793A path floors near −100 dBm and readings saturate ~−98.7 dBm
-        /// (SharedMemory.md); default −98 with <see cref="FloorMarginDb"/> of headroom.</summary>
-        public double FloorDbm { get; set; } = -98.0;
+        /// <summary>
+        /// #21: explicit floor override (dBm) from <c>--floor-dbm</c>. NaN — the default — means "use
+        /// the spec-derived floor for the path actually in use" (see <see cref="LevelLimits"/>). The
+        /// previous flat −98 dBm default was a bench guess; it is a reasonable approximation for the
+        /// 11793A converted path but wrong by 27 dB for the 8902A direct synchronous path.
+        /// </summary>
+        public double FloorDbmOverride { get; set; } = double.NaN;
 
-        /// <summary>#13: dB band used by the floor classifier — the headroom above <see cref="FloorDbm"/>
+        /// <summary>
+        /// #21: skip sweep points whose predicted level falls below the measurable floor of the path
+        /// in use, instead of measuring them and reporting the under-read as an error. On by default:
+        /// below the floor the 8902A cannot track the signal at all — it raises a genuine Error 01
+        /// (signal out of IF range) — so a reading there is not a datum, and commanding it drives the
+        /// receiver into an error state it can never resolve.
+        /// </summary>
+        public bool EnforceLevelLimits { get; set; } = true;
+
+        /// <summary>The spec-derived measurable level window for <paramref name="regime"/> with the
+        /// detector currently selected (#21).</summary>
+        public LevelWindow LevelWindowFor(MeasurementRegime regime) =>
+            LevelLimits.For(regime, Detector);
+
+        /// <summary>
+        /// The floor (dBm) to apply for <paramref name="regime"/>: the <c>--floor-dbm</c> override when
+        /// one was given, otherwise the spec limit for that path (#21).
+        /// </summary>
+        public double EffectiveFloorDbm(MeasurementRegime regime) =>
+            double.IsNaN(FloorDbmOverride) ? LevelWindowFor(regime).MinDbm : FloorDbmOverride;
+
+        /// <summary>#13: dB band used by the floor classifier — the headroom above the effective floor
         /// counted as "at floor", the plateau non-advance threshold, and the under-read threshold a
         /// point must exceed (measured &lt; target − this) before it can be flagged FLOOR.</summary>
         public double FloorMarginDb { get; set; } = 1.0;
@@ -166,6 +190,23 @@ namespace HpAttenuator.Measurement
         /// reported as FLOOR rather than a failure. Set by the floor/plateau classifier.
         /// </summary>
         public bool FloorLimited { get; set; }
+
+        /// <summary>
+        /// #21: this point was NOT attempted — its predicted level (<see cref="PredictedLevelDbm"/>)
+        /// falls outside the measurable window of the path in use, so commanding it could only produce
+        /// a meaningless under-read and an Error 01 on the receiver. Excluded from the accuracy verdict
+        /// and reported as out-of-range rather than as a measurement failure.
+        /// </summary>
+        public bool OutOfRange { get; set; }
+
+        /// <summary>#21: the absolute level this point would have produced, dBm (reference − target
+        /// attenuation). NaN when the reference level is unknown, in which case limits aren't enforced.</summary>
+        public double PredictedLevelDbm { get; set; } = double.NaN;
+
+        /// <summary>True if this point yielded no usable measurement — never attempted (#21), flagged at
+        /// the floor (#13), errored, or unreadable. Such points are excluded from the accuracy verdict.</summary>
+        public bool Excluded =>
+            OutOfRange || FloorLimited || Error != null || double.IsNaN(MeasuredAttenuationDb);
     }
 
     /// <summary>Result of a signal-presence check at one frequency.</summary>
@@ -227,7 +268,7 @@ namespace HpAttenuator.Measurement
             {
                 double m = 0;
                 foreach (var p in Points)
-                    if (!p.FloorLimited && System.Math.Abs(p.ErrorDb) > m) m = System.Math.Abs(p.ErrorDb);
+                    if (!p.Excluded && System.Math.Abs(p.ErrorDb) > m) m = System.Math.Abs(p.ErrorDb);
                 return m;
             }
         }
@@ -251,10 +292,32 @@ namespace HpAttenuator.Measurement
             {
                 double d = double.NaN;
                 foreach (var p in Points)
-                    if (!p.FloorLimited && p.Error == null && !double.IsNaN(p.MeasuredAttenuationDb))
+                    if (!p.Excluded)
                         d = double.IsNaN(d) ? p.MeasuredAttenuationDb : System.Math.Max(d, p.MeasuredAttenuationDb);
                 return d;
             }
         }
+
+        /// <summary>#21: count of points skipped as outside the path's measurable level window.</summary>
+        public int OutOfRangeCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (var p in Points) if (p.OutOfRange) n++;
+                return n;
+            }
+        }
+
+        /// <summary>#21: the measurable level window of the path used at this frequency (null if not
+        /// evaluated — e.g. the reference level was never read).</summary>
+        public LevelWindow LevelWindow { get; set; }
+
+        /// <summary>#21: deepest attenuation (dB) the path could measure from the achieved reference —
+        /// reference − floor. NaN when the reference or window is unknown.</summary>
+        public double UsableDepthDb =>
+            LevelWindow == null || double.IsNaN(ReferencePowerDbm)
+                ? double.NaN
+                : LevelWindow.UsableDepthDb(ReferencePowerDbm);
     }
 }

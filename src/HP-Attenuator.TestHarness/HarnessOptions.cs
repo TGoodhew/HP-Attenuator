@@ -118,7 +118,8 @@ namespace HpAttenuator.TestHarness
                     case "--astep": o.Sweep.AttenStepDb = I(Need(args, ++i)); o.ExplicitAstep = true; break;
                     case "--cal-step": o.Sweep.CalStepDb = I(Need(args, ++i)); break;
                     case "--force-range-cal": o.Sweep.ForceRangeCal = true; break;
-                    case "--floor-dbm": o.Sweep.FloorDbm = D(Need(args, ++i)); break;
+                    case "--floor-dbm": o.Sweep.FloorDbmOverride = D(Need(args, ++i)); break;
+                    case "--no-level-limits": o.Sweep.EnforceLevelLimits = false; break;
                     case "--no-floor-detect": o.Sweep.FloorDetect = false; break;
                     case "--settle": o.Sweep.SettleMs = I(Need(args, ++i)); break;
                     case "--addr-source": o.AddrSource = Need(args, ++i); break;
@@ -237,9 +238,14 @@ Usage: HP-Attenuator.TestHarness [options]
                                  with --debug to see the sequence. Verify per HardwareValidation.md V7.
   --lo-power dBm                 8673B LO drive into the 11793A (default 8; the converter wants
                                  +8..+13 dBm — try +10..+13 to cut conversion loss).
-  --floor-dbm dBm                #13: absolute level at/below which a deep reading is treated as sitting
-                                 on the ~-100 dBm converter floor (default -98). Such saturated points
-                                 are flagged FLOOR and excluded from the accuracy verdict, not failed.
+  --floor-dbm dBm                Override the measurable floor. Default (#21) is the SPEC limit for the
+                                 path in use: 11793A converted -100 dBm (Microwave Product Note); 8902A
+                                 direct -100 dBm on the IF average detector, -127 dBm on synchronous
+                                 (O&C Table 1-1). Use this only to match where the reading actually
+                                 saturates on the day.
+  --no-level-limits              #21: disable the pre-flight level check and attempt every commanded
+                                 point, even ones below the path floor (the pre-#21 behaviour — deep
+                                 points then read the floor and are caught after the fact by #13).
   --no-floor-detect              Disable #13 floor/plateau detection; count every point's error
                                  (the pre-#13 behaviour — deep floored points then fail the sweep).
   --settle ms                    Settle per attenuator step (default 100).

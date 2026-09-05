@@ -50,6 +50,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V8 | #6 — empty/transient read recovers in place (auto-range boundary) instead of failing | `issue-6-empty-read-recovery` | ⬜ | — |
 | V9 | #2 — `--profile` gives the real wall-clock breakdown to drive sweep optimization | `issue-2-sweep-profiling` | ⬜ | — |
 | V10 | #8 — a CALIBRATE error (Error 35) is now polled + logged + surfaced, not silently latched | `issue-8-calibrate-error-surface` | ⬜ | — |
+| V11 | #21 — spec-derived per-path level limits; points below the path floor are skipped, not failed | `issue-21-device-level-limits` | ⬜ | — |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: loses lock through the converter (CHANGE_LOG) |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -275,6 +276,41 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
   ClearError) or a clean status (→ cosmetic RQS latch). Cross-check against the 8902A front-panel error.
 - **If a real Error 35 shows:** that's a genuine marginal-level cal failure (too little signal to
   calibrate that range) — the honest ceiling is shallower there; relates to #1/#7 and the #13 floor.
+
+---
+
+---
+
+## V11 — #21 per-path measurable level limits  ⬜ built, awaiting bench
+
+- **Branch:** `issue-21-device-level-limits` (built; sim PASS on all three paths).
+- **Why:** the V1 run attempted 100 / 110 dB at 3 GHz from a −1.14 dBm reference — levels of −101 and
+  −111 dBm, below the 11793A path's −100 dBm floor. Result: −3.22 / −12.16 dB "errors", a FAIL verdict,
+  and a real **Error 01 (signal out of IF range)** on the 8902A panel. #13 caught it after the fact
+  against a **guessed** flat −98 dBm; #21 replaces that with the numbers the manuals state, per path.
+- **The limits now encoded** (`Instruments/LevelLimits.cs`, citations in source):
+  | Path | Floor | Source |
+  |---|---|---|
+  | 11793A converted (RF > 1300 MHz) | **−100 dBm** | Microwave Product Note: "+0 dBm and -100 dBm" |
+  | 8902A direct, IF average (4.4SP) | **−100 dBm** | O&C Table 1-1 fn.12 |
+  | 8902A direct, IF synchronous (4.0SP) | **−127 dBm** | O&C Table 1-1 / General Information |
+- **Isolate & run** (the same sweep that failed as V1 — it should now stop at the honest depth):
+  ```powershell
+  git checkout issue-21-device-level-limits
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+    --freq 3000 --astop 110 --astep 10 --debug --skip-sensor-cal --out DebugResults/v11-limits.csv
+  ```
+- **Expect (PASS):** the header states `11793A converted floor -100 dBm -> usable ~98 dB`; 0→90 dB
+  measure as before (worst |err| ≈ 1 dB); **100 and 110 dB are SKIPped, never commanded** — so the
+  8902A shows **no Error 01 at any point in the run** (that's the observable bench proof), the summary
+  reports 2 out-of-range points and "Deepest measured ~90 dB", and the verdict is **PASS** rather than
+  being failed by unmeasurable points.
+- **Watch on the panel:** confirm the sweep now ends cleanly at 90 dB with no error display, and that
+  no CL/retry cycling happens at the end of the run.
+- **Cross-check:** `--no-level-limits` restores the old behaviour and should reproduce the Error 01 and
+  the −3.2 / −12.2 dB points — a direct A/B that the limit is doing the work.
+- **If the real floor differs on the day:** `--floor-dbm` overrides the spec value; note the value that
+  matches where the reading actually saturates.
 
 ---
 

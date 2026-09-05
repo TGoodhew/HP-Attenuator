@@ -13,6 +13,47 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased — not yet merged
 
+### branch `issue-21-device-level-limits` (off `main`) — #21
+- **#21 — model each path's spec-derived measurable level window, and never sweep outside it.** The
+  sweep was commanding attenuation whose resulting level lands *below the path's measurement floor*,
+  then reporting the resulting under-read as a measurement error. On the 3 GHz bench run that meant
+  attempting 100 dB and 110 dB from a −1.14 dBm reference (i.e. −101 dBm and −111 dBm), producing
+  −3.22 dB / −12.16 dB "errors", a FAIL verdict, and a genuine **Error 01 (signal out of IF range)**
+  on the 8902A front panel — an error condition the receiver cannot resolve because the signal simply
+  isn't measurable there. #13 only caught this *after the fact*, classifying points against a **guessed
+  flat −98 dBm**, which is a bench approximation for one path and wrong by 27 dB for another.
+- New `LevelLimits` / `LevelWindow` (`Instruments/LevelLimits.cs`) carry the numbers the manuals
+  actually state, keyed on **measurement regime × detector**, each with its citation in the source:
+  - **11793A converted path: +0 to −100 dBm** — 8902A Microwave Product Note, verbatim: *"any power
+    level may be measured between +0 dBm and -100 dBm without further calibration"*. Applies
+    regardless of detector; the −127 dBm synchronous figure is a direct-path sensitivity and never
+    applies through the converter (matches the HW-tested sync dead end in SharedMemory.md).
+  - **8902A direct, IF average (4.4SP): −100 dBm** — O&C Table 1-1, Tuned RF Level, footnote 12,
+    verbatim: *"The Tuned RF Level measurement sensitivity when using the IF average detector is
+    -100 dBm."*
+  - **8902A direct, IF synchronous (4.0SP): −127 dBm** — O&C General Information ("minimum sensitivity
+    of -127 dBm"); stated TRFL range "0 to -127 dBm". Ceiling for all paths: 0 dBm.
+- `MeasureFrequency` now derives the usable depth from the **achieved reference** (`reference − floor`)
+  and **skips** points beyond it: no attenuator command, no read, marked `OutOfRange` with the
+  `PredictedLevelDbm` it would have produced, excluded from the verdict, and reported as
+  `SKIP — <level> dBm is below the path floor`. Enforcement needs a known reference level; when
+  leveling is off or the reference can't be read it is skipped (traced) and #13's post-hoc detection
+  still applies.
+- `SweepOptions.FloorDbm` (flat −98) is replaced by `FloorDbmOverride` (NaN = use the spec limit for
+  the path in use) plus `EffectiveFloorDbm(regime)`, which **#13's floor classifier now also uses** —
+  so both mechanisms agree on one spec-derived number per path. `--floor-dbm` still overrides it for
+  the empirical case; new `--no-level-limits` restores the pre-#21 attempt-everything behaviour.
+- Reporting: the per-frequency header states the active path, its floor and the usable depth
+  (`11793A converted floor -100 dBm -> usable 98.0 dB`); a new summary row counts out-of-range points;
+  CSV gains `out_of_range` and `predicted_level_dbm` columns. `AttenPointResult.Excluded` centralises
+  "this point yields no usable measurement" so the verdict aggregates stay consistent.
+- Also fixes a pre-existing #13 accumulator bug this surfaced: the cross-frequency "Deepest measured"
+  used `Math.Max(NaN, x)` (always NaN), so it always printed "—".
+- **Build clean; sim PASS on all three paths** — converted @ 3 GHz and direct+average @ 1 GHz both
+  floor at −100 dBm, usable 98.0 dB, skipping 100/110 dB (worst |err| 0.04 dB, deepest 90.0 dB);
+  direct+synchronous @ 1 GHz floors at −127 dBm, usable 125.0 dB, and measures the full 110 dB
+  (110 dB → 109.97, err −0.03). Bench validation per HardwareValidation.md row **V11**.
+
 ### branch `issue-8-calibrate-error-surface` (off `main`) — #8
 - **#8 — surface a CALIBRATE error that was invisible during the post-calibrate settle.** On a hardware
   sweep the SRQ annunciator could light with every `--debug` status poll reading `0x00`, because the
