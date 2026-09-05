@@ -19,6 +19,8 @@ namespace HpAttenuator.TestHarness
         public bool AttenSweep;     // --atten-sweep : Test 2 — 1 dB relative attenuation sweep at --freq
         public bool PerAtten;       // --per-atten : Test 3 — exercise each attenuator's settings individually
         public bool SectionTest;    // --section-test : isolate the 8496's two 40 dB sections (digit 7 vs 8)
+        public bool SfMatrix;      // --sf-matrix : #25 - SF 4 x SF 31 stage-1 matrix
+        public string SfConfigs;   // --sf-configs A,B : restrict which matrix cells run
         public bool SectionSum;     // --section-sum : #15 — characterize each section alone, then SUM for the full range
         public bool CalDebug;       // --cal-debug : observe the 8902A status byte vs level (no CALIBRATE)
         public bool Debug;          // --debug : trace every 8902A command + status byte (find Error 35)
@@ -83,6 +85,10 @@ namespace HpAttenuator.TestHarness
                     case "--per-atten": o.PerAtten = true; break;
                     case "--section-test": o.SectionTest = true; break;
                     case "--section-sum": o.SectionSum = true; break;
+                    case "--sf-matrix": o.SfMatrix = true; break;
+                    case "--sf-configs": o.SfConfigs = Need(args, ++i); break;
+                    case "--repeats": o.Sweep.RepeatsPerPoint = I(Need(args, ++i)); break;
+                    case "--noise-correction": o.Sweep.NoiseCorrection = true; break;
                     case "--cal-debug": o.CalDebug = true; break;
                     case "--debug": o.Debug = true; break;
                     case "--profile": o.Profile = true; break;
@@ -262,6 +268,20 @@ Usage: HP-Attenuator.TestHarness [options]
   --fine-to dB                   the shallow region stays on the coarse grid. The coarse grid resumes
                                  past --fine-to (default: --astop). E.g. --astep 10 --fine-from 90
                                  --fine-to 100 gives 0,10..80, 90,91..100, then 110.
+  --sf-matrix                    #25 stage 1: sweep the 2x2 matrix of IF detector (SF 4: 4.0
+                                 synchronous / 4.4 average) against noise correction (SF 31:
+                                 31.0 off / 31.1 on), to test whether the deep-end roll-off is
+                                 residual system noise or a hard floor. Forces the range cal
+                                 (SF 31.1 creates a Range 3 factor, so it needs one to fire).
+                                 Writes one CSV row per reading, flushed as it goes.
+  --sf-configs A,B               #25: run only these matrix cells (A=4.4/31.0, B=4.4/31.1,
+                                 C=4.0/31.0, D=4.0/31.1). Default: all four. The synchronous
+                                 cells (C,D) lose lock through the 11793A and can spend the
+                                 full read budget failing every point, so A,B first is sane.
+  --repeats n                    #25: readings per attenuation point (default 1). >1 gives the
+                                 per-point standard deviation that separates noise from bias.
+  --noise-correction             #25: enable SF 31.1 noise correction on an ordinary sweep.
+                                 AVG detector + Sensor Module only (8902A O&C CAUTION).
   --adaptive-steps               #23: choose the points from what the hardware can actually measure
                                  here, instead of a fixed grid — 1 dB through the FINE attenuator's
                                  whole range (8494: 0-11 dB), then the --astep ladder to within

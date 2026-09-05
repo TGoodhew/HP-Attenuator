@@ -182,6 +182,16 @@ namespace HpAttenuator.Measurement
         /// and approaches the floor in 1 dB steps.</summary>
         public int FloorApproachDb { get; set; } = 10;
 
+        /// <summary>#25: readings taken at each attenuation point. >1 gives a per-point spread (standard
+        /// deviation), which is what separates a genuinely noisy measurement from a biased one — the
+        /// question behind the noise-correction experiment.</summary>
+        public int RepeatsPerPoint { get; set; } = 1;
+
+        /// <summary>#25: enable 8902A noise correction (SF 31.1) — an extra Range 3 (−60 to −100 dBm)
+        /// calibration factor compensating residual system noise. AVG detector + Sensor Module only, and
+        /// it does nothing unless a Range 3 CALIBRATE actually fires (see <see cref="ForceRangeCal"/>).</summary>
+        public bool NoiseCorrection { get; set; } = false;
+
         /// <summary>
         /// The attenuation points to measure, ascending and without duplicates. Normally a uniform
         /// <see cref="AttenStepDb"/> grid; when <see cref="FineFromDb"/> is set the sweep runs coarse up
@@ -314,6 +324,14 @@ namespace HpAttenuator.Measurement
         /// <summary>#24: <see cref="StepDeltaDb"/> − <see cref="NominalStepDb"/> — how far this single
         /// step missed its own nominal value, independent of everything before it.</summary>
         public double StepErrorDb { get; set; } = double.NaN;
+
+        /// <summary>#25: every reading taken at this point (one per repeat), in order.</summary>
+        public System.Collections.Generic.List<double> Repeats { get; } = new System.Collections.Generic.List<double>();
+
+        /// <summary>#25: standard deviation of <see cref="Repeats"/>, dB. NaN with fewer than 2 readings.
+        /// This is the measurement's repeatability at this level — high sd means noise, while a large
+        /// error with a low sd means bias.</summary>
+        public double StdDevDb { get; set; } = double.NaN;
 
         /// <summary>True if this point yielded no usable measurement — never attempted (#21), flagged at
         /// the floor (#13), errored, or unreadable. Such points are excluded from the accuracy verdict.</summary>

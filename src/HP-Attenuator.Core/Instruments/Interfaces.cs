@@ -158,9 +158,14 @@ namespace HpAttenuator.Instruments
         /// <paramref name="detector"/>. <paramref name="tuning"/> selects manual (default) or automatic
         /// signal acquisition (#3).
         /// </summary>
+        /// <summary>Reads the instrument's firmware date code (8902A SF 42.0). Used to confirm a special
+        /// function is actually supported by this unit before trusting a null result from it. NaN if
+        /// unreadable.</summary>
+        double ReadFirmwareDateCode();
+
         void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
             TrflDetector detector = TrflDetector.Average, bool trackMode = false,
-            TrflTuning tuning = TrflTuning.Manual);
+            TrflTuning tuning = TrflTuning.Manual, bool noiseCorrection = false);
 
         /// <summary>
         /// Begins an absolute RF Power measurement at the given RF frequency, in the

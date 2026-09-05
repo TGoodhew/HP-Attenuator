@@ -145,6 +145,9 @@ namespace HpAttenuator.TestHarness
                 // #15: per-section characterize + sum. Measure each section alone (each stays above the
                 // ~95 dB converter floor), then sum to synthesize the full 110/121 dB that cannot be
                 // measured directly. The real path to a validated full-range number.
+                if (opt.SfMatrix)
+                    return RunSfMatrix(opt, bench, config);
+
                 if (opt.SectionSum)
                 {
                     var sumAttn = bench.MakeAttenuator(config);
@@ -1383,6 +1386,262 @@ namespace HpAttenuator.TestHarness
             if (s.FineFromDb < 0 || s.FineStepDb <= 0) return "";
             string to = s.FineToDb >= 0 ? s.FineToDb.ToString() : s.AttenStopDb.ToString();
             return $" (step {s.FineStepDb} from {s.FineFromDb} to {to} dB)";
+        }
+
+
+        // ---- #25: SF 4 x SF 31 matrix ---------------------------------------------------
+
+        private sealed class SfConfig
+        {
+            public string Id;
+            public TrflDetector Detector;
+            public bool Noise;
+            public string Sf4 => Detector == TrflDetector.Synchronous ? "4.0" : "4.4";
+            public string Sf31 => Noise ? "31.1" : "31.0";
+            public string DetectorName => Detector == TrflDetector.Synchronous ? "IF synchronous" : "IF average";
+        }
+
+        private sealed class SfOutcome
+        {
+            public SfConfig Cfg;
+            public double NoiseFloorDbm = double.NaN;
+            public int DeepestInSpecDb = -1;
+            public double WorstSdDb = double.NaN;
+            public int FirstOver05Db = -1;
+            public int ErrorCount;
+            public TimeSpan Elapsed;
+            public double ReferenceDbm = double.NaN;
+            public FreqPointResult Result;
+        }
+
+        /// <summary>
+        /// Per-dB pass/fail limits from SpecFiles/8494G_8496G_series_attenuation_ranges.csv, keyed by
+        /// nominal dB, so depth is judged against the DUT's published tolerance rather than one flat
+        /// number. Missing file is non-fatal: the column just goes blank.
+        /// </summary>
+        private static Dictionary<int, KeyValuePair<double, double>> LoadSpecLimits()
+        {
+            var map = new Dictionary<int, KeyValuePair<double, double>>();
+            string path = Path.Combine("SpecFiles", "8494G_8496G_series_attenuation_ranges.csv");
+            try
+            {
+                bool first = true;
+                foreach (string line in File.ReadAllLines(path))
+                {
+                    if (first) { first = false; continue; }
+                    string[] f = line.Split(',');
+                    if (f.Length < 3) continue;
+                    if (int.TryParse(f[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int nom) &&
+                        double.TryParse(f[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double lo) &&
+                        double.TryParse(f[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double hi))
+                        map[nom] = new KeyValuePair<double, double>(lo, hi);
+                }
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Spec limits not loaded ({ex.Message.EscapeMarkup()}) — " +
+                                       "the in-spec column will be blank.[/]");
+            }
+            return map;
+        }
+
+        /// <summary>The relay split carrying a given total attenuation (which sections are engaged).</summary>
+        private static string AttenSplit(AttenuatorConfig config, int totalDb)
+        {
+            try
+            {
+                var digits = CommandBuilder.Solve(new List<Section>(config.AllSections), totalDb);
+                if (digits == null) return "";
+                var parts = new List<string>();
+                foreach (int d in digits) parts.Add(d.ToString(CultureInfo.InvariantCulture));
+                return string.Join("+", parts.ToArray());
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>
+        /// #25 — stage 1 of the special-function investigation: does 8902A noise correction (SF 31.1)
+        /// lift the deep-end roll-off, or is the ~-96 dBm plateau a hard floor? Varies ONLY the IF
+        /// detector (SF 4) against noise correction (SF 31); SF 3, 9 and 32 stay at their defaults.
+        ///
+        /// SF 4 has exactly two documented detector values — 4.0 (IF synchronous) and 4.4 (IF average),
+        /// O&amp;C p.3-95 — so this is a 2x2, not a 4x2. ForceRangeCal is required throughout: SF 31.1
+        /// works by creating an extra Range 3 calibration factor, and with the descent firing zero
+        /// CALIBRATEs (#17) there would be nothing for it to create.
+        /// </summary>
+        private static int RunSfMatrix(HarnessOptions opt, Bench bench, AttenuatorConfig config)
+        {
+            double freq = opt.RfPowerFreqMHz;
+            var specs = LoadSpecLimits();
+
+            AnsiConsole.MarkupLine("[bold]SF 4 × SF 31 matrix (#25, stage 1)[/]");
+
+            // SF 31.1 is firmware-gated ("not available with firmware date codes 234.1985 and below").
+            // Check first, so an unsupported function is never read as "made no difference".
+            double fw = bench.Receiver.ReadFirmwareDateCode();
+            AnsiConsole.MarkupLine(double.IsNaN(fw)
+                ? "[yellow]Firmware date code (42.0SP) unreadable — cannot confirm SF 31.1 is supported.[/]"
+                : $"[grey]Firmware date code (42.0SP): [/]{fw:0.###}[grey] — SF 31.1 needs above 234.1985.[/]");
+
+            var configs = new[]
+            {
+                new SfConfig { Id = "A", Detector = TrflDetector.Average,     Noise = false },
+                new SfConfig { Id = "B", Detector = TrflDetector.Average,     Noise = true  },
+                new SfConfig { Id = "C", Detector = TrflDetector.Synchronous, Noise = false },
+                new SfConfig { Id = "D", Detector = TrflDetector.Synchronous, Noise = true  },
+            };
+
+            if (!string.IsNullOrWhiteSpace(opt.SfConfigs))
+            {
+                var want = new HashSet<string>(
+                    opt.SfConfigs.ToUpperInvariant().Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries));
+                configs = Array.FindAll(configs, c => want.Contains(c.Id));
+                if (configs.Length == 0)
+                {
+                    AnsiConsole.MarkupLine("[red]--sf-configs matched no cells (valid: A,B,C,D).[/]");
+                    return 2;
+                }
+            }
+            AnsiConsole.MarkupLine($"[grey]Running {configs.Length} config(s).[/]");
+
+            StreamWriter csv;
+            try { csv = OpenCsvWriter(opt.CsvPath); }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[red]Cannot open CSV:[/] {ex.Message.EscapeMarkup()}");
+                return 2;
+            }
+
+            var outcomes = new List<SfOutcome>();
+            using (csv)
+            {
+                csv.AutoFlush = true;   // per-row flush: a run that dies partway still leaves usable data
+                csv.WriteLine("config,sf4,sf31,freq_mhz,noise_floor_dbm,commanded_db,split,repeat_index," +
+                              "relative_db,reference_dbm,absolute_dbm,flag");
+
+                foreach (var cfg in configs)
+                {
+                    AnsiConsole.WriteLine();
+                    AnsiConsole.MarkupLine($"[bold aqua]Config {cfg.Id}[/] — SF4 {cfg.Sf4} ({cfg.DetectorName}), " +
+                                           $"SF31 {cfg.Sf31} (noise correction {(cfg.Noise ? "ON" : "off")})");
+
+                    opt.Sweep.Detector = cfg.Detector;
+                    opt.Sweep.NoiseCorrection = cfg.Noise;
+                    opt.Sweep.ForceRangeCal = true;    // SF 31.1 needs a real Range 3 CALIBRATE (#17)
+
+                    var attn = bench.MakeAttenuator(config);
+                    var engine = new MeasurementEngine(bench.Source, bench.Lo, attn, bench.Receiver, opt.Sweep);
+                    var outcome = new SfOutcome { Cfg = cfg };
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                    outcome.NoiseFloorDbm = engine.MeasureNoiseFloorDbm(freq);
+                    AnsiConsole.MarkupLine(double.IsNaN(outcome.NoiseFloorDbm)
+                        ? "  [grey]Noise floor (RF off): no readable level — below what the receiver can report.[/]"
+                        : $"  [grey]Noise floor (RF off): [/]{outcome.NoiseFloorDbm:0.00} dBm");
+
+                    try
+                    {
+                        outcome.Result = engine.MeasureFrequency(freq,
+                            (i, n, p) =>
+                            {
+                                string body = p.OutOfRange
+                                    ? $"[yellow]SKIP {p.PredictedLevelDbm:0.0} dBm below floor[/]"
+                                    : p.Error != null
+                                        ? $"[red]{p.Error.EscapeMarkup()}[/]"
+                                        : $"meas {p.MeasuredAttenuationDb,7:0.00} dB (err {p.ErrorDb:+0.00;-0.00;0.00}" +
+                                          (double.IsNaN(p.StdDevDb) ? ")" : $", sd {p.StdDevDb:0.000})");
+                                AnsiConsole.MarkupLine($"  {i,3}/{n}  set {p.CommandedDb,3} dB -> {body}");
+                            },
+                            (atten, rep, relDb, refDbm) =>
+                            {
+                                // One row per individual reading, flushed immediately. The reference
+                                // comes from the engine so each row carries its own absolute level and
+                                // stands alone even if the run dies partway.
+                                csv.WriteLine(string.Join(",", new[]
+                                {
+                                    cfg.Id, cfg.Sf4, cfg.Sf31, F(freq), F(outcome.NoiseFloorDbm),
+                                    atten.ToString(CultureInfo.InvariantCulture),
+                                    AttenSplit(config, atten),
+                                    rep.ToString(CultureInfo.InvariantCulture),
+                                    F(relDb), F(refDbm),
+                                    double.IsNaN(refDbm) ? "" : F(refDbm + relDb),
+                                    ""
+                                }));
+                            });
+                    }
+                    catch (Exception ex)
+                    {
+                        AnsiConsole.MarkupLine($"  [red]Config {cfg.Id} aborted: {ex.Message.EscapeMarkup()}[/]");
+                        sw.Stop();
+                        outcome.Elapsed = sw.Elapsed;
+                        outcomes.Add(outcome);
+                        continue;
+                    }
+                    sw.Stop();
+                    outcome.Elapsed = sw.Elapsed;
+                    outcome.ReferenceDbm = outcome.Result.ReferencePowerDbm;
+
+                    foreach (var p in outcome.Result.Points)
+                    {
+                        if (p.Error != null) outcome.ErrorCount++;
+                        if (p.Excluded) continue;
+                        if (!double.IsNaN(p.StdDevDb) &&
+                            (double.IsNaN(outcome.WorstSdDb) || p.StdDevDb > outcome.WorstSdDb))
+                            outcome.WorstSdDb = p.StdDevDb;
+                        if (outcome.FirstOver05Db < 0 && Math.Abs(p.ErrorDb) > 0.5)
+                            outcome.FirstOver05Db = p.CommandedDb;
+                        if (specs.TryGetValue(p.CommandedDb, out var lim) &&
+                            p.MeasuredAttenuationDb >= lim.Key && p.MeasuredAttenuationDb <= lim.Value &&
+                            p.CommandedDb > outcome.DeepestInSpecDb)
+                            outcome.DeepestInSpecDb = p.CommandedDb;
+                    }
+                    outcomes.Add(outcome);
+                    RenderStepTable(outcome.Result, opt.StepToleranceDb);
+                }
+            }
+
+            RenderSfMatrixSummary(opt, outcomes, freq);
+            AnsiConsole.MarkupLine($"[grey]Per-reading CSV: [/]{Path.GetFullPath(opt.CsvPath).EscapeMarkup()}");
+            return 0;
+        }
+
+        /// <summary>#25 — the copy-pasteable markdown summary, one row per config.</summary>
+        private static void RenderSfMatrixSummary(HarnessOptions opt, List<SfOutcome> outcomes, double freq)
+        {
+            string path = "unknown path";
+            double refDbm = double.NaN;
+            foreach (var o in outcomes)
+            {
+                if (o.Result == null) continue;
+                path = o.Result.Regime == MeasurementRegime.Converted
+                    ? $"11793A converted (LO {o.Result.LoMHz:0.##} MHz, IF {o.Result.IfMHz:0.##} MHz)"
+                    : "8902A direct";
+                if (double.IsNaN(refDbm)) refDbm = o.Result.ReferencePowerDbm;
+                break;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine();
+            sb.AppendLine($"Frequency: {freq:0.###} MHz    Path: {path}");
+            sb.AppendLine($"Source: leveled per config to a {opt.Sweep.TargetReferenceDbm:0.#} dBm reference on the " +
+                          $"8340B's {opt.Sweep.LevelFineStepDb:0.##} dB grid" +
+                          (double.IsNaN(refDbm) ? "" : $" (config A achieved {refDbm:0.000} dBm)") +
+                          $"    Repeats/point: {opt.Sweep.RepeatsPerPoint}    Range cal: forced (#17)");
+            sb.AppendLine();
+            sb.AppendLine("| SF4 | SF31 | noise floor (dBm, RF off) | deepest step within CSV limits | worst-case repeatability (sd, dB) | first attenuation where error exceeds 0.5 dB | error/RECAL count | total run time |");
+            sb.AppendLine("|---|---|---|---|---|---|---|---|");
+            foreach (var o in outcomes)
+            {
+                sb.Append("| ").Append(o.Cfg.Sf4).Append(" | ").Append(o.Cfg.Sf31).Append(" | ")
+                  .Append(double.IsNaN(o.NoiseFloorDbm) ? "below readable" : o.NoiseFloorDbm.ToString("0.00", CultureInfo.InvariantCulture)).Append(" | ")
+                  .Append(o.DeepestInSpecDb < 0 ? "—" : o.DeepestInSpecDb + " dB").Append(" | ")
+                  .Append(double.IsNaN(o.WorstSdDb) ? "—" : o.WorstSdDb.ToString("0.000", CultureInfo.InvariantCulture)).Append(" | ")
+                  .Append(o.FirstOver05Db < 0 ? "none" : o.FirstOver05Db + " dB").Append(" | ")
+                  .Append(o.ErrorCount.ToString(CultureInfo.InvariantCulture)).Append(" | ")
+                  .Append(o.Elapsed.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)).Append(" s |")
+                  .AppendLine();
+            }
+            AnsiConsole.WriteLine(sb.ToString());
         }
 
         private static string F(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);

@@ -265,7 +265,7 @@ namespace HpAttenuator.Instruments
 
         public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
             TrflDetector detector = TrflDetector.Average, bool trackMode = false,
-            TrflTuning tuning = TrflTuning.Manual)
+            TrflTuning tuning = TrflTuning.Manual, bool noiseCorrection = false)
         {
             // Manual "Attenuator Measurements" (relative Tuned RF Level, O&C 3-115): S4, tune, pick
             // the detector/mode, then SET REF (done by the engine).
@@ -308,6 +308,23 @@ namespace HpAttenuator.Instruments
                 // ~-100 dBm either way (Microwave Product Note). Range-to-range CALIBRATE references the
                 // sensor module (the 11792A, in the chain).
                 Send(detector == TrflDetector.Synchronous ? "4.0SP" : "4.4SP");
+
+                // Noise correction (SF 31). The manual: "For added noise correction when using the IF
+                // Average detector to measure low-level signals, key in 31.1 SPCL when you select the IF
+                // Average detector (that is prior to calibrating Range 1) ... causes the instrument to
+                // create an additional calibration factor for Range 3 (-60 to -100 dBm) which it uses to
+                // compensate for any residual noise inherent within the measurement system."
+                //
+                // Two conditions bind here. (1) It must be sent NOW - immediately after selecting the
+                // detector and BEFORE any range CALIBRATE - which is why it lives here and not in the
+                // engine. (2) The CAUTION forbids 31.1 for "any uncalibrated, or relative signal level
+                // measurement in Tuned RF Level mode WITHOUT a power sensor". Ours IS a relative
+                // measurement, so this is only legitimate because the 11792A Sensor Module is in the
+                // chain - which the same passage requires for AVG-detector range-to-range calibration.
+                // It also only does anything if a Range 3 CALIBRATE actually fires (see #17 /
+                // ForceRangeCal): with no calibration there is no factor for it to create.
+                Send(noiseCorrection ? "31.1SP" : "31.0SP");
+
                 Send("LG");            // dB display -> bus returns dB
             }
             Send("1.0SP");             // auto RF attenuation (keep fixed after cal)
@@ -442,6 +459,22 @@ namespace HpAttenuator.Instruments
             // later re-zeroes it to relative dB). Same settled-read path as ReadRelativeDb; the only
             // difference is the caller reads it BEFORE taking the reference, for #16 leveling.
             return ReadMeasurement();
+        }
+
+        /// <summary>
+        /// Reads the firmware date code (SF 42.0). Some special functions are firmware-gated - notably
+        /// noise correction (SF 31.1), which the manual marks "not available with firmware date codes
+        /// 234.1985 and below" and "available on instruments serial prefixed 2535A and above". Checking
+        /// this first stops us reading "unsupported" as "made no difference".
+        /// </summary>
+        public double ReadFirmwareDateCode()
+        {
+            try
+            {
+                Send("42.0SP");
+                return ReadMeasurement();
+            }
+            catch { return double.NaN; }
         }
 
         public double ReadSignalFrequencyMHz()

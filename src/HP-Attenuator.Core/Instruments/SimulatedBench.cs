@@ -164,7 +164,7 @@ namespace HpAttenuator.Instruments
 
         public void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
             TrflDetector detector = TrflDetector.Average, bool trackMode = false,
-            TrflTuning tuning = TrflTuning.Manual)
+            TrflTuning tuning = TrflTuning.Manual, bool noiseCorrection = false)
         {
             // The sim floor (-130 dBm) sits below the real floors and the sim never drifts / loses
             // lock, so detector, Track Mode, and manual-vs-auto tuning don't change simulated readings —
@@ -172,6 +172,9 @@ namespace HpAttenuator.Instruments
             _tunedMHz = rfMHz;
             _haveReference = false;
         }
+
+        /// <summary>Sim reports a date code well above the SF 31.1 gate so the matrix runner proceeds.</summary>
+        public double ReadFirmwareDateCode() => 2535.0;
 
         public void BeginRfPowerMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
         {

@@ -129,7 +129,7 @@ namespace HpAttenuator.Measurement
         public DetectResult DetectSignal(double freqMHz, double thresholdDb = 10.0)
         {
             var plan = Prepare(freqMHz);
-            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector, _options.TrackMode, _options.Tuning);
+            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector, _options.TrackMode, _options.Tuning, _options.NoiseCorrection);
             _attenuator.SetAttenuationDb(0);
 
             var r = new DetectResult
@@ -193,14 +193,15 @@ namespace HpAttenuator.Measurement
         }
 
         public FreqPointResult MeasureFrequency(double freqMHz,
-            System.Action<int, int, AttenPointResult> onPoint = null)
+            System.Action<int, int, AttenPointResult> onPoint = null,
+            System.Action<int, int, double, double> onReading = null)
         {
             int total = 0;   // set once the attenuation plan is known (it can depend on the reference, #23)
             int index = 0;
             Timing = new SweepTiming();                         // #2: attribute this frequency's wall-clock
             var wall = System.Diagnostics.Stopwatch.StartNew();
             var plan = Prepare(freqMHz);
-            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector, _options.TrackMode, _options.Tuning);
+            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector, _options.TrackMode, _options.Tuning, _options.NoiseCorrection);
 
             var result = new FreqPointResult
             {
@@ -292,9 +293,21 @@ namespace HpAttenuator.Measurement
                     bool isReference = atten == _options.AttenStartDb;
                     // (ref boundaryCals can't be captured by a lambda, so time this read explicitly.)
                     var swRead = System.Diagnostics.Stopwatch.StartNew();
-                    double relDb = isReference
-                        ? ReadRelativeDbWithRetry(ReferenceReadAttempts)
-                        : ReadStepWithBoundaryCal(StepReadAttempts, ref boundaryCals);
+                    double relDb = 0;
+                    int repeats = _options.RepeatsPerPoint < 1 ? 1 : _options.RepeatsPerPoint;
+                    for (int rep = 0; rep < repeats; rep++)
+                    {
+                        // Only the FIRST reading of the reference point may re-baseline / boundary-cal;
+                        // the extra repeats are plain re-reads at the same setting, so the spread they
+                        // measure is the measurement's own repeatability and nothing else.
+                        relDb = isReference
+                            ? ReadRelativeDbWithRetry(ReferenceReadAttempts)
+                            : ReadStepWithBoundaryCal(StepReadAttempts, ref boundaryCals);
+                        point.Repeats.Add(relDb);
+                        onReading?.Invoke(atten, rep, relDb, referenceDbm);
+                    }
+                    if (point.Repeats.Count > 1) point.StdDevDb = StdDev(point.Repeats);
+                    relDb = Mean(point.Repeats);      // the point's value is the mean of its repeats
                     swRead.Stop();
                     Timing.Add(SweepTiming.Read, swRead.ElapsedMilliseconds);
 
@@ -361,6 +374,55 @@ namespace HpAttenuator.Measurement
             long other = wall.ElapsedMilliseconds - Timing.TotalMs;
             if (other > 0) Timing.Add("setup/other", other, 0);
             return result;
+        }
+
+        /// <summary>
+        /// #25 — the system noise floor at this frequency: the level the receiver reports with the
+        /// source RF switched OFF, in the exact detector / noise-correction configuration about to be
+        /// used. This is the number that says whether a deep reading is a real measurement or the
+        /// measurement system listening to itself. Returns NaN when the receiver cannot read a level at
+        /// all with no signal present (Error 96) — which is itself the good answer: the floor is below
+        /// anything it can report. Always restores RF on.
+        /// </summary>
+        public double MeasureNoiseFloorDbm(double freqMHz)
+        {
+            var plan = Prepare(freqMHz);
+            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz,
+                _options.Detector, _options.TrackMode, _options.Tuning, _options.NoiseCorrection);
+            _attenuator.SetAttenuationDb(_options.AttenStartDb);
+            try
+            {
+                _source.RfOff();
+                Settle();
+                Thread.Sleep(1000);          // let the receiver settle on an absent signal
+                return _receiver.ReadTunedLevelDbm();
+            }
+            catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
+            {
+                try { _receiver.ClearError(); } catch { /* best effort */ }
+                return double.NaN;
+            }
+            finally
+            {
+                _source.RfOn();
+                Settle();
+            }
+        }
+
+        private static double Mean(System.Collections.Generic.List<double> v)
+        {
+            double t = 0;
+            foreach (double x in v) t += x;
+            return v.Count == 0 ? double.NaN : t / v.Count;
+        }
+
+        /// <summary>Sample standard deviation (n-1) — the point's measurement repeatability (#25).</summary>
+        private static double StdDev(System.Collections.Generic.List<double> v)
+        {
+            if (v.Count < 2) return double.NaN;
+            double m = Mean(v), sum = 0;
+            foreach (double x in v) sum += (x - m) * (x - m);
+            return System.Math.Sqrt(sum / (v.Count - 1));
         }
 
         /// <summary>
@@ -503,7 +565,7 @@ namespace HpAttenuator.Measurement
         {
             try
             {
-                _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector, _options.TrackMode, _options.Tuning);
+                _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector, _options.TrackMode, _options.Tuning, _options.NoiseCorrection);
                 Settle();
                 double f = _receiver.ReadSignalFrequencyMHz();
                 double tolMHz = System.Math.Max(1.0, freqMHz * 0.001);
@@ -534,7 +596,7 @@ namespace HpAttenuator.Measurement
             System.Action<int, int, AttenPointResult> onPoint = null)
         {
             var plan = Prepare(freqMHz);
-            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector, _options.TrackMode, _options.Tuning);
+            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz, _options.Detector, _options.TrackMode, _options.Tuning, _options.NoiseCorrection);
 
             var result = new FreqPointResult
             {
