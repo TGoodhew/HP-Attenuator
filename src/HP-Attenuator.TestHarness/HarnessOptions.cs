@@ -19,6 +19,7 @@ namespace HpAttenuator.TestHarness
         public bool AttenSweep;     // --atten-sweep : Test 2 — 1 dB relative attenuation sweep at --freq
         public bool PerAtten;       // --per-atten : Test 3 — exercise each attenuator's settings individually
         public bool SectionTest;    // --section-test : isolate the 8496's two 40 dB sections (digit 7 vs 8)
+        public bool TrflRecal;     // --trfl-recal : one CALIBRATE at 0 dB to rewrite the first cal factor
         public bool TrflCal;       // --trfl-cal : read back the stored TRFL range cal factors (SF 38)
         public bool ClearTrflCal;  // --clear-trfl-cal : clear them (SF 39.9) then read back
         public bool SfMatrix;      // --sf-matrix : #25 - SF 4 x SF 31 stage-1 matrix
@@ -87,6 +88,7 @@ namespace HpAttenuator.TestHarness
                     case "--per-atten": o.PerAtten = true; break;
                     case "--section-test": o.SectionTest = true; break;
                     case "--section-sum": o.SectionSum = true; break;
+                    case "--trfl-recal": o.TrflRecal = true; break;
                     case "--trfl-cal": o.TrflCal = true; break;
                     case "--clear-trfl-cal": o.ClearTrflCal = true; break;
                     case "--sf-matrix": o.SfMatrix = true; break;
@@ -272,6 +274,10 @@ Usage: HP-Attenuator.TestHarness [options]
   --fine-to dB                   the shallow region stays on the coarse grid. The coarse grid resumes
                                  past --fine-to (default: --astop). E.g. --astep 10 --fine-from 90
                                  --fine-to 100 gives 0,10..80, 90,91..100, then 110.
+  --trfl-recal                   Rewrite the Tuned RF Level FIRST calibration factor with one
+                                 CALIBRATE at 0 dB and full signal. The recovery when the absolute
+                                 TRFL scale is offset but RF Power still reads correctly. Survives
+                                 nothing else: preset, sensor re-cal and SF 39.9 all leave it.
   --trfl-cal                     Read back the 8902A's stored Tuned RF Level range calibration
                                  factors (SF 38.1-38.3). A CALIBRATE done at a level the detector
                                  cannot reference stores a BAD factor that offsets every later

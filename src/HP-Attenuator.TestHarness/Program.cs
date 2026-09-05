@@ -147,6 +147,9 @@ namespace HpAttenuator.TestHarness
                 // #15: per-section characterize + sum. Measure each section alone (each stays above the
                 // ~95 dB converter floor), then sum to synthesize the full 110/121 dB that cannot be
                 // measured directly. The real path to a validated full-range number.
+                if (opt.TrflRecal)
+                    return RunTrflRecal(opt, bench, config);
+
                 if (opt.SfMatrix)
                     return RunSfMatrix(opt, bench, config);
 
@@ -1691,6 +1694,45 @@ namespace HpAttenuator.TestHarness
                 ? "[grey]Cleared. With no resident factors the receiver should now raise RECAL/UNCAL as " +
                   "the level drops, so the next sweep calibrates naturally rather than riding stale factors (#17).[/]"
                 : "[grey]Use [/]--clear-trfl-cal[grey] to clear them (SF 39.9) if one looks corrupt.[/]");
+            return 0;
+        }
+
+
+        /// <summary>
+        /// Rewrites the 8902A's Tuned RF Level first calibration factor with one CALIBRATE at 0 dB and
+        /// full signal. The recovery when the absolute TRFL scale is offset but RF Power still reads
+        /// correctly — which localises the fault to the TRFL calibration chain rather than the sensor.
+        /// </summary>
+        private static int RunTrflRecal(HarnessOptions opt, Bench bench, AttenuatorConfig config)
+        {
+            double freq = opt.RfPowerFreqMHz;
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"[bold]Tuned RF Level re-calibration[/] [grey](one CALIBRATE at 0 dB, {freq:0.###} MHz)[/]");
+
+            opt.Sweep.AdaptiveLevel = false;    // do NOT level: levelling reads the very scale we're fixing
+            var attn = bench.MakeAttenuator(config);
+            var engine = new MeasurementEngine(bench.Source, bench.Lo, attn, bench.Receiver, opt.Sweep);
+
+            double after;
+            double before;
+            try { after = engine.RecalibrateTrflFirstFactor(freq, out before); }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"  [red]CALIBRATE failed: {ex.Message.EscapeMarkup()}[/]");
+                AnsiConsole.MarkupLine("  [yellow]A failed CALIBRATE here usually means too little signal — " +
+                                       "check the source is on and the chain is connected.[/]");
+                return 1;
+            }
+
+            AnsiConsole.MarkupLine($"  Absolute level before: {(double.IsNaN(before) ? "unreadable" : before.ToString("+0.000;-0.000;0.000") + " dBm")}");
+            AnsiConsole.MarkupLine($"  Absolute level after:  {(double.IsNaN(after) ? "unreadable" : after.ToString("+0.000;-0.000;0.000") + " dBm")}");
+            AnsiConsole.WriteLine();
+
+            // The RF Power reading through the same chain is the reference truth: TRFL should now agree
+            // with it to within the path's accuracy, not sit tens of dB above it.
+            AnsiConsole.MarkupLine(!double.IsNaN(after) && Math.Abs(after) < 10.0
+                ? "[green]Absolute Tuned RF Level scale looks sane again.[/]"
+                : "[red]Still offset — the first calibration factor was not rewritten.[/]");
             return 0;
         }
 

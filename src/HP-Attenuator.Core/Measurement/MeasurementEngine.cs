@@ -409,6 +409,43 @@ namespace HpAttenuator.Measurement
             }
         }
 
+        /// <summary>
+        /// Recovery for a corrupt Tuned RF Level FIRST calibration factor — the factor that maps the
+        /// detector reading to absolute dBm. A CALIBRATE performed at a level the detector cannot
+        /// reference stores a bad one, and it survives an instrument preset, a sensor re-calibration and
+        /// (on early firmware) SF 39.9, because none of those rewrite it. The manual's mechanism is the
+        /// way back: "the first calibration factor will be different depending on the detector used when
+        /// CALIBRATE is selected the first time" — so one CALIBRATE at full signal rewrites it.
+        ///
+        /// Deliberately does ONE calibration at 0 dB attenuation with the source at full commanded power
+        /// (no levelling, no descent): a strong, steady signal is the condition under which a CALIBRATE
+        /// is safe. It is the deep, weak forced calibrations that store bad factors in the first place.
+        /// Returns the absolute level read after calibrating; <paramref name="before"/> gets the level
+        /// beforehand, so the caller can show the correction.
+        /// </summary>
+        public double RecalibrateTrflFirstFactor(double freqMHz, out double before)
+        {
+            var plan = Prepare(freqMHz);          // sets source power + LO, tunes the chain
+            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz,
+                _options.Detector, false, _options.Tuning, false);   // noise correction OFF
+            _attenuator.SetAttenuationDb(0);
+            Settle();
+
+            before = SafeReadLevel();
+            _receiver.Calibrate();                // rewrites the first calibration factor
+            return SafeReadLevel();
+        }
+
+        private double SafeReadLevel()
+        {
+            try { return _receiver.ReadTunedLevelDbm(); }
+            catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
+            {
+                try { _receiver.ClearError(); } catch { /* best effort */ }
+                return double.NaN;
+            }
+        }
+
         private static double Mean(System.Collections.Generic.List<double> v)
         {
             double t = 0;
