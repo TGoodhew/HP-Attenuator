@@ -1176,6 +1176,7 @@ namespace HpAttenuator.TestHarness
             int measured = 0;
             int errorPoints = 0;
             int floorPoints = 0;                       // #13: points that saturated at the converter floor
+            var completed = new List<FreqPointResult>();   // for the complete rewrite once the sweep ends
             int outOfRangePoints = 0;                  // #21: points skipped as outside the path's level window
             double deepestMeasured = double.NaN;       // deepest attenuation actually tracked, across freqs
             string worstWhere = "";
@@ -1191,6 +1192,7 @@ namespace HpAttenuator.TestHarness
 
             using (var csv = csvWriter)
             {
+                csv.AutoFlush = true;   // per-row flush so an interrupted run still leaves its data
                 csv.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,leveled_ref_dbm,leveled_src_dbm,commanded_db,command,measured_rel_db,measured_atten_db,expected_atten_db,error_db,step_nominal_db,step_actual_db,step_error_db,floor_limited,out_of_range,predicted_level_dbm,error");
 
                 foreach (double freq in frequencies)
@@ -1211,26 +1213,36 @@ namespace HpAttenuator.TestHarness
                         };
                     }
 
-                    FreqPointResult r = engine.MeasureFrequency(freq, prog);
-                    timing.Merge(engine.Timing);       // #2: fold this frequency's wall-clock into the total
-                    measured++;
-
-                    foreach (var p in r.Points)
+                    // Stream a provisional row as each point completes, flushed immediately, so a run
+                    // that is interrupted still leaves its measurements on disk. The post-sweep columns
+                    // (step deltas #24, floor flags #13) aren't known yet and are left blank here; the
+                    // file is rewritten complete once the sweep finishes.
+                    Action<int, int, AttenPointResult> stream = (i, n, p) =>
                     {
                         csv.WriteLine(string.Join(",", new[]
                         {
-                            F(r.FreqMHz), r.Regime.ToString(), F(r.LoMHz), F(r.IfMHz),
-                            F(r.ReferencePowerDbm), F(r.LeveledSourcePowerDbm),
+                            F(freq), "", "", "",
+                            "", "",
                             p.CommandedDb.ToString(CultureInfo.InvariantCulture), p.Command,
                             F(p.MeasuredRelativeDb), F(p.MeasuredAttenuationDb),
                             F(p.ExpectedAttenuationDb), F(p.ErrorDb),
-                            F(p.NominalStepDb), F(p.StepDeltaDb), F(p.StepErrorDb),
-                            p.FloorLimited ? "1" : "0",
-                            p.OutOfRange ? "1" : "0",
+                            "", "", "",
+                            "", p.OutOfRange ? "1" : "0",
                             F(p.PredictedLevelDbm),
                             (p.Error ?? "").Replace(",", ";")
                         }));
+                    };
+                    Action<int, int, AttenPointResult> onPoint = prog == null
+                        ? stream
+                        : (i, n, p) => { prog(i, n, p); stream(i, n, p); };
 
+                    FreqPointResult r = engine.MeasureFrequency(freq, onPoint);
+                    timing.Merge(engine.Timing);       // #2: fold this frequency's wall-clock into the total
+                    measured++;
+
+                    completed.Add(r);
+                    foreach (var p in r.Points)
+                    {
                         if (p.OutOfRange) outOfRangePoints++;      // #21: never attempted — outside the path
                         else if (p.Error != null) errorPoints++;
                         else if (p.FloorLimited) floorPoints++;    // #13: measurement floor, not an error
@@ -1257,6 +1269,37 @@ namespace HpAttenuator.TestHarness
                     }
                     else RenderFrequencyLine(r, opt.ToleranceDb);
                 }
+            }
+
+            // The sweep finished, so replace the streamed provisional rows with complete ones — the
+            // post-sweep columns (step deltas #24, floor flags #13) only exist once a frequency is done.
+            // If the run was interrupted instead, the provisional rows written during the sweep stand.
+            try
+            {
+                using (var csv2 = OpenCsvWriter(opt.CsvPath))
+                {
+                    csv2.WriteLine("freq_mhz,regime,lo_mhz,if_mhz,leveled_ref_dbm,leveled_src_dbm,commanded_db,command,measured_rel_db,measured_atten_db,expected_atten_db,error_db,step_nominal_db,step_actual_db,step_error_db,floor_limited,out_of_range,predicted_level_dbm,error");
+                    foreach (var r2 in completed)
+                        foreach (var p2 in r2.Points)
+                            csv2.WriteLine(string.Join(",", new[]
+                            {
+                                F(r2.FreqMHz), r2.Regime.ToString(), F(r2.LoMHz), F(r2.IfMHz),
+                                F(r2.ReferencePowerDbm), F(r2.LeveledSourcePowerDbm),
+                                p2.CommandedDb.ToString(CultureInfo.InvariantCulture), p2.Command,
+                                F(p2.MeasuredRelativeDb), F(p2.MeasuredAttenuationDb),
+                                F(p2.ExpectedAttenuationDb), F(p2.ErrorDb),
+                                F(p2.NominalStepDb), F(p2.StepDeltaDb), F(p2.StepErrorDb),
+                                p2.FloorLimited ? "1" : "0",
+                                p2.OutOfRange ? "1" : "0",
+                                F(p2.PredictedLevelDbm),
+                                (p2.Error ?? "").Replace(",", ";")
+                            }));
+                }
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Could not rewrite the complete CSV ({ex.Message.EscapeMarkup()}); " +
+                                       "the streamed rows from the run are still in place.[/]");
             }
 
             AnsiConsole.WriteLine();

@@ -13,6 +13,59 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased - not yet merged
 
+### 500 MHz direct path: 114 dB reached, and the 11793A was the binding constraint (2026-09-04, bench)
+- **The converter, not the receiver, was the limit.** At 500 MHz the signal is below the 1300 MHz
+  crossover, so it goes direct (no 11793A, no LO). With the synchronous detector the sweep reached
+  **114 dB / about -114.9 dBm** before failing - **14 dB deeper** than the converted path managed at
+  3 GHz (100 dB / -100.5 dBm, essentially the 11793A's published -100 dBm limit).
+
+  | Set dB | 100 | 110 | 111 | 112 | 113 | 114 | 115 |
+  |---|---|---|---|---|---|---|---|
+  | Meas dB | 101.31 | 111.36 | 112.24 | 113.16 | 114.09 | 114.87 | Error 96 |
+  | Error dB | +1.31 | +1.36 | +1.24 | +1.16 | +1.09 | +0.87 | - |
+
+  Reference -0.024 dBm. Note the error was still SHRINKING at the limit (+1.36 -> +0.87) and each 1 dB
+  step still moved ~0.9 dB, so it tracked cleanly right to the cliff - no compression, no noise plateau.
+- **The failure mode differs from the converted path.** At 3 GHz it was **Error 01** (signal out of IF
+  range - the converted signal wandering out of the passband). At 500 MHz it is **Error 96, "no input
+  signal sensed"**: a genuine sensitivity limit rather than a tracking failure.
+- **RECAL fired for the first time all session** - `range-cal: 2 CALIBRATE(s) fired`. This confirms the
+  #17 mechanism: the descent was never broken, it is that RESIDENT range factors suppress RECAL, so
+  nothing triggers. The direct path at 500 MHz with a freshly written sync calibration had no resident
+  factors, UNCAL appeared, and it calibrated naturally.
+- **Source at 500 MHz is even better than at 3 GHz** (`--source-check`): counted frequency exact (0 Hz
+  error), RF Power -0.233 dBm and TRFL -0.217 dBm agreeing within **0.02 dB**, residual AM 0.24 %,
+  **residual FM 7.0 Hz** (vs 18 Hz at 3 GHz - the 8673B LO was contributing most of it), level sd
+  **0.001 dB**. Path loss is negligible: 0 dBm commanded reads -0.233 dBm.
+- **-127 dBm is not reachable through the attenuator alone.** With the reference at ~0 dBm the
+  attenuators' full 121 dB can only reach -121 dBm, and the receiver quit 6 dB before that at -115 dBm.
+  Levelling to `--ref-target -6` would put 121 dB exactly on -127 dBm - costing 6 dB of top-end range,
+  which is irrelevant for a floor-finding run.
+
+### HP 11792A Sensor Module - specifications (8902A O&C, General Information)
+- **Frequency range 50 MHz to 26.5 GHz**, "intended for use with the HP 11793A Down Converter". Contains
+  an internal switch that automatically swaps between the receiver's SENSOR and RF INPUT connectors.
+- "**A low SWR attenuator isolates the power sensor from the source-under-test**, reducing mismatch."
+  That pad sits ahead of the 8902A's RF input, so its insertion loss raises the DUT-referred floor: the
+  -127 dBm sensitivity is referred to the receiver's own input, not to the DUT. A candidate explanation
+  for part of the 12 dB between the -114.9 dBm we measured and the -127 dBm spec. The exact insertion
+  loss is in the 11792A manual, which is scanned images with no text layer.
+- **Cal-factor caveat below 2 GHz.** The manual: "the instrument will not measure power at frequencies
+  less than the lowest frequency entered in the cal factor table (**2 GHz** in the case of the HP
+  11792A)" unless "the reference cal factor [is entered] as an entry in the table **at 50 MHz**". Our
+  table runs 2-18 GHz and we enter the REF CF into the separate reference store, which is NOT a 50 MHz
+  table entry. So the cal factor applied at 500 MHz is questionable. It did not block the measurement
+  (RF Power and TRFL agreed to 0.02 dB) but that agreement does not validate the ABSOLUTE scale, since
+  both paths share the cal factor. The relative attenuation sweep is unaffected - it is a substitution
+  measurement anchored to its own 0 dB reference.
+
+### Sweep CSV now streams (a killed run keeps its data)
+- The 500 MHz run was interrupted and its CSV was **empty**: rows were only written after each frequency
+  completed. The sweep now streams a provisional row per point with `AutoFlush`, and rewrites the file
+  complete once the sweep finishes (the post-sweep columns - step deltas #24 and floor flags #13 - only
+  exist once a frequency is done). An interrupted run keeps its measurements; a completed one is
+  unchanged. Verified in sim.
+
 ### Synchronous detector re-tested and the "dead end" record corrected (2026-09-04, bench)
 - **The sync detector is the better choice on this chain, and the old record was wrong.** SharedMemory
   had it as a dead end that "loses lock (Error 96), never re-try". That was recorded without ever
