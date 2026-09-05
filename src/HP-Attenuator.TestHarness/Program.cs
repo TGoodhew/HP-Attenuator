@@ -41,6 +41,55 @@ namespace HpAttenuator.TestHarness
                 MeasurementEngine.Trace = s => AnsiConsole.MarkupLine($"[yellow]  {s.EscapeMarkup()}[/]");
             }
 
+            // Attended bench runs: hold after setup until the operator says they are watching. The
+            // release is a file rather than a keypress so it works when the harness is driven
+            // non-interactively (its stdin is not the operator's terminal).
+            if (!string.IsNullOrWhiteSpace(opt.HoldBeforeSteps))
+            {
+                string holdPath = opt.HoldBeforeSteps;
+                MeasurementEngine.BeforeStepping = () =>
+                {
+                    try { if (File.Exists(holdPath)) File.Delete(holdPath); } catch { }
+                    AnsiConsole.MarkupLine("[bold yellow]SETUP COMPLETE - holding before the first attenuator step.[/]");
+                    AnsiConsole.MarkupLine($"[grey]Waiting for [/]{holdPath.EscapeMarkup()}[grey] to appear.[/]");
+                    var swHold = System.Diagnostics.Stopwatch.StartNew();
+                    while (!File.Exists(holdPath))
+                    {
+                        if (swHold.Elapsed > TimeSpan.FromMinutes(30))
+                        {
+                            AnsiConsole.MarkupLine("[yellow]Hold timed out after 30 minutes - continuing.[/]");
+                            break;
+                        }
+                        System.Threading.Thread.Sleep(500);
+                    }
+                    try { if (File.Exists(holdPath)) File.Delete(holdPath); } catch { }
+                    AnsiConsole.MarkupLine("[bold green]Released - stepping the attenuator now.[/]");
+                };
+            }
+
+            // Hold at a chosen depth instead of before the whole sweep, so the operator watches only
+            // the region of interest.
+            if (opt.HoldAtDb >= 0 && !string.IsNullOrWhiteSpace(opt.HoldBeforeSteps))
+            {
+                string holdPath2 = opt.HoldBeforeSteps;
+                int holdAt = opt.HoldAtDb;
+                MeasurementEngine.BeforeStepping = null;      // the per-step hold replaces the global one
+                MeasurementEngine.BeforeStep = atten =>
+                {
+                    if (atten != holdAt) return;
+                    try { if (File.Exists(holdPath2)) File.Delete(holdPath2); } catch { }
+                    AnsiConsole.MarkupLine($"[bold yellow]HOLDING at {holdAt} dB - the next step is the one to watch.[/]");
+                    var swH = System.Diagnostics.Stopwatch.StartNew();
+                    while (!File.Exists(holdPath2))
+                    {
+                        if (swH.Elapsed > TimeSpan.FromMinutes(30)) break;
+                        System.Threading.Thread.Sleep(500);
+                    }
+                    try { if (File.Exists(holdPath2)) File.Delete(holdPath2); } catch { }
+                    AnsiConsole.MarkupLine("[bold green]Released - stepping from here.[/]");
+                };
+            }
+
             var disposables = new List<IDisposable>();
             try
             {

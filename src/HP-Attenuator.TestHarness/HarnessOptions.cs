@@ -19,6 +19,8 @@ namespace HpAttenuator.TestHarness
         public bool AttenSweep;     // --atten-sweep : Test 2 — 1 dB relative attenuation sweep at --freq
         public bool PerAtten;       // --per-atten : Test 3 — exercise each attenuator's settings individually
         public bool SectionTest;    // --section-test : isolate the 8496's two 40 dB sections (digit 7 vs 8)
+        public int HoldAtDb = -1;       // --hold-at-db N : hold before the step at N dB instead of before all stepping
+        public string HoldBeforeSteps;  // --hold-before-steps <file> : pause after setup until the file appears
         public bool SourceCheck;   // --source-check : characterize the 8340B through the chain
         public int StabilityReads = 10;  // --stability-reads : level samples for the source check
         public bool NoiseFloor;    // --noise-floor : measure the RF-off noise floor vs LO drive
@@ -92,6 +94,8 @@ namespace HpAttenuator.TestHarness
                     case "--per-atten": o.PerAtten = true; break;
                     case "--section-test": o.SectionTest = true; break;
                     case "--section-sum": o.SectionSum = true; break;
+                    case "--hold-before-steps": o.HoldBeforeSteps = Need(args, ++i); break;
+                    case "--hold-at-db": o.HoldAtDb = I(Need(args, ++i)); break;
                     case "--source-check": o.SourceCheck = true; break;
                     case "--stability-reads": o.StabilityReads = I(Need(args, ++i)); break;
                     case "--noise-floor": o.NoiseFloor = true; break;
@@ -282,6 +286,11 @@ Usage: HP-Attenuator.TestHarness [options]
   --fine-to dB                   the shallow region stays on the coarse grid. The coarse grid resumes
                                  past --fine-to (default: --astop). E.g. --astep 10 --fine-from 90
                                  --fine-to 100 gives 0,10..80, 90,91..100, then 110.
+  --hold-at-db N                 With --hold-before-steps, hold before the N dB point instead of
+                                 before all stepping - watch only the region of interest.
+  --hold-before-steps <file>     Attended runs: after the reference/levelling/calibration setup is
+                                 done, hold until <file> appears, then step the attenuator. Lets the
+                                 operator watch only the measurement, not the setup. 30 min timeout.
   --source-check                 Characterize the 8340B through the measurement chain at 0 dB:
                                  counted frequency, level by both the sensor and Tuned RF Level
                                  paths, residual AM and FM, and level stability. The source is

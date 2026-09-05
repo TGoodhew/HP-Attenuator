@@ -13,6 +13,42 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased - not yet merged
 
+### Synchronous detector re-tested and the "dead end" record corrected (2026-09-04, bench)
+- **The sync detector is the better choice on this chain, and the old record was wrong.** SharedMemory
+  had it as a dead end that "loses lock (Error 96), never re-try". That was recorded without ever
+  measuring residual FM, the one quantity that decides it.
+- **Residual FM must be measured in the specified bandwidth.** 447 Hz unfiltered vs **18.0 Hz** with the
+  50 Hz high-pass (`H1`) and 3 kHz low-pass (`L1`) applied - the spec defines the 50 Hz threshold
+  "measured over a 30 second period in a 3 kHz BW". The unfiltered number is what made sync look
+  disqualified.
+- **1 dB stepping from 90 dB settled the mechanism** (operator watching the panel throughout):
+
+  | Set dB | 90 | 91 | 92 | 93 | 94 | 95 | 96 | 97 | 98 | 99 | 100 |
+  |---|---|---|---|---|---|---|---|---|---|---|---|
+  | Meas dB | 91.27 | 92.25 | 93.30 | 94.31 | 95.43 | 96.50 | 97.60 | 98.58 | 99.63 | 100.51 | Error 01 |
+  | Step delta | - | 0.98 | 1.05 | 1.01 | 1.12 | 1.07 | 1.10 | 0.98 | 1.05 | 0.88 | - |
+  | Error dB | +1.27 | +1.25 | +1.30 | +1.31 | +1.43 | +1.50 | +1.60 | +1.58 | +1.63 | +1.51 | - |
+
+  Every step moves ~1 dB (mean 1.03) right to the edge, then a **clean cliff**. Linear tracking with a
+  **constant** offset is a calibration error; noise-limited saturation looks like the average detector,
+  whose steps shrink to 0.55-0.8 dB and plateau. **There is no unexplained noise floor.**
+- **Depth comparison at 3 GHz:** average detector ~96 dB (-96 dBm, silent compression, 4 dB short of
+  the converter spec); synchronous **99 dB (-100.5 dBm)**, meeting the 11793A's published -100 dBm
+  limit, and failing with a flagged Error 01 rather than a plausible wrong number.
+- **Sync needs its own first calibration** - "the first calibration factor will be different depending
+  on the detector used when CALIBRATE is selected the first time". Switching detectors silently
+  inherits the other one's factors. `--trfl-recal --detector sync` does it safely (0 dB, full signal).
+- **The documentation does not recommend sync - it recommends against it, for a reason that does not
+  apply to us.** The 11793A manual never mentions the detector. The Microwave Product Note prescribes
+  the average detector inside Track Mode ("32.9 SPCL ... the same as entering 4.4 SPCL, 8.1 SPCL, Log
+  units, Track Mode, and 27.3 SPCL") because it is written for a **drifting** source. Our synthesized
+  sources are quiet (18 Hz residual FM, 0.004 dB level stability), so following that procedure costs
+  ~4 dB of depth for no benefit.
+- **Remaining error is #17.** The +1.5 dB offset is the uncalibrated range factors; RECAL has never
+  fired on any run today, confirmed on the front panel three separate times by the operator.
+- New: `--hold-before-steps <file>` and `--hold-at-db N` hold an attended run after setup (or at a
+  chosen depth) until released, so the operator watches only the measurement rather than the setup.
+
 ### branch `issue-24-sf-matrix` - #24 bench findings (2026-09-04)
 - **SF 31.1 is NOT the culprit, and is harmless here.** The first matrix run put an unvalidated special
   function and an unvalidated forced CALIBRATE into the same run, and left the absolute Tuned RF Level

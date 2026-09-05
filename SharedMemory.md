@@ -40,10 +40,35 @@ that caps the usable range at ~95–98 dB. 110 dB (≈ −112 dBm) is below the 
 Confirmed on the bench (Average detector, 3 GHz, 0–110/10 dB): accurate/holds lock to ~90 dB, then
 readings saturate at ~−97.6 dB rel (≈ −98.7 dBm absolute), matching the −100 dBm floor.
 
+**CORRECTED 2026-09-04 — the IF Synchronous detector is NOT a dead end. It is the better choice here.**
+- The earlier "loses lock (Error 96), never re-try" entry was **wrong**, and was recorded without ever
+  measuring the one quantity that decides it: residual FM. Measured properly (`--source-check`, in the
+  specified 50 Hz–3 kHz bandwidth via the `H1`/`L1` audio filters) the source is **18 Hz** — well inside
+  the 50 Hz limit above which the average detector is required (O&C Table 1-1 fn.12). Measured without
+  those filters it reads 447 Hz and looks disqualifying; that was the mistake.
+- On the bench, sync (`4.0SP`) **tracks linearly to −100.5 dBm** — every 1 dB attenuation step produced
+  ~1 dB of change (0.88–1.12, mean 1.03) from 90 through 99 dB — then fails at 100 dB with a **clean
+  cliff** (Error 01), not compression. The average detector by contrast **compresses** from ~94 dB and
+  plateaus at −96 dBm, silently under-reading.
+- So sync reaches the 11793A's published −100 dBm limit essentially exactly, ~4 dB deeper than average,
+  **and fails honestly** (flagged Error 01) instead of returning a plausible wrong number.
+- **Sync needs its own calibration.** The manual: "the first calibration factor will be different
+  depending on the detector used when CALIBRATE is selected the first time … you will need to make a
+  first calibration for both 4.0 SPCL and 4.4 SPCL". Switching detectors silently inherits the other
+  one's factors. Use `--trfl-recal --detector sync` (one CALIBRATE at 0 dB, full signal).
+- **Residual error with sync is a constant +1.3 to +1.6 dB offset while tracking stays linear** — that
+  is a calibration error, categorically not a noise limit. It is #17: the range factors are never
+  written because RECAL never fires (confirmed on the panel three times by the author).
+
+**Neither the 11793A manual nor the Microwave Product Note recommends the synchronous detector.** The
+11793A manual never mentions the detector; the Product Note prescribes the **average** detector inside
+Track Mode ("32.9 SPCL … the same as entering 4.4 SPCL, 8.1 SPCL, Log units, Track Mode, and 27.3
+SPCL"). It does so because it is written for a **drifting** source — Track Mode exists to chase a
+wandering carrier and the average detector's wide bandwidth tolerates the drift. Our 8340B/8673B are
+synthesized and quiet (18 Hz residual FM, 0.004 dB level stability), so that premise does not hold and
+following the documented procedure costs ~4 dB of depth for nothing.
+
 **Dead ends ruled out (don't re-try):**
-- **IF Synchronous detector (`4.0SP`, −127 dBm spec):** loses lock (Error 96) below ~−100 dBm on the
-  drifting converted signal; the −127 dBm floor never applies through the converter. Reacquisition
-  needs the signal ≥ −80 dBm.
 - **Track Mode (`32.9SP`):** it's for a *drifting, free-running* source; our 8340B/8673B are
   synthesized (stable), so its continuous auto-ranging defeats the #16 leveler and breaks the fixed
   SET REF (produced garbage: 68 dB at a 10 dB step). Left as an off-by-default `--track-mode` flag.

@@ -90,6 +90,21 @@ namespace HpAttenuator.Measurement
         /// </summary>
         public static Action<string> Trace;
 
+        /// <summary>
+        /// Optional hook invoked ONCE per frequency, after the reference/levelling/calibration setup is
+        /// complete and immediately before the first attenuator step. Lets an attended bench run hold
+        /// until the operator is actually watching the front panel, so they only have to watch the part
+        /// that matters — the stepping — rather than the whole setup. Null = no hold.
+        /// </summary>
+        public static Action BeforeStepping;
+
+        /// <summary>
+        /// Optional hook invoked before EACH attenuation point, with the attenuation about to be set.
+        /// Lets an attended run hold at a chosen depth, so the operator watches only the region of
+        /// interest instead of the whole sweep. Null = no hold.
+        /// </summary>
+        public static Action<int> BeforeStep;
+
         /// <summary>Wall-clock attribution for the most recent <see cref="MeasureFrequency"/> (issue #2).
         /// The harness aggregates it across frequencies and prints the breakdown under <c>--profile</c>.
         /// Null until the first frequency is measured.</summary>
@@ -245,6 +260,9 @@ namespace HpAttenuator.Measurement
             List<int> attenPlan = BuildAttenuationPlan(referenceDbm, pathFloorDbm);
             total = attenPlan.Count;
 
+            // Setup is finished; everything after this point is the measurement itself.
+            BeforeStepping?.Invoke();
+
             foreach (int atten in attenPlan)
             {
                 double expected = atten - _options.AttenStartDb;
@@ -253,6 +271,8 @@ namespace HpAttenuator.Measurement
                     CommandedDb = atten,
                     ExpectedAttenuationDb = expected
                 };
+
+                BeforeStep?.Invoke(atten);
 
                 // #21: skip a point whose level would fall outside the path's measurable window. Not a
                 // failure and not a measurement — the hardware simply cannot report it, so record what
