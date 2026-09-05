@@ -50,7 +50,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V8 | #6 — empty/transient read recovers in place (auto-range boundary) instead of failing | `issue-6-empty-read-recovery` | ⬜ | — |
 | V9 | #2 — `--profile` gives the real wall-clock breakdown to drive sweep optimization | `issue-2-sweep-profiling` | ⬜ | — |
 | V10 | #8 — a CALIBRATE error (Error 35) is now polled + logged + surfaced, not silently latched | `issue-8-calibrate-error-surface` | ⬜ | — |
-| V11 | #21 — spec-derived per-path level limits; points below the path floor are skipped, not failed | `issue-21-device-level-limits` | ⬜ | — |
+| V11 | #21 — spec-derived per-path level limits; points below the path floor are skipped, not failed | `issue-21-device-level-limits` | ✅ | — |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: loses lock through the converter (CHANGE_LOG) |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -281,7 +281,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 
 ---
 
-## V11 — #21 per-path measurable level limits  ⬜ built, awaiting bench
+## V11 — #21 per-path measurable level limits  ✅ BENCH PASS (2026-09-04)
 
 - **Branch:** `issue-21-device-level-limits` (built; sim PASS on all three paths).
 - **Why:** the V1 run attempted 100 / 110 dB at 3 GHz from a −1.14 dBm reference — levels of −101 and
@@ -311,6 +311,18 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
   the −3.2 / −12.2 dB points — a direct A/B that the limit is doing the work.
 - **If the real floor differs on the day:** `--floor-dbm` overrides the spec value; note the value that
   matches where the reading actually saturates.
+
+### Result — PASS, 2026-09-04 (3 GHz, converted path, author-confirmed on the bench)
+
+Reference leveled to −1.1 dBm → usable depth **98.9 dB** against the 11793A's −100 dBm spec floor.
+0→90 dB measured normally (worst |err| **0.94 dB @ 80 dB**, inside ±1.5); **100 and 110 dB were
+skipped, never commanded** (predicted −101.1 / −111.1 dBm). Deepest measured 90.6 dB. Verdict **PASS**.
+
+The bench proof: the author confirmed the 8902A front panel showed **no errors at any point** in the
+run. The trace agrees — zero error sentinels, zero `CL` error-clears, zero `SB=0x44`, versus three of
+each in the pre-#21 run of the same sweep, which ended in a real **Error 01 (signal out of IF range)**
+at 110 dB. Driving the receiver below its floor is what produced that error, and the limit gate
+removes it at the source.
 
 ---
 
