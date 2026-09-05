@@ -19,6 +19,10 @@ namespace HpAttenuator.TestHarness
         public bool AttenSweep;     // --atten-sweep : Test 2 — 1 dB relative attenuation sweep at --freq
         public bool PerAtten;       // --per-atten : Test 3 — exercise each attenuator's settings individually
         public bool SectionTest;    // --section-test : isolate the 8496's two 40 dB sections (digit 7 vs 8)
+        public bool SourceCheck;   // --source-check : characterize the 8340B through the chain
+        public int StabilityReads = 10;  // --stability-reads : level samples for the source check
+        public bool NoiseFloor;    // --noise-floor : measure the RF-off noise floor vs LO drive
+        public string LoPowerList; // --lo-powers 8,10,13 : LO drives to try
         public bool TrflRecal;     // --trfl-recal : one CALIBRATE at 0 dB to rewrite the first cal factor
         public bool TrflCal;       // --trfl-cal : read back the stored TRFL range cal factors (SF 38)
         public bool ClearTrflCal;  // --clear-trfl-cal : clear them (SF 39.9) then read back
@@ -88,6 +92,10 @@ namespace HpAttenuator.TestHarness
                     case "--per-atten": o.PerAtten = true; break;
                     case "--section-test": o.SectionTest = true; break;
                     case "--section-sum": o.SectionSum = true; break;
+                    case "--source-check": o.SourceCheck = true; break;
+                    case "--stability-reads": o.StabilityReads = I(Need(args, ++i)); break;
+                    case "--noise-floor": o.NoiseFloor = true; break;
+                    case "--lo-powers": o.LoPowerList = Need(args, ++i); break;
                     case "--trfl-recal": o.TrflRecal = true; break;
                     case "--trfl-cal": o.TrflCal = true; break;
                     case "--clear-trfl-cal": o.ClearTrflCal = true; break;
@@ -274,6 +282,18 @@ Usage: HP-Attenuator.TestHarness [options]
   --fine-to dB                   the shallow region stays on the coarse grid. The coarse grid resumes
                                  past --fine-to (default: --astop). E.g. --astep 10 --fine-from 90
                                  --fine-to 100 gives 0,10..80, 90,91..100, then 110.
+  --source-check                 Characterize the 8340B through the measurement chain at 0 dB:
+                                 counted frequency, level by both the sensor and Tuned RF Level
+                                 paths, residual AM and FM, and level stability. The source is
+                                 never adjusted between runs, so its instability is a common-mode
+                                 error that reads as attenuator error. Residual FM below 50 Hz
+                                 also means the synchronous detector should hold lock.
+  --stability-reads n            Level samples for --source-check (default 10).
+  --noise-floor                  Measure the system noise floor (source RF off) at each LO drive in
+                                 --lo-powers. The floor is what actually limits this chain's depth,
+                                 and LO drive cuts the 11793A's conversion loss, which lowers the
+                                 DUT-referred floor directly.
+  --lo-powers 8,10,13            LO drives (dBm) for --noise-floor. Default 8,9,10,11,12,13.
   --trfl-recal                   Rewrite the Tuned RF Level FIRST calibration factor with one
                                  CALIBRATE at 0 dB and full signal. The recovery when the absolute
                                  TRFL scale is offset but RF Power still reads correctly. Survives

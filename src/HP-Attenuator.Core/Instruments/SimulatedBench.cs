@@ -179,6 +179,10 @@ namespace HpAttenuator.Instruments
         public double ReadTrflCalFactor(int range) => 100.0;   // sim: a nominal, uncorrupted factor
         public void ClearTrflCalFactors() { }
 
+        // A clean synthesized source: negligible residual AM/FM.
+        public double ReadAmDepthPercent() => 0.02;
+        public double ReadFmDeviationHz() => 3.0;
+
         public void BeginRfPowerMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
         {
             _tunedMHz = rfMHz;

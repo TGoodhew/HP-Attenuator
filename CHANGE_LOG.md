@@ -13,6 +13,66 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased - not yet merged
 
+### branch `issue-24-sf-matrix` - #24 bench findings (2026-09-04)
+- **SF 31.1 is NOT the culprit, and is harmless here.** The first matrix run put an unvalidated special
+  function and an unvalidated forced CALIBRATE into the same run, and left the absolute Tuned RF Level
+  scale +42.9 dB high. Re-running configs A/B with the forced calibration removed made them
+  **indistinguishable** (reference -0.020 vs -0.016 dBm; 10/20/30 dB within 0.01 dB of each other), so
+  the corruption came from **`--force-range-cal`** - the deep forced CALIBRATEs at 20 and 55 dB, exactly
+  the case the manual (and our own engine comment) warns stores a bad range factor. The matrix no longer
+  forces the calibration.
+- **Root cause and recovery for the corruption.** Reading RF Power through the same chain was the
+  discriminator: it returned -1.14 dBm (correct) while TRFL read +41.8 dBm, localising the fault to the
+  TRFL **first calibration factor**. Instrument preset, a full sensor zero+calibrate, and SF 39.9 all
+  failed to clear it. One CALIBRATE at 0 dB with full signal rewrote it (+41.781 -> -1.136 dBm, matching
+  RF Power). Shipped as **`--trfl-recal`**. It persisted because, since #17, the sweep only calibrates on
+  UNCAL and UNCAL never appears - so no CALIBRATE had been issued since the damage.
+- **This 8902A's firmware lacks the SF 31/38/39 family.** Date code 94.199; SF 38.1-38.3 read back
+  unreadable and SF 39.9 has no effect. The manual gates several of these at "date codes 234.1985 and
+  below". SF 31.1 is accepted but cannot do anything useful, since its documented mechanism is creating a
+  Range 3 calibration factor and no Range 3 CALIBRATE fires.
+- **Noise floor, with a caveat.** With the absolute scale repaired the receiver will sometimes report a
+  floor with the source RF off: -93.74 / -93.75 dBm in the matrix run and -93.48 dBm once afterwards.
+  But it is **not reliably reproducible** - a `--noise-floor` sweep across LO drives 8-13 dBm returned
+  "below readable" in 5 of 6 cells, because with RF off the receiver has nothing to stay tuned to and
+  throws Error 96 instead of reporting its noise. So the LO-drive comparison produced no usable data.
+  The solid number remains the **-96 dBm plateau** from the deep sweeps, where the receiver stays
+  locked; -93.5 dBm is consistent with it but should not be quoted as a measured floor.
+- **Config A also showed the deep error is bias, not noise**: standard deviations of 0.014-0.026 dB
+  while running -0.5 to -3.0 dB of error. Repeatable and biased - so more averaging cannot help.
+- **Special functions reviewed for noise-floor benefit** (8902A O&C):
+  - `1.9SP` - inserts a fixed 10 dB input pad for SWR, and explicitly *"decreases the sensitivity of
+    Range 3 by 10 dB"*. Would make the floor **worse**. Rejected.
+  - `3.1SP` / `3.7SP` - 455 kHz IF at 200 kHz / 30 kHz selectivity. The IF Average detector is already
+    30 kHz, so there is no noise-bandwidth win. Rejected.
+  - SF 4 display averaging - reduces variance, and our variance is already 0.02 dB against a >1 dB
+    bias. Cannot address a bias. Rejected.
+  - `4.0SP` IF synchronous (200 Hz BW, -127 dBm) - the right bandwidth, but a HW-proven dead end
+    through the converter (loses lock, Error 96).
+  - **LO drive remains the untested lever**: the Microwave Product Note specifies "+8 dBm leveled
+    output from the LO" and we run the default +8. Cutting the 11793A's conversion loss raises the
+    signal at the 8902A for the same DUT level, which lowers the DUT-referred noise floor directly.
+
+### Source characterization (`--source-check`) - the 8340B is good, and residual FM was mis-measured
+- Tony's suggestion: the source is never adjusted between runs, so any instability in it is a
+  common-mode error that reads as attenuator error. New `--source-check` characterizes it through the
+  measurement chain at 0 dB - counted frequency, level by BOTH the sensor (M4) and Tuned RF Level
+  paths, residual AM (M1), residual FM (M2), and level stability over repeated reads.
+- **Result at 3 GHz: the 8340B is excellent.** Counted frequency 3000.0001 MHz (+100 Hz); RF Power
+  -1.096 dBm and Tuned RF Level -1.144 dBm agreeing within 0.05 dB (which also confirms the repaired
+  TRFL scale); residual AM 0.17 %; level **sd 0.004 dB**, span 0.013 dB, drift 0.013 dB. Source
+  instability is therefore NOT contributing to the 0.3-0.6 dB mid-range errors - which points back at
+  the uncalibrated range boundaries (#17).
+- **Residual FM must be measured in the specified bandwidth.** First readings were 447 Hz (converted)
+  and 897 Hz (direct) - both apparently far over the 50 Hz threshold. But the specification defines it
+  "measured over a 30 second period in a **3 kHz BW**", and no audio filters had been selected, so the
+  reading was integrating far more noise than intended. Applying the 50 Hz high-pass (`H1`) and 3 kHz
+  low-pass (`L1`) filters gives **18.0 Hz** - comfortably INSIDE the 50 Hz limit.
+- **Consequence:** the IF synchronous detector should be able to hold lock after all. Its 200 Hz
+  bandwidth is ~22 dB narrower than the average detector's 30 kHz, which is precisely where a lower
+  noise floor would come from. The earlier "sync is a dead end" finding was made without this
+  measurement; it is worth re-testing rather than assumed.
+
 ### branch `issue-23-zero-dbm-ref-adaptive-steps` (off `issue-22-fine-step-near-floor`) - #23
 - **#23a - level the reference to 0 dBm, not -2 dBm.** The leveller targeted -2 dBm, so the 0 dB
   reference landed wherever the source power and cable loss put it (-1.14 dBm on the bench). It now

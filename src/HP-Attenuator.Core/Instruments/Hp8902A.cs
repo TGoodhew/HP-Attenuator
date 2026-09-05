@@ -506,6 +506,35 @@ namespace HpAttenuator.Instruments
             catch { return double.NaN; }
         }
 
+        /// <summary>
+        /// Residual AM depth of the tuned signal, % (8902A M1 = AM). Amplitude instability on the
+        /// source shows up here and lands directly on a level measurement.
+        /// </summary>
+        public double ReadAmDepthPercent()
+        {
+            Send("M1");
+            return ReadMeasurement();
+        }
+
+        /// <summary>
+        /// Residual FM deviation of the tuned signal, Hz (8902A M2 = FM). This is the number that
+        /// decides whether the IF SYNCHRONOUS detector is usable: O&amp;C Table 1-1 footnote 12 — "If the
+        /// residual FM(peak) is >50 Hz measured over a 30 second period in a 3 kHz BW, Tuned RF Level
+        /// measurements should be made using the IF average detector (30 kHz BW)". Measured through the
+        /// 11793A this includes the external LO's contribution, which is correct for our purposes: it is
+        /// the stability of the CONVERTED signal that the synchronous detector has to lock to.
+        /// </summary>
+        public double ReadFmDeviationHz()
+        {
+            Send("M2");
+            // Measure in the bandwidth the specification names, or the number means nothing: the
+            // 50 Hz threshold is defined "measured over a 30 second period in a 3 kHz BW". Without
+            // these filters the reading integrates far more noise and overstates the residual FM.
+            Send("H1");    // 50 Hz high-pass filter on
+            Send("L1");    // 3 kHz low-pass filter on
+            return ReadMeasurement();
+        }
+
         public double ReadSignalFrequencyMHz()
         {
             Send("M5");                       // RF Frequency measurement

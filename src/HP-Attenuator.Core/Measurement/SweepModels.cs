@@ -339,6 +339,52 @@ namespace HpAttenuator.Measurement
             OutOfRange || FloorLimited || Error != null || double.IsNaN(MeasuredAttenuationDb);
     }
 
+    /// <summary>
+    /// Characterization of the source itself, measured through the same chain the sweep uses. The
+    /// 8340B is never adjusted between runs, so if its output drifts or carries residual modulation
+    /// that error lands in every measurement and looks like attenuator error.
+    /// </summary>
+    public sealed class SourceCheckResult
+    {
+        public double FreqMHz { get; set; }
+        public MeasurementRegime Regime { get; set; }
+        public double LoMHz { get; set; }
+        public double IfMHz { get; set; }
+        public double CommandedPowerDbm { get; set; }
+
+        /// <summary>Frequency the receiver actually counted, MHz (M5). NaN if unreadable.</summary>
+        public double MeasuredFreqMHz { get; set; } = double.NaN;
+
+        /// <summary>Absolute level via the sensor path, dBm (M4).</summary>
+        public double RfPowerDbm { get; set; } = double.NaN;
+
+        /// <summary>Absolute level via Tuned RF Level, dBm. Should agree with RfPowerDbm.</summary>
+        public double TunedLevelDbm { get; set; } = double.NaN;
+
+        /// <summary>Residual AM depth, % (M1) — amplitude instability lands straight on a level reading.</summary>
+        public double AmDepthPercent { get; set; } = double.NaN;
+
+        /// <summary>
+        /// Residual FM deviation, Hz (M2). The decisive number for detector choice: above ~50 Hz peak
+        /// the IF synchronous detector cannot hold lock (O&amp;C Table 1-1 fn.12). Measured through the
+        /// converter this includes the external LO, which is the right thing — it is the converted
+        /// signal the detector must lock to.
+        /// </summary>
+        public double FmDeviationHz { get; set; } = double.NaN;
+
+        /// <summary>Repeated Tuned RF Level readings used for the stability figures, dBm.</summary>
+        public List<double> LevelSamples { get; } = new List<double>();
+
+        public double LevelMeanDbm { get; set; } = double.NaN;
+        public double LevelSdDb { get; set; } = double.NaN;
+        public double LevelSpanDb { get; set; } = double.NaN;
+
+        /// <summary>Level difference between the last and first sample, dB — drift over the sampling window.</summary>
+        public double LevelDriftDb { get; set; } = double.NaN;
+
+        public string Warning { get; set; }
+    }
+
     /// <summary>Result of a signal-presence check at one frequency.</summary>
     public sealed class DetectResult
     {

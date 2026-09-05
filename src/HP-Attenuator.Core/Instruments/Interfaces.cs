@@ -170,6 +170,13 @@ namespace HpAttenuator.Instruments
         /// stored range factor, which an instrument preset does NOT clear.</summary>
         void ClearTrflCalFactors();
 
+        /// <summary>Residual AM depth of the tuned signal, % (M1).</summary>
+        double ReadAmDepthPercent();
+
+        /// <summary>Residual FM deviation of the tuned signal, Hz (M2). Above ~50 Hz peak the IF
+        /// synchronous detector cannot hold lock and the average detector must be used.</summary>
+        double ReadFmDeviationHz();
+
         void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
             TrflDetector detector = TrflDetector.Average, bool trackMode = false,
             TrflTuning tuning = TrflTuning.Manual, bool noiseCorrection = false);

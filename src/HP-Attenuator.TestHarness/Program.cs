@@ -147,6 +147,12 @@ namespace HpAttenuator.TestHarness
                 // #15: per-section characterize + sum. Measure each section alone (each stays above the
                 // ~95 dB converter floor), then sum to synthesize the full 110/121 dB that cannot be
                 // measured directly. The real path to a validated full-range number.
+                if (opt.SourceCheck)
+                    return RunSourceCheck(opt, bench, config);
+
+                if (opt.NoiseFloor)
+                    return RunNoiseFloor(opt, bench, config);
+
                 if (opt.TrflRecal)
                     return RunTrflRecal(opt, bench, config);
 
@@ -1733,6 +1739,135 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.MarkupLine(!double.IsNaN(after) && Math.Abs(after) < 10.0
                 ? "[green]Absolute Tuned RF Level scale looks sane again.[/]"
                 : "[red]Still offset — the first calibration factor was not rewritten.[/]");
+            return 0;
+        }
+
+
+        /// <summary>
+        /// Measures the system noise floor (source RF off) against 11793A LO drive. The floor is what
+        /// actually limits this chain's depth -- measured at -93.7 dBm, right where the deep-end
+        /// roll-off begins -- and LO drive is the one documented lever left: the Microwave Product Note
+        /// specifies "+8 dBm leveled output from the LO", and the converter accepts more. Cutting the
+        /// converter's conversion loss raises the signal at the 8902A for the same DUT level, which
+        /// lowers the DUT-referred noise floor directly.
+        ///
+        /// Also reports the floor without the converter where the frequency allows it, so we can tell
+        /// whether the noise is the converter path or the receiver itself.
+        /// </summary>
+        private static int RunNoiseFloor(HarnessOptions opt, Bench bench, AttenuatorConfig config)
+        {
+            double freq = opt.RfPowerFreqMHz;
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"[bold]Noise floor vs LO drive[/] [grey]({freq:0.###} MHz, source RF off)[/]");
+
+            var powers = new List<double>();
+            if (!string.IsNullOrWhiteSpace(opt.LoPowerList))
+            {
+                foreach (string t in opt.LoPowerList.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                    if (double.TryParse(t.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+                        powers.Add(v);
+            }
+            if (powers.Count == 0) powers.AddRange(new[] { 8.0, 9.0, 10.0, 11.0, 12.0, 13.0 });
+
+            var t2 = new Table().Border(TableBorder.Rounded);
+            t2.AddColumn(new TableColumn("LO drive dBm").RightAligned());
+            t2.AddColumn(new TableColumn("Noise floor dBm").RightAligned());
+            t2.AddColumn(new TableColumn("vs +8 dB").RightAligned());
+
+            double baseline = double.NaN;
+            double best = double.NaN, bestLo = double.NaN;
+            foreach (double lo in powers)
+            {
+                opt.Sweep.LoPowerDbm = lo;
+                var attn = bench.MakeAttenuator(config);
+                var engine = new MeasurementEngine(bench.Source, bench.Lo, attn, bench.Receiver, opt.Sweep);
+                double nf = engine.MeasureNoiseFloorDbm(freq);
+                if (double.IsNaN(baseline)) baseline = nf;
+                if (!double.IsNaN(nf) && (double.IsNaN(best) || nf < best)) { best = nf; bestLo = lo; }
+
+                string delta = (double.IsNaN(nf) || double.IsNaN(baseline))
+                    ? "—"
+                    : (nf - baseline).ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture);
+                t2.AddRow($"{lo:0.#}", double.IsNaN(nf) ? "[grey]below readable[/]" : $"{nf:0.00}", delta);
+                AnsiConsole.MarkupLine($"  [grey]LO {lo:0.#} dBm -> [/]" +
+                    (double.IsNaN(nf) ? "[grey]below readable[/]" : $"{nf:0.00} dBm"));
+            }
+            AnsiConsole.Write(t2);
+
+            if (!double.IsNaN(best))
+                AnsiConsole.MarkupLine($"[green]Lowest floor {best:0.00} dBm at LO {bestLo:0.#} dBm[/]" +
+                    (double.IsNaN(baseline) ? "" : $" [grey]({best - baseline:+0.00;-0.00;0.00} dB vs the +8 dBm default)[/]"));
+            AnsiConsole.MarkupLine("[grey]A lower floor here is directly more usable depth: the roll-off starts about " +
+                                   "1 dB above it.[/]");
+            return 0;
+        }
+
+
+        /// <summary>
+        /// Characterizes the 8340B through the measurement chain at 0 dB attenuation. The source is
+        /// never adjusted between runs, so any instability in it is a common-mode error that shows up
+        /// as attenuator error. The residual FM figure also decides whether the IF synchronous detector
+        /// (and its much lower noise floor) is usable at all.
+        /// </summary>
+        private static int RunSourceCheck(HarnessOptions opt, Bench bench, AttenuatorConfig config)
+        {
+            double freq = opt.RfPowerFreqMHz;
+            int n = opt.StabilityReads;
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"[bold]Source check[/] [grey]({freq:0.###} MHz, 0 dB attenuation, {n} level samples)[/]");
+
+            opt.Sweep.AdaptiveLevel = false;   // characterize the source as it stands, do not adjust it
+            var attn = bench.MakeAttenuator(config);
+            var engine = new MeasurementEngine(bench.Source, bench.Lo, attn, bench.Receiver, opt.Sweep);
+            SourceCheckResult r = engine.CheckSource(freq, n);
+
+            string Dbm(double v) => double.IsNaN(v) ? "[grey]unreadable[/]" : $"{v:+0.000;-0.000;0.000} dBm";
+
+            var t = new Table().Border(TableBorder.Rounded).Title("8340B through the measurement chain");
+            t.AddColumn("Quantity"); t.AddColumn(new TableColumn("Value").RightAligned());
+            t.AddColumn("Assessment");
+
+            t.AddRow("Commanded level", $"{r.CommandedPowerDbm:0.##} dBm", "");
+            t.AddRow("Path", r.Regime == MeasurementRegime.Converted
+                ? $"11793A, LO {r.LoMHz:0.##} MHz" : "direct", "");
+
+            double freqErrHz = double.IsNaN(r.MeasuredFreqMHz) ? double.NaN : (r.MeasuredFreqMHz - freq) * 1e6;
+            t.AddRow("Counted frequency",
+                double.IsNaN(r.MeasuredFreqMHz) ? "[grey]unreadable[/]" : $"{r.MeasuredFreqMHz:0.000###} MHz",
+                double.IsNaN(freqErrHz) ? "" :
+                    Math.Abs(freqErrHz) < 1000 ? $"[green]{freqErrHz:+0;-0;0} Hz[/]" : $"[yellow]{freqErrHz:+0;-0;0} Hz[/]");
+
+            t.AddRow("Level (RF Power, sensor)", Dbm(r.RfPowerDbm), "");
+            t.AddRow("Level (Tuned RF Level)", Dbm(r.TunedLevelDbm),
+                (double.IsNaN(r.RfPowerDbm) || double.IsNaN(r.TunedLevelDbm)) ? "" :
+                    Math.Abs(r.RfPowerDbm - r.TunedLevelDbm) < 1.0
+                        ? $"[green]agrees within {Math.Abs(r.RfPowerDbm - r.TunedLevelDbm):0.00} dB[/]"
+                        : $"[red]differs by {Math.Abs(r.RfPowerDbm - r.TunedLevelDbm):0.00} dB[/]");
+
+            t.AddRow("Residual AM", double.IsNaN(r.AmDepthPercent) ? "[grey]unreadable[/]" : $"{r.AmDepthPercent:0.000} %",
+                double.IsNaN(r.AmDepthPercent) ? "" :
+                    r.AmDepthPercent < 1.0 ? "[green]negligible[/]" : "[yellow]lands on every level reading[/]");
+
+            // The decisive one: >50 Hz peak forces the average detector (O&C Table 1-1 fn.12).
+            t.AddRow("Residual FM", double.IsNaN(r.FmDeviationHz) ? "[grey]unreadable[/]" : $"{r.FmDeviationHz:0.0} Hz",
+                double.IsNaN(r.FmDeviationHz) ? ""
+                    : r.FmDeviationHz < 50.0
+                        ? "[green]< 50 Hz — IF synchronous detector should hold lock[/]"
+                        : "[yellow]> 50 Hz — average detector required (O&C Table 1-1 fn.12)[/]");
+
+            t.AddRow("Level stability (sd)", double.IsNaN(r.LevelSdDb) ? "—" : $"{r.LevelSdDb:0.000} dB",
+                double.IsNaN(r.LevelSdDb) ? "" :
+                    r.LevelSdDb < 0.05 ? "[green]stable[/]" : "[yellow]noisy[/]");
+            t.AddRow("Level span (max-min)", double.IsNaN(r.LevelSpanDb) ? "—" : $"{r.LevelSpanDb:0.000} dB", "");
+            t.AddRow("Level drift (last-first)", double.IsNaN(r.LevelDriftDb) ? "—" : $"{r.LevelDriftDb:+0.000;-0.000;0.000} dB",
+                double.IsNaN(r.LevelDriftDb) ? "" :
+                    Math.Abs(r.LevelDriftDb) < 0.05 ? "[green]no meaningful drift[/]" : "[yellow]drifting[/]");
+            AnsiConsole.Write(t);
+
+            if (!double.IsNaN(r.FmDeviationHz) && r.FmDeviationHz < 50.0)
+                AnsiConsole.MarkupLine("[green]Residual FM is inside the synchronous detector's limit.[/] " +
+                    "[grey]Worth retrying --detector sync: its 200 Hz bandwidth is ~22 dB narrower than the " +
+                    "average detector's 30 kHz, which is where the extra depth would come from.[/]");
             return 0;
         }
 

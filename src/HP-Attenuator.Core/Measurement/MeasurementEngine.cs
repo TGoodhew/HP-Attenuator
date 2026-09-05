@@ -446,6 +446,86 @@ namespace HpAttenuator.Measurement
             }
         }
 
+        /// <summary>
+        /// Characterizes the source through the measurement chain at 0 dB attenuation: counted
+        /// frequency, absolute level by both the sensor and Tuned RF Level paths, residual AM and FM,
+        /// and level stability over repeated reads. The 8340B is never touched between runs, so any
+        /// instability in it is a common-mode error that shows up as attenuator error.
+        ///
+        /// The residual FM number is the one that matters most: above ~50 Hz peak the synchronous
+        /// detector cannot hold lock, which is what has confined us to the average detector and its
+        /// higher noise floor.
+        /// </summary>
+        public SourceCheckResult CheckSource(double freqMHz, int stabilityReads)
+        {
+            var plan = Prepare(freqMHz);
+            _attenuator.SetAttenuationDb(0);
+            Settle();
+
+            var r = new SourceCheckResult
+            {
+                FreqMHz = freqMHz, Regime = plan.Regime, LoMHz = plan.LoMHz, IfMHz = plan.IfMHz,
+                CommandedPowerDbm = _options.SourcePowerDbm, Warning = plan.Warning
+            };
+
+            // Sensor path first — independent of the Tuned RF Level calibration chain, so the two
+            // together also cross-check that the TRFL scale is sane.
+            try
+            {
+                _receiver.BeginRfPowerMeasurement(freqMHz, plan.Regime, plan.LoMHz);
+                Settle();
+                r.RfPowerDbm = _receiver.ReadRfPowerDbm();
+            }
+            catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
+            { try { _receiver.ClearError(); } catch { } }
+
+            // Each of M5 / M1 / M2 leaves Tuned RF Level, so re-enter it before the next reading.
+            r.MeasuredFreqMHz = TrflThen(freqMHz, plan, () => _receiver.ReadSignalFrequencyMHz());
+            r.AmDepthPercent  = TrflThen(freqMHz, plan, () => _receiver.ReadAmDepthPercent());
+            r.FmDeviationHz   = TrflThen(freqMHz, plan, () => _receiver.ReadFmDeviationHz());
+
+            EnterTrfl(freqMHz, plan);
+            for (int i = 0; i < System.Math.Max(1, stabilityReads); i++)
+            {
+                double v = SafeReadLevel();
+                if (!double.IsNaN(v)) r.LevelSamples.Add(v);
+            }
+            if (r.LevelSamples.Count > 0)
+            {
+                r.LevelMeanDbm = Mean(r.LevelSamples);
+                r.TunedLevelDbm = r.LevelMeanDbm;
+                double min = double.MaxValue, max = double.MinValue;
+                foreach (double v in r.LevelSamples) { if (v < min) min = v; if (v > max) max = v; }
+                r.LevelSpanDb = max - min;
+                r.LevelDriftDb = r.LevelSamples[r.LevelSamples.Count - 1] - r.LevelSamples[0];
+            }
+            if (r.LevelSamples.Count > 1) r.LevelSdDb = StdDev(r.LevelSamples);
+            return r;
+        }
+
+        private void EnterTrfl(double freqMHz, LoPlan plan)
+        {
+            _receiver.BeginAttenuationMeasurement(freqMHz, plan.Regime, plan.LoMHz,
+                _options.Detector, false, _options.Tuning, false);
+            Settle();
+        }
+
+        /// <summary>Re-enters Tuned RF Level, then takes one reading that itself switches measurement
+        /// mode (M5/M1/M2). NaN if the reading fails.</summary>
+        private double TrflThen(double freqMHz, LoPlan plan, Func<double> read)
+        {
+            try
+            {
+                EnterTrfl(freqMHz, plan);
+                return read();
+            }
+            catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
+            {
+                try { _receiver.ClearError(); } catch { }
+                return double.NaN;
+            }
+        }
+
         private static double Mean(System.Collections.Generic.List<double> v)
         {
             double t = 0;
