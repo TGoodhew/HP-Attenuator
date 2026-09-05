@@ -43,13 +43,26 @@ namespace HpAttenuator.Measurement
         public double TargetReferenceDbm { get; set; } = 0.0;
 
         /// <summary>How far BELOW <see cref="TargetReferenceDbm"/> the reference may sit and still be
-        /// accepted, dB. A reading ABOVE the target is never accepted (at the 0 dBm ceiling that is an
-        /// over-range), however small the excess.</summary>
-        public double LevelToleranceDb { get; set; } = 0.1;
+        /// accepted, dB — one fine step. A reading ABOVE the target is never accepted (at the 0 dBm
+        /// ceiling that is an over-range), however small the excess.</summary>
+        public double LevelToleranceDb { get; set; } = 0.01;
+
+        /// <summary>
+        /// Source-power increment used on the final approach to the target, dB. The 8340B takes three
+        /// decimals, so 0.01 dB is well inside its resolution. Once the reference is within
+        /// <see cref="LevelFineWindowDb"/> of the target the leveller creeps up one of these at a time
+        /// rather than jumping, so it lands as close under the target as the hardware allows.
+        /// </summary>
+        public double LevelFineStepDb { get; set; } = 0.01;
+
+        /// <summary>Remaining error (dB) below which the leveller switches from a single corrective jump
+        /// to <see cref="LevelFineStepDb"/> creeping. The coarse jump deliberately lands one fine step
+        /// SHORT of the target, so the final approach is always upward from below.</summary>
+        public double LevelFineWindowDb { get; set; } = 0.15;
 
         /// <summary>Max source-power adjustment iterations per frequency (best-effort; clamps out).
-        /// Higher than the old coarse ±1 dB window needed, since the target is now approached to 0.1 dB.</summary>
-        public int MaxLevelIterations { get; set; } = 12;
+        /// Generous, since the fine approach can take several 0.01 dB steps.</summary>
+        public int MaxLevelIterations { get; set; } = 30;
 
         /// <summary>Lower clamp on the leveled source power, dBm (8340B usable range / safety).</summary>
         public double SourcePowerMinDbm { get; set; } = -15.0;

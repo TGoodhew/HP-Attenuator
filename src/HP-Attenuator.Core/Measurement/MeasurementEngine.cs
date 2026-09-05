@@ -878,9 +878,24 @@ namespace HpAttenuator.Measurement
                 // ceiling. Converging from below also means the last move is always a reduction.
                 if (delta >= 0 && delta <= _options.LevelToleranceDb) break;
 
+                // Two-phase approach. A single jump of the whole delta lands wherever the source's own
+                // step accuracy puts it, which is how the reference settled 0.059 dB low. So: jump to
+                // one fine step SHORT of the target while the error is large, then creep up in
+                // LevelFineStepDb (0.01 dB, inside the 8340B's 3-decimal resolution) increments until
+                // the reading is within one step below the target. A reading ABOVE the target is not a
+                // near-miss at the 0 dBm ceiling — it is an over-range, so that case jumps straight back
+                // down rather than creeping.
+                double step;
+                if (delta < 0)
+                    step = delta;                                             // over target — back off now
+                else if (delta > _options.LevelFineWindowDb)
+                    step = delta - _options.LevelFineStepDb;                  // coarse, landing just under
+                else
+                    step = _options.LevelFineStepDb;                          // fine creep, from below
+
                 double next = System.Math.Max(_options.SourcePowerMinDbm,
-                              System.Math.Min(_options.SourcePowerMaxDbm, power + delta));
-                if (System.Math.Abs(next - power) < 1e-3) break;             // clamped — no further move
+                              System.Math.Min(_options.SourcePowerMaxDbm, power + step));
+                if (System.Math.Abs(next - power) < 1e-4) break;              // clamped — no further move
                 power = next;
                 _source.SetPowerDbm(power);
                 Settle();
