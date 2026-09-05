@@ -120,6 +120,9 @@ namespace HpAttenuator.TestHarness
                     case "--force-range-cal": o.Sweep.ForceRangeCal = true; break;
                     case "--floor-dbm": o.Sweep.FloorDbmOverride = D(Need(args, ++i)); break;
                     case "--no-level-limits": o.Sweep.EnforceLevelLimits = false; break;
+                    case "--fine-from": o.Sweep.FineFromDb = I(Need(args, ++i)); break;
+                    case "--fine-step": o.Sweep.FineStepDb = I(Need(args, ++i)); break;
+                    case "--fine-to": o.Sweep.FineToDb = I(Need(args, ++i)); break;
                     case "--no-floor-detect": o.Sweep.FloorDetect = false; break;
                     case "--settle": o.Sweep.SettleMs = I(Need(args, ++i)); break;
                     case "--addr-source": o.AddrSource = Need(args, ++i); break;
@@ -246,6 +249,11 @@ Usage: HP-Attenuator.TestHarness [options]
   --no-level-limits              #21: disable the pre-flight level check and attempt every commanded
                                  point, even ones below the path floor (the pre-#21 behaviour — deep
                                  points then read the floor and are caught after the fact by #13).
+  --fine-from dB                 #22: switch to a finer attenuation step at this depth, to sample the
+  --fine-step dB                 approach to the measurement floor densely (default step 1 dB) while
+  --fine-to dB                   the shallow region stays on the coarse grid. The coarse grid resumes
+                                 past --fine-to (default: --astop). E.g. --astep 10 --fine-from 90
+                                 --fine-to 100 gives 0,10..80, 90,91..100, then 110.
   --no-floor-detect              Disable #13 floor/plateau detection; count every point's error
                                  (the pre-#13 behaviour — deep floored points then fail the sweep).
   --settle ms                    Settle per attenuator step (default 100).

@@ -195,7 +195,7 @@ namespace HpAttenuator.Measurement
         public FreqPointResult MeasureFrequency(double freqMHz,
             System.Action<int, int, AttenPointResult> onPoint = null)
         {
-            int total = (_options.AttenStopDb - _options.AttenStartDb) / _options.AttenStepDb + 1;
+            int total = _options.AttenuationStepCount();   // #22: grid isn't uniform once fine steps are on
             int index = 0;
             Timing = new SweepTiming();                         // #2: attribute this frequency's wall-clock
             var wall = System.Diagnostics.Stopwatch.StartNew();

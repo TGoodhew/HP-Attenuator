@@ -1096,8 +1096,8 @@ namespace HpAttenuator.TestHarness
             string tuneTag = opt.Sweep.Tuning == TrflTuning.Auto ? "auto-tune (#3, unverified)" : "manual-tune";
             AnsiConsole.MarkupLine(
                 $"[grey]Sweep:[/] {frequencies.Count} freqs, attenuation {opt.Sweep.AttenStartDb}-{opt.Sweep.AttenStopDb} dB " +
-                $"step {opt.Sweep.AttenStepDb}, source {opt.Sweep.SourcePowerDbm:0.#} dBm, {detectorTag} detector, {tuneTag}, " +
-                $"tolerance ±{opt.ToleranceDb:0.#} dB");
+                $"step {opt.Sweep.AttenStepDb}{FineTag(opt.Sweep)}, source {opt.Sweep.SourcePowerDbm:0.#} dBm, " +
+                $"{detectorTag} detector, {tuneTag}, tolerance ±{opt.ToleranceDb:0.#} dB");
             AnsiConsole.WriteLine();
 
             bool detailed = frequencies.Count <= 12;
@@ -1176,7 +1176,9 @@ namespace HpAttenuator.TestHarness
                             : Math.Max(deepestMeasured, r.DeepestMeasuredDb);
 
                     // Small detailed runs get a table; large ones already streamed progress.
-                    if (detailed && r.Points.Count <= 15) RenderFrequencyTable(r, opt.ToleranceDb);
+                    // Roomy enough for a coarse grid plus a #22 fine region (e.g. 21 points for
+                    // 0-110/10 with 1 dB steps 90-100) — a single-frequency run still gets the table.
+                    if (detailed && r.Points.Count <= 40) RenderFrequencyTable(r, opt.ToleranceDb);
                     else RenderFrequencyLine(r, opt.ToleranceDb);
                 }
             }
@@ -1313,6 +1315,14 @@ namespace HpAttenuator.TestHarness
             string limit = r.LevelWindow == null ? ""
                 : $"  |  {r.LevelWindow.PathName} floor {r.LevelWindow.MinDbm:0} dBm -> usable {r.UsableDepthDb:0.0} dB";
             return $"  ref {r.ReferencePowerDbm:+0.0;-0.0;0.0} dBm{src}{limit}";
+        }
+
+        /// <summary>#22: describes the fine-step region in the sweep header, or "" when it's off.</summary>
+        private static string FineTag(SweepOptions s)
+        {
+            if (s.FineFromDb < 0 || s.FineStepDb <= 0) return "";
+            string to = s.FineToDb >= 0 ? s.FineToDb.ToString() : s.AttenStopDb.ToString();
+            return $" (step {s.FineStepDb} from {s.FineFromDb} to {to} dB)";
         }
 
         private static string F(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);

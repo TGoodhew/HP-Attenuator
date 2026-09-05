@@ -132,10 +132,70 @@ namespace HpAttenuator.Measurement
                 yield return FreqStartMHz + i * FreqStepMHz;
         }
 
+        /// <summary>
+        /// #22: attenuation (dB) at which the sweep switches from <see cref="AttenStepDb"/> to the
+        /// finer <see cref="FineStepDb"/>. Negative — the default — disables it (uniform coarse step).
+        /// Used to sample the approach to the measurement floor densely, where accuracy degrades as the
+        /// signal nears the noise, while the well-behaved shallow region stays cheap.
+        /// </summary>
+        public int FineFromDb { get; set; } = -1;
+
+        /// <summary>#22: step (dB) used from <see cref="FineFromDb"/> through <see cref="FineToDb"/>.</summary>
+        public int FineStepDb { get; set; } = 1;
+
+        /// <summary>#22: attenuation (dB) at which the fine region ends and the coarse grid resumes.
+        /// Negative = stay fine all the way to <see cref="AttenStopDb"/>.</summary>
+        public int FineToDb { get; set; } = -1;
+
+        /// <summary>
+        /// The attenuation points to measure, ascending and without duplicates. Normally a uniform
+        /// <see cref="AttenStepDb"/> grid; when <see cref="FineFromDb"/> is set the sweep runs coarse up
+        /// to it, fine (<see cref="FineStepDb"/>) through <see cref="FineToDb"/>, then rejoins the
+        /// ORIGINAL coarse grid beyond it — so enabling the fine region never shifts the coarse points.
+        /// </summary>
         public IEnumerable<int> AttenuationSteps()
         {
-            for (int a = AttenStartDb; a <= AttenStopDb; a += AttenStepDb)
+            if (FineFromDb < 0 || FineStepDb <= 0)
+            {
+                for (int a = AttenStartDb; a <= AttenStopDb; a += AttenStepDb)
+                    yield return a;
+                yield break;
+            }
+
+            int fineEnd = FineToDb >= 0 ? System.Math.Min(FineToDb, AttenStopDb) : AttenStopDb;
+            int last = int.MinValue;
+
+            // Coarse approach, up to (not including) the fine region.
+            for (int a = AttenStartDb; a <= AttenStopDb && a < FineFromDb; a += AttenStepDb)
+            {
                 yield return a;
+                last = a;
+            }
+
+            // Fine region.
+            for (int a = System.Math.Max(FineFromDb, AttenStartDb); a <= fineEnd; a += FineStepDb)
+            {
+                if (a <= last) continue;
+                yield return a;
+                last = a;
+            }
+
+            // Rejoin the original coarse grid past the fine region (keeps 110 dB on a 0/10 grid).
+            for (int a = AttenStartDb; a <= AttenStopDb; a += AttenStepDb)
+            {
+                if (a <= last) continue;
+                yield return a;
+                last = a;
+            }
+        }
+
+        /// <summary>Number of points <see cref="AttenuationSteps"/> yields (the step grid is no longer
+        /// uniform once #22's fine region is enabled, so it must be counted, not calculated).</summary>
+        public int AttenuationStepCount()
+        {
+            int n = 0;
+            foreach (var _ in AttenuationSteps()) n++;
+            return n;
         }
 
         /// <summary>Coarser attenuation points used only for the range-calibration pass.</summary>

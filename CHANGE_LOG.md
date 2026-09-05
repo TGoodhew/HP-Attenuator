@@ -13,6 +13,21 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased — not yet merged
 
+### branch `issue-22-fine-step-near-floor` (off `issue-21-device-level-limits`) — #22
+- **#22 — variable sweep resolution: fine steps on the approach to the measurement floor.** With #21
+  the sweep stops at the path's honest limit (~98.9 dB usable at 3 GHz from a −1.1 dBm reference), so
+  the most interesting region — the last ~9 dB before the 11793A's −100 dBm floor, where accuracy is
+  expected to degrade as the signal nears the noise — was characterized by a **single** coarse point.
+  New `--fine-from dB` / `--fine-step dB` (default 1) / `--fine-to dB` (default `--astop`) let the
+  sweep run coarse to the threshold, fine through the fine region, then **rejoin the ORIGINAL coarse
+  grid** beyond it, so enabling the fine region never shifts the coarse points. `AttenuationSteps()`
+  yields strictly ascending points with no duplicates; the progress total now comes from the new
+  `AttenuationStepCount()` rather than assuming a uniform step. The detailed per-frequency table
+  threshold rose 15 → 40 points so a single-frequency fine run still renders as a table.
+- **Build clean; sim PASS** — `--astep 10 --fine-from 90 --fine-step 1 --fine-to 100` gives 21 points:
+  0,10..80, then 90,91..98 measured, with 99/100/110 skipped by #21 against the sim's 98.0 dB usable
+  depth. Worst |err| 0.04 dB, deepest measured 98.0 dB. Bench validation: HardwareValidation.md **V12**.
+
 ### branch `issue-21-device-level-limits` (off `main`) — #21
 - **#21 — model each path's spec-derived measurable level window, and never sweep outside it.** The
   sweep was commanding attenuation whose resulting level lands *below the path's measurement floor*,

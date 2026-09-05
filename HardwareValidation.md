@@ -51,6 +51,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V9 | #2 — `--profile` gives the real wall-clock breakdown to drive sweep optimization | `issue-2-sweep-profiling` | ⬜ | — |
 | V10 | #8 — a CALIBRATE error (Error 35) is now polled + logged + surfaced, not silently latched | `issue-8-calibrate-error-surface` | ⬜ | — |
 | V11 | #21 — spec-derived per-path level limits; points below the path floor are skipped, not failed | `issue-21-device-level-limits` | ✅ | — |
+| V12 | #22 — fine (1 dB) steps from 90 dB to the floor characterize the last few dB | `issue-22-fine-step-near-floor` | ⬜ | — |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: loses lock through the converter (CHANGE_LOG) |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -323,6 +324,31 @@ run. The trace agrees — zero error sentinels, zero `CL` error-clears, zero `SB
 each in the pre-#21 run of the same sweep, which ended in a real **Error 01 (signal out of IF range)**
 at 110 dB. Driving the receiver below its floor is what produced that error, and the limit gate
 removes it at the source.
+
+---
+
+---
+
+## V12 — #22 fine steps on the approach to the floor  ⬜ built, awaiting bench
+
+- **Branch:** `issue-22-fine-step-near-floor` (off `issue-21-device-level-limits`; sim PASS).
+- **Why:** #21 caps the 3 GHz sweep at ~98.9 dB usable, and the coarse grid samples that final stretch
+  with one point (90 dB). The bench data shows error growing +0.27 dB @ 70 → +0.94 @ 80 → +0.63 @ 90;
+  three widely spaced points can't separate drift, range-boundary error and floor onset.
+- **Isolate & run:**
+  ```powershell
+  git checkout issue-22-fine-step-near-floor
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+    --freq 3000 --astop 110 --astep 10 --fine-from 90 --fine-step 1 --fine-to 100 `
+    --debug --skip-sensor-cal --out DebugResults/v12-fine.csv
+  ```
+- **Expect (PASS):** header reads `step 10 (step 1 from 90 to 100 dB)`; 21 points; coarse 0-80 as
+  before; **90,91,…,98 each measured** (98 dB predicts ≈ −99.1 dBm, just inside the −100 dBm floor);
+  99/100/110 SKIPped; no error on the 8902A panel at any point; verdict PASS.
+- **What we're actually looking for:** does |error| stay flat across 90→98 dB, or climb as the level
+  approaches −100 dBm? A clean flat run says the path is honest right up to its spec floor; a rising
+  tail tells us where the practical limit really is, and is the number to feed back into #13/#21
+  (`--floor-dbm`) and into the #15 per-section cross-check.
 
 ---
 
