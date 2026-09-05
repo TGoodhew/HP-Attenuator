@@ -163,6 +163,13 @@ namespace HpAttenuator.Instruments
         /// unreadable.</summary>
         double ReadFirmwareDateCode();
 
+        /// <summary>Reads a stored Tuned RF Level calibration factor (RF range 1-3); NaN if unreadable.</summary>
+        double ReadTrflCalFactor(int range);
+
+        /// <summary>Clears all stored Tuned RF Level calibration factors — the recovery for a bad
+        /// stored range factor, which an instrument preset does NOT clear.</summary>
+        void ClearTrflCalFactors();
+
         void BeginAttenuationMeasurement(double rfMHz, MeasurementRegime regime, double loMHz,
             TrflDetector detector = TrflDetector.Average, bool trackMode = false,
             TrflTuning tuning = TrflTuning.Manual, bool noiseCorrection = false);

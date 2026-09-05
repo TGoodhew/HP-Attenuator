@@ -45,9 +45,11 @@ namespace HpAttenuator.TestHarness
             try
             {
                 // These steps only need the 8902A — don't open the whole bench.
-                if (opt.SensorCal || opt.SensorZero || opt.SensorCalibrate || opt.LoadCal)
+                if (opt.SensorCal || opt.SensorZero || opt.SensorCalibrate || opt.LoadCal
+                    || opt.TrflCal || opt.ClearTrflCal)
                 {
                     var receiver = BuildReceiverOnly(opt, disposables);
+                    if (opt.TrflCal || opt.ClearTrflCal) return RunTrflCalFactors(opt, receiver);
                     if (opt.LoadCal) return RunLoadCalFactors(receiver);
                     if (opt.SensorCal) return RunSensorCalInteractive(receiver);
                     return opt.SensorZero ? RunSensorZero(receiver) : RunSensorCalibrate(receiver);
@@ -1527,7 +1529,10 @@ namespace HpAttenuator.TestHarness
 
                     opt.Sweep.Detector = cfg.Detector;
                     opt.Sweep.NoiseCorrection = cfg.Noise;
-                    opt.Sweep.ForceRangeCal = true;    // SF 31.1 needs a real Range 3 CALIBRATE (#17)
+                    // NOT forced here. Forcing a CALIBRATE at a level the AVG detector cannot reference
+                    // against the sensor module stores a BAD range factor (the manual's caution), which
+                    // survives an instrument preset and offsets every later reading. Pass
+                    // --force-range-cal explicitly, and only once the baseline is known good.
 
                     var attn = bench.MakeAttenuator(config);
                     var engine = new MeasurementEngine(bench.Source, bench.Lo, attn, bench.Receiver, opt.Sweep);
@@ -1642,6 +1647,51 @@ namespace HpAttenuator.TestHarness
                   .AppendLine();
             }
             AnsiConsole.WriteLine(sb.ToString());
+        }
+
+
+        /// <summary>
+        /// Reads back the 8902A's stored Tuned RF Level calibration factors (SF 38.1-38.3), and with
+        /// <c>--clear-trfl-cal</c> clears them first (SF 39.9). This is the diagnosis and the recovery
+        /// for a bad stored range factor: a CALIBRATE performed at a level the detector cannot reference
+        /// writes a corrupt factor, which offsets every later absolute reading and is NOT cleared by an
+        /// instrument preset.
+        /// </summary>
+        private static int RunTrflCalFactors(HarnessOptions opt, IMeasuringReceiver receiver)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[bold]Tuned RF Level calibration factors[/] [grey](SF 38.1-38.3)[/]");
+
+            double fw = receiver.ReadFirmwareDateCode();
+            AnsiConsole.MarkupLine(double.IsNaN(fw)
+                ? "  [grey]Firmware date code (42.0SP): unreadable[/]"
+                : $"  [grey]Firmware date code (42.0SP): [/]{fw:0.###}");
+
+            if (opt.ClearTrflCal)
+            {
+                AnsiConsole.MarkupLine("  [yellow]Clearing all Tuned RF Level calibration factors (39.9SP)...[/]");
+                try { receiver.ClearTrflCalFactors(); }
+                catch (Exception ex)
+                {
+                    AnsiConsole.MarkupLine($"  [red]Clear failed: {ex.Message.EscapeMarkup()}[/]");
+                    return 1;
+                }
+            }
+
+            var t = new Table().Border(TableBorder.Rounded);
+            t.AddColumn("RF range"); t.AddColumn(new TableColumn("Cal factor").RightAligned());
+            for (int r = 1; r <= 3; r++)
+            {
+                double v = receiver.ReadTrflCalFactor(r);
+                t.AddRow($"Range #{r}  (38.{r}SP)", double.IsNaN(v) ? "[grey]unreadable[/]" : $"{v:0.####}");
+            }
+            AnsiConsole.Write(t);
+
+            AnsiConsole.MarkupLine(opt.ClearTrflCal
+                ? "[grey]Cleared. With no resident factors the receiver should now raise RECAL/UNCAL as " +
+                  "the level drops, so the next sweep calibrates naturally rather than riding stale factors (#17).[/]"
+                : "[grey]Use [/]--clear-trfl-cal[grey] to clear them (SF 39.9) if one looks corrupt.[/]");
+            return 0;
         }
 
         private static string F(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);

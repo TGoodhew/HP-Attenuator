@@ -19,6 +19,8 @@ namespace HpAttenuator.TestHarness
         public bool AttenSweep;     // --atten-sweep : Test 2 — 1 dB relative attenuation sweep at --freq
         public bool PerAtten;       // --per-atten : Test 3 — exercise each attenuator's settings individually
         public bool SectionTest;    // --section-test : isolate the 8496's two 40 dB sections (digit 7 vs 8)
+        public bool TrflCal;       // --trfl-cal : read back the stored TRFL range cal factors (SF 38)
+        public bool ClearTrflCal;  // --clear-trfl-cal : clear them (SF 39.9) then read back
         public bool SfMatrix;      // --sf-matrix : #25 - SF 4 x SF 31 stage-1 matrix
         public string SfConfigs;   // --sf-configs A,B : restrict which matrix cells run
         public bool SectionSum;     // --section-sum : #15 — characterize each section alone, then SUM for the full range
@@ -85,6 +87,8 @@ namespace HpAttenuator.TestHarness
                     case "--per-atten": o.PerAtten = true; break;
                     case "--section-test": o.SectionTest = true; break;
                     case "--section-sum": o.SectionSum = true; break;
+                    case "--trfl-cal": o.TrflCal = true; break;
+                    case "--clear-trfl-cal": o.ClearTrflCal = true; break;
                     case "--sf-matrix": o.SfMatrix = true; break;
                     case "--sf-configs": o.SfConfigs = Need(args, ++i); break;
                     case "--repeats": o.Sweep.RepeatsPerPoint = I(Need(args, ++i)); break;
@@ -268,6 +272,12 @@ Usage: HP-Attenuator.TestHarness [options]
   --fine-to dB                   the shallow region stays on the coarse grid. The coarse grid resumes
                                  past --fine-to (default: --astop). E.g. --astep 10 --fine-from 90
                                  --fine-to 100 gives 0,10..80, 90,91..100, then 110.
+  --trfl-cal                     Read back the 8902A's stored Tuned RF Level range calibration
+                                 factors (SF 38.1-38.3). A CALIBRATE done at a level the detector
+                                 cannot reference stores a BAD factor that offsets every later
+                                 reading and survives an instrument preset.
+  --clear-trfl-cal               Clear all stored TRFL calibration factors (SF 39.9), then read
+                                 back. The recovery for the above.
   --sf-matrix                    #25 stage 1: sweep the 2x2 matrix of IF detector (SF 4: 4.0
                                  synchronous / 4.4 average) against noise correction (SF 31:
                                  31.0 off / 31.1 on), to test whether the deep-end roll-off is

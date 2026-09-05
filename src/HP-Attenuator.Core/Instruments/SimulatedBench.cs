@@ -176,6 +176,9 @@ namespace HpAttenuator.Instruments
         /// <summary>Sim reports a date code well above the SF 31.1 gate so the matrix runner proceeds.</summary>
         public double ReadFirmwareDateCode() => 2535.0;
 
+        public double ReadTrflCalFactor(int range) => 100.0;   // sim: a nominal, uncorrupted factor
+        public void ClearTrflCalFactors() { }
+
         public void BeginRfPowerMeasurement(double rfMHz, MeasurementRegime regime, double loMHz)
         {
             _tunedMHz = rfMHz;

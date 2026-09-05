@@ -467,6 +467,35 @@ namespace HpAttenuator.Instruments
         /// 234.1985 and below" and "available on instruments serial prefixed 2535A and above". Checking
         /// this first stops us reading "unsupported" as "made no difference".
         /// </summary>
+        /// <summary>
+        /// Reads a stored Tuned RF Level calibration factor (SF 38.1/38.2/38.3 = RF Range 1/2/3).
+        /// These are what a CALIBRATE writes, and a bad one shifts every subsequent absolute reading —
+        /// so reading them back is how you tell a corrupt range factor from a real level change.
+        /// 38.4 (the SET REF reference value) is firmware-gated above date code 234.1985; 38.1-38.3
+        /// are not. Returns NaN if unreadable.
+        /// </summary>
+        public double ReadTrflCalFactor(int range)
+        {
+            try
+            {
+                Send($"38.{range}SP");
+                return ReadMeasurement();
+            }
+            catch { return double.NaN; }
+        }
+
+        /// <summary>
+        /// Clears ALL stored Tuned RF Level calibration factors (SF 39.9, "Clear all calibration
+        /// factors"). This is the recovery when a CALIBRATE has stored a bad range factor: the
+        /// instrument preset (IP) does NOT clear them, so a corrupt factor survives a reset and keeps
+        /// offsetting every reading. Not firmware-gated (unlike 39.4).
+        ///
+        /// Side effect worth knowing: with no resident factors the receiver raises RECAL/UNCAL as it
+        /// descends, which is exactly the condition #17 found missing — so a cleared instrument
+        /// calibrates naturally instead of riding stale factors.
+        /// </summary>
+        public void ClearTrflCalFactors() => Send("39.9SP");
+
         public double ReadFirmwareDateCode()
         {
             try

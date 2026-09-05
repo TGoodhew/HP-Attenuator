@@ -1025,7 +1025,10 @@ namespace HpAttenuator.Measurement
                 // over-range — so that case steps back down rather than creeping.
                 double step;
                 if (delta < 0)
-                    step = -grid;                                             // over target — back off
+                    // Over target: jump the whole way when far off, creep only within the fine window.
+                    // Creeping unconditionally meant a reference 41 dB high moved 0.05 dB per iteration
+                    // and burned the entire budget without arriving.
+                    step = delta < -_options.LevelFineWindowDb ? delta : -grid;
                 else if (delta > _options.LevelFineWindowDb)
                     step = delta - grid;                                      // coarse, landing just under
                 else
