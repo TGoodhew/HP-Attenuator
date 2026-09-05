@@ -115,6 +115,14 @@ namespace HpAttenuator.TestHarness
 
                 AttenuatorConfig config = ResolveAttenuator(opt, bench);
 
+                // #23: the adaptive plan sweeps every step of the FINE attenuator 1 dB at a time, so it
+                // needs that attenuator's range. Either pad can be on ATTEN X (--x-atten), so identify
+                // it as the smaller of the two groups (8494 = 11 dB vs 8496 = 110 dB).
+                int xTotal = 0, yTotal = 0;
+                foreach (var sec in config.X) xTotal += sec.Decibels;
+                foreach (var sec in config.Y) yTotal += sec.Decibels;
+                opt.Sweep.FineAttenuatorMaxDb = Math.Min(xTotal, yTotal);
+
                 // Test 3: exercise each attenuator's settings individually (8494 1..11 dB,
                 // 8496 10..110 dB), one attenuator engaged at a time.
                 if (opt.PerAtten)
@@ -1320,6 +1328,8 @@ namespace HpAttenuator.TestHarness
         /// <summary>#22: describes the fine-step region in the sweep header, or "" when it's off.</summary>
         private static string FineTag(SweepOptions s)
         {
+            if (s.StepPlan == AttenStepPlan.Adaptive)
+                return $" (adaptive #23: 1 dB to {s.FineAttenuatorMaxDb}, ladder, 1 dB for the last {s.FloorApproachDb})";
             if (s.FineFromDb < 0 || s.FineStepDb <= 0) return "";
             string to = s.FineToDb >= 0 ? s.FineToDb.ToString() : s.AttenStopDb.ToString();
             return $" (step {s.FineStepDb} from {s.FineFromDb} to {to} dB)";

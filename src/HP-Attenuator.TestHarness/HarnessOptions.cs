@@ -123,6 +123,8 @@ namespace HpAttenuator.TestHarness
                     case "--fine-from": o.Sweep.FineFromDb = I(Need(args, ++i)); break;
                     case "--fine-step": o.Sweep.FineStepDb = I(Need(args, ++i)); break;
                     case "--fine-to": o.Sweep.FineToDb = I(Need(args, ++i)); break;
+                    case "--adaptive-steps": o.Sweep.StepPlan = AttenStepPlan.Adaptive; break;
+                    case "--floor-approach": o.Sweep.FloorApproachDb = I(Need(args, ++i)); break;
                     case "--no-floor-detect": o.Sweep.FloorDetect = false; break;
                     case "--settle": o.Sweep.SettleMs = I(Need(args, ++i)); break;
                     case "--addr-source": o.AddrSource = Need(args, ++i); break;
@@ -254,6 +256,16 @@ Usage: HP-Attenuator.TestHarness [options]
   --fine-to dB                   the shallow region stays on the coarse grid. The coarse grid resumes
                                  past --fine-to (default: --astop). E.g. --astep 10 --fine-from 90
                                  --fine-to 100 gives 0,10..80, 90,91..100, then 110.
+  --adaptive-steps               #23: choose the points from what the hardware can actually measure
+                                 here, instead of a fixed grid — 1 dB through the FINE attenuator's
+                                 whole range (8494: 0-11 dB), then the --astep ladder to within
+                                 --floor-approach of the deepest measurable point, then 1 dB in to
+                                 that limit. The limit is (achieved reference - path floor), so
+                                 levelling the reference to 0 dBm buys the most depth.
+  --floor-approach dB            #23: how far above the limit the 1 dB approach begins (default 10).
+  --ref-target dBm               Target for the leveled 0 dB reference (default 0). Levelling until
+                                 the 8902A reads 0 dBm makes the reference an absolute anchor, so the
+                                 generator's power error and the cable loss drop out of every point.
   --no-floor-detect              Disable #13 floor/plateau detection; count every point's error
                                  (the pre-#13 behaviour — deep floored points then fail the sweep).
   --settle ms                    Settle per attenuator step (default 100).

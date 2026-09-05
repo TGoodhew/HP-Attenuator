@@ -29,15 +29,27 @@ namespace HpAttenuator.Measurement
         /// <summary>Measure and level the 0 dB reference per frequency before SET REF (#16).</summary>
         public bool AdaptiveLevel { get; set; } = true;
 
-        /// <summary>Target for the leveled 0 dB reference at the 8902A, dBm. Just under the 0 dBm
-        /// ceiling with margin against drift (manual guidance −1 to −3 dBm).</summary>
-        public double TargetReferenceDbm { get; set; } = -2.0;
+        /// <summary>
+        /// Target for the leveled 0 dB reference at the 8902A, dBm. Levelling the source until the
+        /// receiver reads exactly 0 dBm makes the reference an absolute anchor, so the signal
+        /// generator's own power error and the cabling loss drop out of the result entirely — the
+        /// measured attenuation is then just the negated reading. It also buys the most dynamic range,
+        /// since every dB of reference below 0 is a dB of usable depth lost above the floor.
+        ///
+        /// NOTE: 0 dBm is the 8902A's Tuned RF Level ceiling (<see cref="LevelLimits.TunedRfLevelMaxDbm"/>),
+        /// so there is no headroom above it — the leveller therefore converges from BELOW and never
+        /// accepts a reading above the target (see the engine's LevelReference).
+        /// </summary>
+        public double TargetReferenceDbm { get; set; } = 0.0;
 
-        /// <summary>Accept the reference without stepping when it is within this of the target, dB.</summary>
-        public double LevelToleranceDb { get; set; } = 1.0;
+        /// <summary>How far BELOW <see cref="TargetReferenceDbm"/> the reference may sit and still be
+        /// accepted, dB. A reading ABOVE the target is never accepted (at the 0 dBm ceiling that is an
+        /// over-range), however small the excess.</summary>
+        public double LevelToleranceDb { get; set; } = 0.1;
 
-        /// <summary>Max source-power adjustment iterations per frequency (best-effort; clamps out).</summary>
-        public int MaxLevelIterations { get; set; } = 5;
+        /// <summary>Max source-power adjustment iterations per frequency (best-effort; clamps out).
+        /// Higher than the old coarse ±1 dB window needed, since the target is now approached to 0.1 dB.</summary>
+        public int MaxLevelIterations { get; set; } = 12;
 
         /// <summary>Lower clamp on the leveled source power, dBm (8340B usable range / safety).</summary>
         public double SourcePowerMinDbm { get; set; } = -15.0;
@@ -146,6 +158,19 @@ namespace HpAttenuator.Measurement
         /// <summary>#22: attenuation (dB) at which the fine region ends and the coarse grid resumes.
         /// Negative = stay fine all the way to <see cref="AttenStopDb"/>.</summary>
         public int FineToDb { get; set; } = -1;
+
+        /// <summary>#23: how the attenuation points are chosen — a fixed grid, or a plan derived per
+        /// frequency from the achieved reference and the path's measurable floor.</summary>
+        public AttenStepPlan StepPlan { get; set; } = AttenStepPlan.Uniform;
+
+        /// <summary>#23: full range of the FINE step attenuator (the 8494's 1+2+4+4 = 11 dB), swept one
+        /// step at a time at the top of an adaptive plan so every one of its steps is characterized.
+        /// Set from the resolved <c>AttenuatorConfig</c>.</summary>
+        public int FineAttenuatorMaxDb { get; set; } = 11;
+
+        /// <summary>#23: how far above the measurable limit the adaptive plan leaves the coarse ladder
+        /// and approaches the floor in 1 dB steps.</summary>
+        public int FloorApproachDb { get; set; } = 10;
 
         /// <summary>
         /// The attenuation points to measure, ascending and without duplicates. Normally a uniform

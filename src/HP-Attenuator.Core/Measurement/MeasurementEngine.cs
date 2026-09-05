@@ -195,7 +195,7 @@ namespace HpAttenuator.Measurement
         public FreqPointResult MeasureFrequency(double freqMHz,
             System.Action<int, int, AttenPointResult> onPoint = null)
         {
-            int total = _options.AttenuationStepCount();   // #22: grid isn't uniform once fine steps are on
+            int total = 0;   // set once the attenuation plan is known (it can depend on the reference, #23)
             int index = 0;
             Timing = new SweepTiming();                         // #2: attribute this frequency's wall-clock
             var wall = System.Diagnostics.Stopwatch.StartNew();
@@ -241,7 +241,10 @@ namespace HpAttenuator.Measurement
             double baselineRelDb = 0.0;
             int boundaryCals = 0;   // range-to-range CALIBRATEs done this frequency (cap: MaxBoundaryCalibrations)
 
-            foreach (int atten in _options.AttenuationSteps())
+            List<int> attenPlan = BuildAttenuationPlan(referenceDbm, pathFloorDbm);
+            total = attenPlan.Count;
+
+            foreach (int atten in attenPlan)
             {
                 double expected = atten - _options.AttenStartDb;
                 var point = new AttenPointResult
@@ -357,6 +360,59 @@ namespace HpAttenuator.Measurement
             long other = wall.ElapsedMilliseconds - Timing.TotalMs;
             if (other > 0) Timing.Add("setup/other", other, 0);
             return result;
+        }
+
+        /// <summary>
+        /// #23 — chooses the attenuation points for one frequency. <see cref="AttenStepPlan.Uniform"/>
+        /// returns the fixed grid. <see cref="AttenStepPlan.Adaptive"/> builds a plan around what the
+        /// hardware can actually do here, given the reference the leveller achieved and the path's
+        /// measurable floor:
+        ///
+        ///   1. every step of the FINE attenuator, 1 dB at a time (the 8494's full 0–11 dB), so each of
+        ///      its sections is characterized individually;
+        ///   2. the coarse 10 dB ladder onward, to within <see cref="SweepOptions.FloorApproachDb"/> of
+        ///      the deepest measurable point;
+        ///   3. 1 dB steps from there in to that limit, so the approach to the floor — where accuracy
+        ///      rolls off — is sampled densely rather than jumped over.
+        ///
+        /// The limit is (reference − floor), so a better reference automatically buys more depth. Points
+        /// are ascending and deduplicated; step 2 stays on the original coarse grid (0, 10, 20 …) and so
+        /// naturally skips the 10 dB point already covered by step 1. Falls back to the fixed grid when
+        /// the reference is unknown, since without it there is no limit to plan against.
+        /// </summary>
+        private List<int> BuildAttenuationPlan(double referenceDbm, double floorDbm)
+        {
+            if (_options.StepPlan != AttenStepPlan.Adaptive || double.IsNaN(referenceDbm))
+                return new List<int>(_options.AttenuationSteps());
+
+            // Deepest point whose level still sits at/above the floor. Floor of the real value so we
+            // never plan a point the #21 gate would then refuse.
+            int limit = (int)System.Math.Floor(referenceDbm - floorDbm);
+            if (limit > _options.AttenStopDb) limit = _options.AttenStopDb;
+
+            var points = new List<int>();
+            int last = int.MinValue;
+            System.Action<int> add = a =>
+            {
+                if (a > last && a >= _options.AttenStartDb && a <= limit) { points.Add(a); last = a; }
+            };
+
+            // 1. Every step of the fine attenuator.
+            int head = System.Math.Min(_options.FineAttenuatorMaxDb, limit);
+            for (int a = _options.AttenStartDb; a <= head; a++) add(a);
+
+            // 2. Coarse ladder to within FloorApproachDb of the limit (original grid alignment).
+            int coarseEnd = limit - _options.FloorApproachDb;
+            if (_options.AttenStepDb > 0)
+                for (int a = _options.AttenStartDb; a <= coarseEnd; a += _options.AttenStepDb) add(a);
+
+            // 3. 1 dB approach to the limit.
+            for (int a = System.Math.Max(coarseEnd + 1, _options.AttenStartDb); a <= limit; a++) add(a);
+
+            Trace?.Invoke($"step-plan (#23): {points.Count} points — 1 dB to {head} dB (fine attenuator), " +
+                          $"{_options.AttenStepDb} dB ladder to {coarseEnd} dB, then 1 dB in to {limit} dB " +
+                          $"(reference {referenceDbm:0.00} dBm − floor {floorDbm:0.0} dBm).");
+            return points;
         }
 
         /// <summary>
@@ -813,7 +869,14 @@ namespace HpAttenuator.Measurement
                 achieved = level;
 
                 double delta = target - level;                               // dB the reference must move
-                if (System.Math.Abs(delta) <= _options.LevelToleranceDb) break;   // in the window — done
+                Trace?.Invoke($"level: read {level:+0.000;-0.000;0.000} dBm, target {target:+0.0;-0.0;0.0} " +
+                              $"(delta {delta:+0.000;-0.000;0.000}), source {power:0.00} dBm");
+
+                // Accept ONLY from below the target. With the target at the 0 dBm Tuned RF Level ceiling
+                // there is no headroom above it, so any positive excess is an over-range and is always
+                // corrected down, however small — a symmetric window would happily settle above the
+                // ceiling. Converging from below also means the last move is always a reduction.
+                if (delta >= 0 && delta <= _options.LevelToleranceDb) break;
 
                 double next = System.Math.Max(_options.SourcePowerMinDbm,
                               System.Math.Min(_options.SourcePowerMaxDbm, power + delta));
@@ -828,6 +891,10 @@ namespace HpAttenuator.Measurement
                 result.ReferencePowerDbm = achieved;
                 result.LeveledSourcePowerDbm = power;
             }
+            if (!double.IsNaN(achieved))
+                Trace?.Invoke($"level: settled at {achieved:+0.000;-0.000;0.000} dBm " +
+                              $"(source {power:0.00} dBm) — the reference is the measurement anchor, so the " +
+                              "source's own power error and the cable loss drop out of every point.");
             return achieved;
         }
 

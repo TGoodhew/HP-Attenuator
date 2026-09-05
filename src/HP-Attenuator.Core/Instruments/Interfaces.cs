@@ -61,6 +61,20 @@ namespace HpAttenuator.Instruments
     /// converter path — used for the deep sweep (#14).</item>
     /// </list>
     /// </summary>
+    /// <summary>How an attenuation sweep chooses its points (#23).</summary>
+    public enum AttenStepPlan
+    {
+        /// <summary>A fixed grid: <c>--astep</c> throughout, plus any #22 fine region.</summary>
+        Uniform,
+
+        /// <summary>
+        /// Derived per frequency from the achieved reference and the path's measurable floor: every
+        /// step of the fine attenuator 1 dB at a time, then the coarse ladder down to within
+        /// <c>FloorApproachDb</c> of the limit, then 1 dB steps in to the limit.
+        /// </summary>
+        Adaptive
+    }
+
     public enum TrflDetector
     {
         /// <summary>IF Average detector (SF 4.4, 30 kHz BW, floor ≈ −100 dBm).</summary>

@@ -11,7 +11,33 @@ kept alive** (not deleted/cleaned up) until their change is bench-validated and 
 What's on `main` but not yet confirmed against the real hardware is tracked in
 **[HardwareValidation.md](HardwareValidation.md)** — the step-by-step bench checklist for Renton.
 
-## Unreleased — not yet merged
+## Unreleased - not yet merged
+
+### branch `issue-23-zero-dbm-ref-adaptive-steps` (off `issue-22-fine-step-near-floor`) - #23
+- **#23a - level the reference to 0 dBm, not -2 dBm.** The leveller targeted -2 dBm, so the 0 dB
+  reference landed wherever the source power and cable loss put it (-1.14 dBm on the bench). It now
+  drives the source until the **8902A itself reads 0 dBm**, making the reference an absolute anchor:
+  the generator's own power error and the cabling loss drop out of every point, and the measured
+  attenuation is just the negated reading. It also buys maximum dynamic range - every dB of reference
+  below 0 is a dB of usable depth lost above the floor. `TargetReferenceDbm` 0.0, `LevelToleranceDb`
+  1.0 -> **0.1**, `MaxLevelIterations` 5 -> 12.
+  - 0 dBm **is** the Tuned RF Level ceiling, so acceptance is now **asymmetric**: a reading is accepted
+    only when it sits in `[target - tolerance, target]`. A reading *above* target is always corrected
+    down however small the excess - a symmetric window would have settled over-range. The last move is
+    therefore always a reduction. Each iteration is traced under `--debug`.
+- **#23b - derive the step plan from the attenuator and the path floor (`--adaptive-steps`).** A fixed
+  grid does not match what the stack can do. Per frequency the plan is now: **(1)** 1 dB steps through
+  the whole FINE attenuator (8494, 0-11 dB) so each of its steps is characterized; **(2)** the `--astep`
+  coarse ladder onward to within `--floor-approach` (default 10) dB of the deepest measurable point;
+  **(3)** 1 dB steps in to that limit, sampling the roll-off densely. The limit is
+  `achieved reference - path floor` (#21), so a better reference automatically buys depth and the plan
+  never proposes a point the #21 gate would refuse. The fine attenuator is identified as the smaller of
+  the two configured groups, so `--x-atten` either way round works. Step 2 stays on the original coarse
+  grid and so naturally skips the 10 dB point already covered by step 1; points are ascending and
+  deduplicated. Falls back to the fixed grid when the reference is unknown.
+- **Build clean; sim PASS** - levelling converged from below to -0.038 dBm (it read +0.042 and +0.001
+  and correctly pushed back down); the plan came out as 29 points: 0,1,...,11 then 20,30,...,90 then
+  91,...,99 (limit 99 from the -0.038 dBm reference). Worst |err| 0.04 dB. Bench: **V13**.
 
 ### branch `issue-22-fine-step-near-floor` (off `issue-21-device-level-limits`) — #22
 - **#22 — variable sweep resolution: fine steps on the approach to the measurement floor.** With #21

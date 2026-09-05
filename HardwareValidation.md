@@ -51,7 +51,8 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V9 | #2 — `--profile` gives the real wall-clock breakdown to drive sweep optimization | `issue-2-sweep-profiling` | ⬜ | — |
 | V10 | #8 — a CALIBRATE error (Error 35) is now polled + logged + surfaced, not silently latched | `issue-8-calibrate-error-surface` | ⬜ | — |
 | V11 | #21 — spec-derived per-path level limits; points below the path floor are skipped, not failed | `issue-21-device-level-limits` | ✅ | — |
-| V12 | #22 — fine (1 dB) steps from 90 dB to the floor characterize the last few dB | `issue-22-fine-step-near-floor` | ⬜ | — |
+| V12 | #22 — fine (1 dB) steps from 90 dB to the floor characterize the last few dB | `issue-22-fine-step-near-floor` | ✅ | — |
+| V13 | #23 — reference leveled to 0 dBm; step plan derived from the attenuator + path floor | `issue-23-zero-dbm-ref-adaptive-steps` | ⬜ | — |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: loses lock through the converter (CHANGE_LOG) |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -329,7 +330,7 @@ removes it at the source.
 
 ---
 
-## V12 — #22 fine steps on the approach to the floor  ⬜ built, awaiting bench
+## V12 — #22 fine steps on the approach to the floor  ✅ BENCH PASS (2026-09-04)
 
 - **Branch:** `issue-22-fine-step-near-floor` (off `issue-21-device-level-limits`; sim PASS).
 - **Why:** #21 caps the 3 GHz sweep at ~98.9 dB usable, and the coarse grid samples that final stretch
@@ -349,6 +350,52 @@ removes it at the source.
   approaches −100 dBm? A clean flat run says the path is honest right up to its spec floor; a rising
   tail tells us where the practical limit really is, and is the number to feed back into #13/#21
   (`--floor-dbm`) and into the #15 per-section cross-check.
+
+### Result — PASS, 2026-09-04 (author-confirmed: no errors on the 8902A through all 21 points)
+
+The tail is **not** flat — a clean monotonic roll-off, and it found the chain's practical floor:
+
+| Set dB | 90 | 91 | 92 | 93 | 94 | 95 | 96 | 97 | 98 |
+|---|---|---|---|---|---|---|---|---|---|
+| Error dB | +0.36 | +0.28 | +0.13 | −0.12 | −0.33 | −0.71 | −1.06 | −2.31 | −2.76 |
+| Level dBm | −91.5 | −92.4 | −93.2 | −94.0 | −94.8 | −95.4 | −96.0 | −95.8 | −96.3 |
+
+Readings **compress and plateau at about −96 dBm** — 97 and 98 dB read *less* attenuation than 95 dB
+does. So this chain's practical floor is **≈ −96 dBm, ~4 dB short of the 11793A's −100 dBm spec**
+(real conversion loss and noise vs the ideal figure). Honest depth at 3 GHz: **~94 dB within ±0.5 dB**,
+~95 dB within ±1 dB. #21 refused the 3 impossible points, #13 flagged the 3 saturated ones, and the
+verdict was PASS on the 15 real points — the two mechanisms working together as designed.
+
+Also visible: error takes step changes at 30→40 dB (−0.15 → +0.34) and 70→80 dB (+0.24 → +0.83),
+which look like the two uncalibrated RF range-to-range boundaries — with `NO-OP — 0 CALIBRATEs fired`
+and no RECAL all run. That is **#17 showing up directly in the accuracy numbers**, and makes row V2
+(`--force-range-cal`) worth running to see if ~0.5 dB of mid-range error is recoverable.
+
+---
+
+---
+
+## V13 — #23 0 dBm reference + adaptive step plan  ⬜ built, awaiting bench
+
+- **Branch:** `issue-23-zero-dbm-ref-adaptive-steps` (off `issue-22-fine-step-near-floor`; sim PASS).
+- **What changed:** (a) the leveller drives the source until the **8902A reads 0 dBm**, so the
+  generator's power error and cable loss drop out of every point and the usable depth is maximised;
+  (b) `--adaptive-steps` derives the points from the hardware — 1 dB through the 8494's full 0–11 dB,
+  the 10 dB ladder to within 10 dB of the limit, then 1 dB in to the limit.
+- **Isolate & run:**
+  ```powershell
+  git checkout issue-23-zero-dbm-ref-adaptive-steps
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+    --freq 3000 --astop 110 --astep 10 --adaptive-steps --debug --skip-sensor-cal `
+    --out DebugResults/v13-adaptive.csv
+  ```
+- **Expect (PASS):** the `level:` trace converges to a reference within 0.1 dB **below** 0 dBm and never
+  settles above it; the plan reports ~30 points (0,1..11, 20,30..90, 91..100); 0–11 dB each measure
+  near nominal; no error on the 8902A panel at any point.
+- **What we're looking for:** (1) do the 8494's individual 1 dB steps come out accurate — this is the
+  first time each has been measured on its own; (2) with the reference at 0 dBm instead of −1.1, the
+  usable depth grows ~1 dB — does the roll-off still start around −95 dBm absolute (which would confirm
+  the −96 dBm practical floor found in V12 is a property of the path, not of the reference level)?
 
 ---
 
