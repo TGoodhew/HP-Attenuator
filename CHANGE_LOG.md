@@ -13,6 +13,34 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased - not yet merged
 
+### DISCRIMINATOR RESULT: the deep-end error is the ATTENUATOR, not the receiver (2026-09-05, bench)
+- The +0.4 dB step at 40 dB and the growth beyond 80 dB had two candidate causes that every previous
+  run confounded: the 8496's 40 dB sections (fixed vs **commanded dB**) or the receiver's uncalibrated
+  range boundaries (fixed vs **absolute level**). With the reference always at 0 dBm those two are
+  numerically identical, so no run so far could separate them.
+- **Experiment:** repeat the 500 MHz sync sweep with the reference deliberately parked low
+  (`--ref-target -10`; the leveller settled at **-12.772 dBm**), decoupling commanded dB from absolute
+  level by ~12.8 dB.
+
+  | Set dB | 0 | 10 | 20 | 30 | **40** |
+  |---|---|---|---|---|---|
+  | Error, ref 0 dBm | 0.00 | -0.11 | -0.07 | -0.09 | **+0.38** |
+  | Error, ref -12.77 dBm | 0.00 | -0.06 | -0.02 | -0.07 | **+0.39** |
+
+- **The step did NOT move.** It stays at commanded **40 dB** (+0.39) with 30 dB still clean (-0.07). Had
+  it been a receiver range boundary at -40 dBm absolute, it would have shifted down to ~27-30 dB
+  commanded. It follows the ATTENUATOR SETTING, so it is the **8496's first 40 dB section (digit 7)** -
+  which is exactly what the per-step increment table (#24) fingered at +0.49 dB, alongside digit 8 at
+  +0.62 dB.
+- **Consequence: this is real DUT behaviour to be measured and reported, not calibrated away.** #17
+  (range-to-range calibration) drops sharply in priority - it is not the dominant error term after all.
+  The remaining question is whether the growth beyond 80 dB is also sectional (digits 7+8 together).
+- Incidental: the streamed-CSV fix committed earlier paid off immediately - the interrupted run left 6
+  usable rows instead of an empty file.
+- Small follow-up noted: the leveller settled at -12.772 dBm against a -10 dBm target rather than
+  converging closer. Harmless here (the actual reference is known and the decoupling is what mattered)
+  but worth a look.
+
 ### 500 MHz direct path: 114 dB reached, and the 11793A was the binding constraint (2026-09-04, bench)
 - **The converter, not the receiver, was the limit.** At 500 MHz the signal is below the 1300 MHz
   crossover, so it goes direct (no 11793A, no LO). With the synchronous detector the sweep reached

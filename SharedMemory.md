@@ -14,6 +14,63 @@ A cross-machine handoff snapshot so work can continue from anywhere. Updated 202
 - **Standing git default: commit + push** every change, branches included. No manual merge-to-`main`
   gate anymore — combine freely; validation is deferred to the ledger, not blocked before merge.
 
+## STOPPING POINT — 2026-09-05, bench powered down
+
+**Branch: `issue-24-sf-matrix`** (stacked: main → 21 → 22 → 23 → 24). All work committed and pushed.
+Bench is idle; nothing was left mid-run. The 8902A's Tuned RF Level calibration is HEALTHY (verified:
+RF Power and TRFL agree within 0.02 dB).
+
+### The headline result of the session
+**The deep-end error is the ATTENUATOR, not the receiver.** Parking the reference at −12.77 dBm instead
+of 0 dBm decoupled commanded dB from absolute level; the +0.4 dB step **stayed at commanded 40 dB**, so
+it tracks the attenuator setting — the 8496's first 40 dB section (digit 7). The per-step table had
+already put digit 7 at +0.49 dB and digit 8 at +0.62 dB. This is real DUT behaviour to be measured and
+reported, not calibrated away, and it **demotes #17**.
+
+### Also established tonight
+- **The synchronous detector is the right choice, not a dead end** (the old SharedMemory entry was
+  wrong and is corrected below). Residual FM is **18 Hz at 3 GHz / 7 Hz at 500 MHz** measured in the
+  specified 50 Hz–3 kHz bandwidth (`H1`/`L1` filters) — well inside the 50 Hz limit. Sync tracks
+  linearly (~1 dB per 1 dB step) to the cliff; the average detector compresses and under-reads.
+- **Depth reached:** 3 GHz converted **99 dB** (−100.5 dBm, exactly the 11793A spec); 500 MHz direct
+  **114 dB** (−114.9 dBm). The converter, not the receiver, was the binding constraint.
+- **Why not −127 dBm:** the 11792A contains a **10 dB pad** ahead of its RF switch (to let the sensor
+  take 1 W). The instrument compensates the *reading*, not the *sensitivity*, so the DUT-referred floor
+  is 10 dB worse: −127 + 10 = −117 dBm, and we measured −114.9. Spec says the **11722A** reaches
+  **−120 dBm** (Option 050, 2.5–1300 MHz). Bypassing the module entirely (straight to the 8902A RF
+  INPUT) should also work, since a SET REF relative measurement bypasses the sensor anyway.
+- **The source is excellent and is not a contributor:** level sd 0.001–0.004 dB, drift 0.013 dB,
+  0 Hz frequency error, residual AM 0.17–0.24 %.
+- **#17 mechanism understood:** the descent fires nothing because RESIDENT range factors suppress
+  RECAL. It fired 2 CALIBRATEs at 500 MHz where no resident factors existed. The operator confirmed on
+  the front panel across three runs that RECAL/UNCAL never lights.
+- **`--force-range-cal` is DANGEROUS as implemented** — its deep 20/55 dB calibrations corrupted the
+  TRFL first calibration factor (+42.9 dB offset). Recovery is `--trfl-recal` (one CALIBRATE at 0 dB,
+  full signal). Instrument preset, sensor re-cal and SF 39.9 all fail to clear it. **Do not use
+  `--force-range-cal` until reworked.**
+- **This 8902A lacks the SF 31/38/39 family** (firmware date code 94.199): 38.1–38.3 read unreadable,
+  39.9 has no effect, 31.1 is accepted but useless. The SF-matrix experiment is not runnable here.
+
+### NEXT STEP when the bench is back on
+1. **Finish the discriminator sweep** — `--ref-target -10` was stopped at 40 dB. Re-run to see whether
+   the 80 dB+ growth is also sectional (digits 7+8) or receiver-related:
+   ```powershell
+   dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+     --freq 500 --astop 110 --astep 10 --detector sync --ref-target -10 --debug --skip-sensor-cal `
+     --out DebugResults/v22-ref-minus10.csv
+   ```
+2. **Then `--section-sum`** (ledger V5, built, never run) for per-section values on all eight sections,
+   to cross-check digit 7 = +0.49 dB and digit 8 = +0.62 dB.
+3. Deferred housekeeping: mark **V13** ✅ (0 dBm reference + adaptive plan ran clean all session), and
+   decide **V1** (#4 — criterion met but the failure mode never occurred, so it is "no regression"
+   rather than "fix demonstrated").
+4. Re-scope **#15**: per-section summation may only be needed above 1300 MHz now that direct reaches
+   114 dB.
+
+New tooling this session: `--source-check`, `--trfl-recal`, `--trfl-cal`/`--clear-trfl-cal`,
+`--noise-floor`, `--sf-matrix`, `--adaptive-steps`, `--fine-from/step/to`, `--repeats`,
+`--step-tolerance`, `--hold-before-steps`/`--hold-at-db`. Sweep CSV now streams per point.
+
 ## Where we are right now
 
 On **`main`** (`635755a`, pushed to origin). Goal: measure the 11713A + 8494/8496 step attenuator's
