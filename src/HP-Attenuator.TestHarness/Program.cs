@@ -1195,14 +1195,14 @@ namespace HpAttenuator.TestHarness
             {
                 summary.AddRow("Floor-limited (#13)", $"[yellow]{floorPoints} point(s)[/] — saturated at the " +
                     $"measurement floor; excluded from the verdict");
-                summary.AddRow("Deepest measured", double.IsNaN(deepestMeasured) ? "—" : $"{deepestMeasured:0.0} dB");
             }
             if (outOfRangePoints > 0)
-            {
                 summary.AddRow("Out of range (#21)", $"[yellow]{outOfRangePoints} point(s)[/] — not attempted; " +
                     "below the measurable floor of the path in use");
+            // One depth row however many exclusion kinds fired (#13 floor and #21 out-of-range both
+            // shorten the honest depth, and printing it per-block duplicated the row).
+            if (floorPoints > 0 || outOfRangePoints > 0)
                 summary.AddRow("Deepest measured", double.IsNaN(deepestMeasured) ? "—" : $"{deepestMeasured:0.0} dB");
-            }
             summary.AddRow("Tolerance", $"±{opt.ToleranceDb:0.#} dB");
             summary.AddRow("CSV", Path.GetFullPath(opt.CsvPath).EscapeMarkup());
             summary.AddRow("Verdict", pass ? "[green]PASS[/]" : "[red]FAIL[/]");
