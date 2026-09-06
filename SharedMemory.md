@@ -14,6 +14,61 @@ A cross-machine handoff snapshot so work can continue from anywhere. Updated 202
 - **Standing git default: commit + push** every change, branches included. No manual merge-to-`main`
   gate anymore — combine freely; validation is deferred to the ledger, not blocked before merge.
 
+## STOPPING POINT — 2026-09-06 midday, author stepped away, bench left powered
+
+**Branch `issue-24-sf-matrix`, all committed and pushed.** No run is in flight; the GPIB bus was
+released and the peer session (`winz3805a-25`, on COM3/RS-232 only, unrelated work) was told.
+
+### What got done
+1. **All 8 sections measured at 500 MHz and 3 GHz — every one in spec** (ledger V5 ✅). Worst is
+   digit 8 at 64% of its ±0.7 limit. Full table in CHANGE_LOG.
+2. **Frequency sweep 10 MHz → 26 GHz** (`DebugResults/v25-sec-<f>.csv`). Units confirmed by the
+   author as **8494G/8496G = DC–4 GHz**, so only 10/100/500/1000/2000 MHz have a published spec;
+   5 GHz and up is unrated characterization, not pass/fail.
+3. **Leveller straddle bug found and fixed** (ledger V14, sim-tested, NOT yet hardware-validated).
+
+### The three open threads, in priority order
+1. **§5 at 2 GHz reads −0.23 dB against a ±0.20 limit — the only in-band point that fails, and it is
+   UNCONFIRMED.** The whole 2 GHz row carries a systematic negative offset absent at 1 GHz (direct)
+   and 5 GHz (converted), and 2 GHz is the first converted point with the 8673B LO at the bottom of
+   its range. **A repeat was launched and interrupted** — re-run it:
+   ```powershell
+   dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --section-sum `
+     --freq 2000 --detector sync --ref-target 0 --debug --skip-sensor-cal --out DebugResults/v26-sec-2000.csv
+   ```
+2. **18 GHz needs re-running to validate the leveller fix** (same command, `--freq 18000`). The old
+   18 GHz row was measured against a reference 13 dB below target, so its odd §3/§4 values
+   (−1.03/+1.36) are not trustworthy. Expect the trace to now settle near 0 dBm instead of −13.232.
+3. **10 MHz §7/§8 need the author.** Both 40 dB sections return the 8902A `CCCC` UNCAL — the −40 dBm
+   range has no resident cal factor at 10 MHz. The fix needs a range calibration → which needs a
+   sensor calibration → which needs the **sensor physically moved to the 8902A CALIBRATION RF POWER
+   OUTPUT and back**. Not attempted; do not attempt without the author at the bench.
+
+### Out-of-band headline (no spec exists, reported as characterization)
+The G models far outlive their DC–4 GHz rating: 5 GHz is indistinguishable from 500 MHz, 10 GHz is
+still tidy (§7 +0.53, §8 +0.54). Degradation starts ~18–20 GHz; by 26 GHz §7/§8 deliver only 24 and
+22 dB instead of 40. Not instrumental — the reference held at −14.6 dBm and the deepest point was
+−54.6 dBm, far above the compression floor.
+
+### Manual has no RF test frequencies
+The operator's check is **1 kHz** audio (Table 3-1; its SWR meter is square-law, so dB errors read
+**twice** the meter indication). "Performance tests" delegates entirely to a network analyzer's own
+manual. Table 1-6 is a **band** limit over DC–4 GHz, not a set of test points.
+
+### App issues filed today (all unfixed)
+- **#25** bare GPIB number at the VISA prompt should expand to `GPIB0::n::INSTR`; and declining the
+  simulated-driver fallback should return to the menu instead of exiting.
+- **#26** `Console.Beep` fires synchronously on every write → the app is slow, with no way to disable
+  it (the harness has `--no-beep`; the app never sets the flag).
+- **#27** `SetSwitch9`/`SetSwitch0` bypass `Sense()`, so `InvertSense` desynchronises S9/S0.
+
+**Unexplained and still open:** the app hung indefinitely inside `GlobalResourceManager.Open` on
+`GPIB0::27::INSTR` while the harness opened the same resource fine all session. Nothing was holding
+the bus. Candidates: the 11713A being powered off, or a wedged bus from two mid-transaction
+`TaskStop` kills. Never resolved. Also unresolved: **S9/S0 front-panel LEDs did not toggle** even
+though the emitted `A9`/`B9`/`A0`/`B0` match the manual — next step is "Send raw data string → `A9`"
+to isolate app logic from hardware.
+
 ## CURRENT STATE — 2026-09-06, bench ON, GPIB bus claimed by this session
 
 **Branch: `issue-24-sf-matrix`.** The discriminator sweep abandoned at 40 dB on 2026-09-05 is now

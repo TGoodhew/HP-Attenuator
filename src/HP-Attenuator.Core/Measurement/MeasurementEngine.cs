@@ -1142,7 +1142,14 @@ namespace HpAttenuator.Measurement
                 // Both sides seen: the source's 0.05 dB grid straddles the target, so no further move
                 // can do better than the best reading at or below it. Go back to that power and stop —
                 // this is what previously oscillated forever between 1.12 and 1.13 dBm.
-                if (sawAbove && !double.IsNaN(bestBelowPower))
+                //
+                // The width test below matters. The level tracks source power 1:1 only to within
+                // the source's own flatness, so a coarse jump can overshoot by more than the grid and
+                // leave the two samples far apart. At 18 GHz a 13.20 dB jump landed 0.219 dB high;
+                // taking this shortcut then reverted to the 13 dB-away baseline and reported it as
+                // "settled", measuring that whole frequency against a reference 13 dB too low.
+                if (sawAbove && !double.IsNaN(bestBelowPower) &&
+                    System.Math.Abs(power - bestBelowPower) <= grid * 1.5)
                 {
                     if (System.Math.Abs(power - bestBelowPower) > 1e-9)
                     {
@@ -1177,6 +1184,22 @@ namespace HpAttenuator.Measurement
                 power = next;
                 _source.SetPowerDbm(power);
                 Settle();
+            }
+
+            // Never settle ABOVE the target: at the 0 dBm Tuned RF Level ceiling that is an
+            // over-range. If the iteration budget ran out, or the source clamped, on a reading
+            // above the target, fall back to the best reading at or below it.
+            if (!double.IsNaN(achieved) && achieved > target + 1e-9 && !double.IsNaN(bestBelowPower))
+            {
+                if (System.Math.Abs(power - bestBelowPower) > 1e-9)
+                {
+                    power = bestBelowPower;
+                    _source.SetPowerDbm(power);
+                    Settle();
+                }
+                achieved = bestBelowLevel;
+                Trace?.Invoke("level: iteration budget ended above the target - falling back to " +
+                              "the best reading at or below it.");
             }
 
             if (result != null)

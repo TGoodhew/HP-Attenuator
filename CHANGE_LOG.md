@@ -13,6 +13,57 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased - not yet merged
 
+### Frequency sweep 10 MHz - 26 GHz, and a leveller bug found and fixed (2026-09-06, bench)
+- Ran `--section-sum` at 10, 100, 500, 1000, 2000 MHz and 5, 10, 18, 20, 26 GHz. Files
+  `DebugResults/v25-sec-<f>.csv`. **The units are 8494G/8496G (DC-4 GHz confirmed by the author)**,
+  so only the first five frequencies have a published spec; 5 GHz and above are unrated operation
+  and are reported as characterization, not pass/fail.
+- **Manual gives no RF test frequencies.** The operator's check is a **1 kHz** audio test (Table 3-1;
+  note its SWR meter is square-law, so dB errors read **twice** the meter indication), and the
+  "Performance tests" section delegates entirely: *"can be tested ... with a network analyzer ...
+  use the procedure in the analyzer's operating manual."* Table 1-6 is a **band** limit over DC-4 GHz,
+  not a set of test points, so any in-band frequency is as valid as any other.
+
+  | | §1 (1) | §2 (2) | §3 (4) | §4 (4) | §5 (10) | §6 (20) | §7 (40) | §8 (40) |
+  |---|---|---|---|---|---|---|---|---|
+  | 10 MHz | 0.00 | +0.03 | +0.03 | +0.03 | -0.05 | -0.07 | UNCAL | UNCAL |
+  | 100 MHz | 0.00 | +0.02 | +0.02 | +0.01 | -0.06 | -0.06 | +0.38 | +0.43 |
+  | 500 MHz | 0.00 | +0.02 | +0.02 | +0.03 | -0.08 | -0.06 | +0.36 | +0.41 |
+  | 1 GHz | +0.01 | +0.06 | +0.05 | +0.03 | -0.07 | +0.04 | +0.42 | +0.46 |
+  | 2 GHz | -0.03 | -0.02 | -0.15 | -0.13 | **-0.23** | -0.21 | +0.15 | +0.19 |
+  | 5 GHz | +0.02 | +0.06 | +0.02 | +0.03 | -0.10 | -0.11 | +0.40 | +0.45 |
+  | 10 GHz | -0.04 | 0.00 | -0.05 | -0.04 | -0.15 | -0.14 | +0.53 | +0.54 |
+  | 18 GHz | +0.02 | -0.02 | -1.03 | +1.36 | -0.13 | +0.14 | -0.42 | +0.13 |
+  | 20 GHz | -0.05 | +0.90 | +0.83 | +0.34 | -0.18 | +0.11 | -3.04 | -2.00 |
+  | 26 GHz | +0.43 | +1.04 | +0.22 | +0.71 | +0.91 | -7.32 | -15.92 | -17.56 |
+
+- **In band, everything passes except §5 at 2 GHz (-0.23 vs ±0.20) — and that one is UNCONFIRMED.**
+  The whole 2 GHz row carries a systematic negative offset that neither 1 GHz (direct) nor 5 GHz
+  (converted) shows, and 2 GHz is the first converted point with the 8673B LO at the bottom of its
+  range. Treat as a suspected measurement artifact until repeated.
+- **Out of band the G models far outlive their rating:** 5 GHz is indistinguishable from 500 MHz and
+  10 GHz is still tidy. Degradation starts ~18-20 GHz; by 26 GHz §7 and §8 deliver only 24 and 22 dB
+  instead of 40. Not instrumental — even at 26 GHz the reference held at -14.6 dBm and the deepest
+  point was -54.6 dBm, far above the compression floor.
+- **Cable loss confirmed and normalised out.** 10 MHz-2 GHz needed no source boost; 5 GHz +1.75 dBm,
+  10 GHz +5.75 dBm, 20 and 26 GHz clamped at the +15 dBm source maximum (~21 and ~30 dB of path
+  loss). Re-levelling the 0 dB reference at each frequency is what removes it.
+- **LEVELLER BUG FOUND AND FIXED.** At 18 GHz the leveller found source +13.20 dBm giving +0.187 dBm
+  — on target — then discarded it and "settled" back on source 0.00 dBm / reference **-13.232 dBm**,
+  measuring the whole frequency 13 dB low. The straddle shortcut assumed its two samples were one
+  grid step apart, which only holds if level tracks source power exactly 1:1; source flatness broke
+  that assumption. It now requires the bracket to actually be within 1.5 grid steps, and a new
+  post-loop guard prevents ever settling above the target. This is the same defect noted as a loose
+  end in the earlier `--ref-target -10` run (it settled 2.7 dB below a -10 dBm target).
+- **10 MHz §7/§8 unresolved:** both 40 dB sections return the 8902A's `CCCC` UNCAL — the -40 dBm
+  range has no resident calibration factor at 10 MHz. Fixing it needs a range calibration, which
+  needs a sensor calibration, which needs the sensor physically moved to the 8902A CALIBRATION RF
+  POWER OUTPUT and back. Not attempted.
+- App issues filed while diagnosing an unrelated session: **#25** (bare GPIB number at the VISA
+  prompt should expand to `GPIB0::n::INSTR`; declining the fallback should return to the menu, not
+  exit), **#26** (`Console.Beep` on every write makes the app slow, no way to disable), **#27**
+  (`SetSwitch9`/`SetSwitch0` bypass `Sense()`).
+
 ### ALL EIGHT SECTIONS MEASURED — every one IN SPEC at 500 MHz and 3 GHz (2026-09-06, bench)
 - First real run of `--section-sum` (ledger V5, built long ago, never executed). Each section engaged
   **alone** against the 0 dB reference, so the deepest point is only 40 dB (≈ -40 dBm) — far above the
