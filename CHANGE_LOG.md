@@ -13,6 +13,52 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased - not yet merged
 
+### BOTH EFFECTS RESOLVED: sections 7+8 are high; the deep-end collapse is the RECEIVER (2026-09-06, bench)
+- Completed the discriminator sweep the previous session had to abandon at 40 dB: 500 MHz direct,
+  sync detector, reference parked at **-12.71 dBm**, full 0-110 dB in 10 dB steps
+  (`DebugResults/v23-ref-minus10-full.csv`). All 12 points landed.
+- The 8496 is a 10/20/40/40 dB ladder on digits 5/6/7/8, so 12 commanded points over-determine 4
+  section values. Solving the four singles and testing every combination against their sum is the
+  clean discriminator: a **sectional** error must add exactly, a **receiver** error must track
+  absolute level regardless of which sections are engaged.
+
+  | Cmd dB | relays | abs dBm | measured | sum of sections | residual |
+  |---|---|---|---|---|---|
+  | 30 | 5+6 | -42.6 | 29.928 | 29.928 | **+0.000** |
+  | 50 | 5+7 | -63.0 | 50.324 | 50.327 | -0.003 |
+  | 60 | 6+7 | -73.1 | 60.369 | 60.371 | -0.002 |
+  | 70 | 5+6+7 | -82.9 | 70.199 | 70.313 | -0.114 |
+  | 90 | 5+7+8 | -103.0 | 90.318 | 90.585 | -0.267 |
+  | 100 | 6+7+8 | -112.2 | 99.443 | 100.629 | **-1.186** |
+  | 110 | 5+6+7+8 | -119.1 | 106.378 | 110.571 | **-4.193** |
+
+- **The attenuator is additive to 0.003 dB through 60 dB.** Sections do not interact; the DUT sums.
+- **The sectional error is real and confined to digits 7 and 8:** digit 5 = 9.942 (-0.058), digit 6 =
+  19.986 (-0.014), digit 7 = **40.385 (+0.385)**, digit 8 = **40.258 (+0.258)**. This confirms and
+  now *quantifies* yesterday's discriminator finding.
+- **The collapse beyond 90 dB is NOT sectional — it is the receiver.** The clincher: 110 dB engages
+  80 dB (digits 7+8, measured consistent) plus digits 5 and 6, both of which measured within 0.06 dB
+  at high level. Two known-good sections cannot manufacture a -4.19 dB error. The residual instead
+  tracks **absolute level** monotonically: -0.27 at -103 dBm, -1.19 at -112 dBm, -4.19 at -119 dBm.
+  That is soft compression against the floor, not a hard cliff.
+- **The real 500 MHz direct/sync floor is about -119 dBm**, and the harness's printed
+  "floor -127 dBm -> usable 114.3 dB" is optimistic by ~8 dB. Usable linear range ends around
+  **-100 dBm**, where the residual first exceeds 0.25 dB.
+- **Caveat that sets the next step:** digit 8's +0.258 dB rests on the single 80 dB point, which sits
+  at **-93.4 dBm** — already inside the region where compression is plausibly starting. If it is, the
+  true digit 8 is *larger* than +0.258. Digit 8 is the one section never measured in the clean zone,
+  because at this reference no combination puts it there.
+- **Consequence for #15 (per-section summation):** it is no longer a >1300 MHz special case. It is the
+  general method for any total that would push the receiver below ~-100 dBm — measure each section
+  alone at a high reference where the receiver is linear, then sum. The 0-60 dB additivity result is
+  the evidence that summing is legitimate for this DUT.
+- Verdict line still reads FAIL (worst |error| 3.62 dB at 110 dB), but that number is now known to be
+  a receiver artifact, not attenuator error, and should not be reported as DUT accuracy.
+- Operational note: with the 11713A powered off the harness sat silently in setup (last traffic
+  `4.0SP`) instead of reporting the attenuator unreachable. A pre-flight check on GPIB 27 would have
+  caught it in a second.
+
+
 ### DISCRIMINATOR RESULT: the deep-end error is the ATTENUATOR, not the receiver (2026-09-05, bench)
 - The +0.4 dB step at 40 dB and the growth beyond 80 dB had two candidate causes that every previous
   run confounded: the 8496's 40 dB sections (fixed vs **commanded dB**) or the receiver's uncalibrated

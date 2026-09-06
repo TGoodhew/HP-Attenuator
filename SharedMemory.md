@@ -14,7 +14,50 @@ A cross-machine handoff snapshot so work can continue from anywhere. Updated 202
 - **Standing git default: commit + push** every change, branches included. No manual merge-to-`main`
   gate anymore — combine freely; validation is deferred to the ledger, not blocked before merge.
 
+## CURRENT STATE — 2026-09-06, bench ON, GPIB bus claimed by this session
+
+**Branch: `issue-24-sf-matrix`.** The discriminator sweep abandoned at 40 dB on 2026-09-05 is now
+**complete** — all 12 points, 500 MHz direct, sync detector, reference at −12.71 dBm
+(`DebugResults/v23-ref-minus10-full.csv`).
+
+### Both effects are now separated and quantified
+The 8496 is a 10/20/40/40 ladder on digits 5/6/7/8, so 12 commanded points over-determine 4 sections.
+Solve the singles, then test every combination against their sum — a sectional error adds exactly, a
+receiver error tracks absolute level whatever is engaged.
+
+- **The attenuator is additive to 0.003 dB through 60 dB.** Sections do not interact.
+- **Sectional error, real, confined to digits 7 and 8:** digit 5 = 9.942 (−0.058), digit 6 = 19.986
+  (−0.014), **digit 7 = 40.385 (+0.385)**, **digit 8 = 40.258 (+0.258)**.
+- **The collapse past 90 dB is the RECEIVER, not the DUT.** 110 dB = (digits 7+8, already consistent)
+  + digits 5 and 6, both good to 0.06 dB at high level; two good sections cannot make a −4.19 dB
+  error. The residual tracks absolute level: −0.27 at −103 dBm, −1.19 at −112 dBm, −4.19 at −119 dBm.
+  Soft compression, not a cliff.
+- **Real 500 MHz direct/sync floor ≈ −119 dBm.** The harness prints "floor −127 dBm → usable 114.3 dB",
+  optimistic by ~8 dB. **Linear range ends near −100 dBm** (first residual past 0.25 dB).
+- **Open caveat:** digit 8's +0.258 rests on the single 80 dB point at **−93.4 dBm**, possibly already
+  compressing. If so the true digit 8 is *larger*. Digit 8 is the one section never measured in the
+  clean zone at this reference.
+
+### NEXT STEP
+1. **`--section-sum`** (ledger V5, built, never run) — now strongly motivated, not just housekeeping.
+   Measure each section **alone at a high reference** so every point stays above ~−100 dBm, which
+   settles digit 8 and cross-checks digits 5/6/7. The 0–60 dB additivity result above is the evidence
+   that summing is legitimate for this DUT.
+2. **Re-scope #15**: per-section summation is no longer a >1300 MHz special case — it is the general
+   method for any total that would drive the receiver below ~−100 dBm.
+3. Housekeeping still deferred: mark **V13** ✅, decide **V1** (criterion met but the failure mode
+   never occurred — "no regression" rather than "fix demonstrated").
+4. Harness gap seen tonight: with the 11713A powered off the run sat silently in setup (last traffic
+   `4.0SP`) instead of reporting the attenuator unreachable. A pre-flight GPIB 27 check would catch it.
+
+**Still true and still important:** `--force-range-cal` is DANGEROUS as implemented (it corrupted the
+TRFL first calibration factor; recovery is `--trfl-recal`). **Do not use it until reworked.** This
+8902A lacks the SF 31/38/39 family (firmware 94.199), so the SF-matrix experiment is not runnable here.
+
+
 ## STOPPING POINT — 2026-09-05, bench powered down
+
+*(Superseded by the CURRENT STATE section above — its open question is now answered.)*
 
 **Branch: `issue-24-sf-matrix`** (stacked: main → 21 → 22 → 23 → 24). All work committed and pushed.
 Bench is idle; nothing was left mid-run. The 8902A's Tuned RF Level calibration is HEALTHY (verified:
