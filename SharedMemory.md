@@ -38,6 +38,46 @@ receiver error tracks absolute level whatever is engaged.
   compressing. If so the true digit 8 is *larger*. Digit 8 is the one section never measured in the
   clean zone at this reference.
 
+### 2026-09-06 — ALL EIGHT SECTIONS MEASURED, ALL IN SPEC (V5 ✅)
+
+First real run of `--section-sum`, at 500 MHz (Direct) and 3 GHz (Converted), each section engaged
+alone against the 0 dB reference so nothing goes below ~−40 dBm.
+Files: `DebugResults/v24-sections-500.csv`, `v24-sections-3000.csv`.
+
+Spec = Table 1-6 "(±dB): Referenced from 0 dB", DC–4 GHz — now in **docs/ATTENUATOR-SPECS.md**.
+It is **cumulative and widens with the setting**: ±0.2 at 10 dB, ±0.7 at 40 dB, ±1.8 at 110 dB.
+
+| Digit | Nominal | 500 MHz | 3 GHz | Limit | Worst |
+|---|---|---|---|---|---|
+| 1 | 1 dB | +0.01 | +0.00 | ±0.2 | 5% |
+| 2 | 2 dB | +0.03 | +0.03 | ±0.3 | 10% |
+| 3 | 4 dB | +0.03 | +0.03 | ±0.3 | 10% |
+| 4 | 4 dB | +0.04 | +0.01 | ±0.3 | 13% |
+| 5 | 10 dB | −0.07 | −0.06 | ±0.2 | 35% |
+| 6 | 20 dB | −0.04 | −0.06 | ±0.4 | 15% |
+| 7 | 40 dB | +0.41 | +0.40 | ±0.7 | 59% |
+| 8 | 40 dB | +0.45 | +0.45 | ±0.7 | **64%** |
+
+- **Every section passes at both frequencies; worst is digit 8 at 64% of limit.** The +0.4 dB step
+  chased for three sessions is real, repeatable, and **within spec for a 40 dB setting**. Do not
+  calibrate it away — report it.
+- **Frequency-flat**: no section moves more than 0.03 dB between 500 MHz and 3 GHz, despite direct
+  vs converter paths. Independent check on the chain.
+- **Digit 8 corrected +0.258 → +0.45**, exactly the direction predicted when it was solved from the
+  single 80 dB point at −93.4 dBm. So compression costs ~0.19 dB at −93 dBm: the **usable linear
+  range ends nearer −90 dBm than −100 dBm**. Digits 5/6/7 (solved above −53 dBm) agree with direct
+  measurement to 0.03 dB, which is what makes the digit-8 gap interpretable rather than noise.
+- **Synthesized totals all pass**, including unreachable ones: 80 dB +0.86 (±1.3), 110 dB +0.75
+  (±1.8), full scale **121.84 vs nominal 121** (+0.84 against a cascaded ±2.3). The direct 110 dB
+  read of −3.62 dB is receiver compression; the summed 110 dB is the trustworthy figure.
+
+**The measurement goal is essentially met**: the attenuator is characterized across its full range,
+every section is in spec, and the method that gets there (characterize where linear, then sum) is
+validated. Remaining work is reporting/housekeeping, not discovery.
+
+Possible next: teach the harness the Table 1-6 limits so it prints in-spec/out-of-spec itself instead
+of requiring this manual comparison; mark V13 ✅; decide V1; re-scope #15 as the general method.
+
 ### NEXT STEP
 1. **`--section-sum`** (ledger V5, built, never run) — now strongly motivated, not just housekeeping.
    Measure each section **alone at a high reference** so every point stays above ~−100 dBm, which

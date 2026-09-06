@@ -13,6 +13,49 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased - not yet merged
 
+### ALL EIGHT SECTIONS MEASURED — every one IN SPEC at 500 MHz and 3 GHz (2026-09-06, bench)
+- First real run of `--section-sum` (ledger V5, built long ago, never executed). Each section engaged
+  **alone** against the 0 dB reference, so the deepest point is only 40 dB (≈ -40 dBm) — far above the
+  compression zone that corrupted the deep end of the direct sweep. Run at both 500 MHz (Direct) and
+  3 GHz (Converted): `DebugResults/v24-sections-500.csv`, `v24-sections-3000.csv`. 8/8 sections read
+  at both frequencies.
+- Spec is **Table 1-6, "(±dB): (Referenced from 0 dB)"**, DC-4 GHz columns, now recorded in
+  **[docs/ATTENUATOR-SPECS.md](docs/ATTENUATOR-SPECS.md)**. The limit is **cumulative and widens with
+  the setting** — ±0.2 dB at a 10 dB setting but ±0.7 dB at 40 dB and ±1.8 dB at 110 dB. A section
+  engaged alone is simply a setting of that value, so it takes that setting's limit.
+
+  | Digit | Unit | Nominal | err 500 MHz | err 3 GHz | Limit | Worst % of limit |
+  |---|---|---|---|---|---|---|
+  | 1 | 8494G | 1 dB | +0.01 | +0.00 | ±0.2 | 5% |
+  | 2 | 8494G | 2 dB | +0.03 | +0.03 | ±0.3 | 10% |
+  | 3 | 8494G | 4 dB | +0.03 | +0.03 | ±0.3 | 10% |
+  | 4 | 8494G | 4 dB | +0.04 | +0.01 | ±0.3 | 13% |
+  | 5 | 8496G | 10 dB | -0.07 | -0.06 | ±0.2 | 35% |
+  | 6 | 8496G | 20 dB | -0.04 | -0.06 | ±0.4 | 15% |
+  | 7 | 8496G | 40 dB | **+0.41** | **+0.40** | ±0.7 | 59% |
+  | 8 | 8496G | 40 dB | **+0.45** | **+0.45** | ±0.7 | **64%** |
+
+- **Verdict: every section passes, at both frequencies. Worst case is digit 8 at 64% of its limit.**
+  The +0.4 dB step that dominated the last three sessions is a real, repeatable property of the
+  8496G's 40 dB sections — and it is **comfortably inside the manufacturer's tolerance for a 40 dB
+  setting**. It is not a fault and must not be calibrated away.
+- **The sections are essentially frequency-flat** from 500 MHz to 3 GHz: no section moves by more
+  than 0.03 dB between the two, despite one path being direct and the other through the 11793A
+  converter. That is also a strong independent check on the measurement chain itself.
+- **Digit 8 corrected, and it confirms the compression caveat.** The indirect solve from the deep
+  sweep gave digit 8 = +0.258 dB from the single 80 dB point at -93.4 dBm, with the explicit warning
+  that if compression had already started there the true value would be *larger*. Measured directly
+  at -40 dBm it is **+0.45 dB** — larger by 0.19 dB, exactly as predicted. So compression is already
+  worth ~0.19 dB at -93 dBm, and the **usable linear range ends nearer -90 dBm than -100 dBm**.
+  Digits 5, 6 and 7 (all solved from points above -53 dBm) agree with the direct measurement to
+  within 0.03 dB, which is what makes the digit-8 discrepancy interpretable rather than just noise.
+- **Synthesized totals all pass too** (500 MHz), including the ones no direct measurement can reach:
+  80 dB +0.86 (66% of ±1.3), 110 dB +0.75 (42% of ±1.8), full scale **121.84 dB vs nominal 121**,
+  +0.84 against a cascaded ±2.3. Compare the *direct* 110 dB read of -3.62 dB error — that number is
+  receiver compression, not the attenuator, and the summed 110 dB is the trustworthy one.
+- Ledger **V5 → ✅**. The method is validated: characterize each section where the receiver is linear,
+  then sum.
+
 ### BOTH EFFECTS RESOLVED: sections 7+8 are high; the deep-end collapse is the RECEIVER (2026-09-06, bench)
 - Completed the discriminator sweep the previous session had to abandon at 40 dB: 500 MHz direct,
   sync detector, reference parked at **-12.71 dBm**, full 0-110 dB in 10 dB steps
