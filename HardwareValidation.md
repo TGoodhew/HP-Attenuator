@@ -68,7 +68,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V12 | #22 — fine (1 dB) steps from 90 dB to the floor characterize the last few dB | `issue-22-fine-step-near-floor` | ✅ | — |
 | V13 | #23 — reference leveled to 0 dBm; step plan derived from the attenuator + path floor | `issue-23-zero-dbm-ref-adaptive-steps` | ✅ | — |
 | V14 | Leveller straddle fix — a coarse jump that overshoots must not settle on the far-below sample (18 GHz: ref was 13 dB low) | `issue-24-sf-matrix` | ✅ | — |
-| V15 | **NEW DEFECT** — leveller silently no-ops when the first level read is UNCAL, taking the adaptive step plan and #21 limits down with it | `issue-24-sf-matrix` | 🔨 | — found 2026-09-15 |
+| V15 | **#30** — leveller silently no-ops when the first level read is UNCAL, taking the adaptive step plan and #21 limits down with it | _needs a branch_ | 🔨 | — found 2026-09-15 |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-24-sf-matrix` | ✅ | **REINSTATED 2026-09-04**: reaches 99 dB / −100.5 dBm vs average's 96 dB, tracks linearly, fails honestly. The earlier rejection was made without measuring residual FM (18 Hz, well in spec). |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -654,9 +654,10 @@ Every section reproduced to within **0.09 dB** across a 13 dB change of referenc
 
 ---
 
-## V15 — leveller silently no-ops on an UNCAL first read  🔨 NEEDS CODE (found 2026-09-15)
+## V15 — #30 leveller silently no-ops on an UNCAL first read  🔨 NEEDS CODE (found 2026-09-15)
 
-- **Branch:** defect found on `issue-24-sf-matrix`; no fix written yet.
+- **Issue:** [#30](https://github.com/TGoodhew/HP-Attenuator/issues/30). Found on `issue-24-sf-matrix`
+  (now merged to `main`); no fix written yet, and no branch cut for it.
 - **Severity: high, because it fails quietly and the symptom looks like a DUT failure.** A run that
   never levelled is almost indistinguishable from one that did, except by the *absence* of trace lines
   you would have to know to look for.

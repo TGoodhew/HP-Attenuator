@@ -11,7 +11,7 @@ kept alive** (not deleted/cleaned up) until their change is bench-validated and 
 What's on `main` but not yet confirmed against the real hardware is tracked in
 **[HardwareValidation.md](HardwareValidation.md)** — the step-by-step bench checklist for Renton.
 
-## Unreleased - not yet merged
+## Merged to `main` — 2026-09-15
 
 ### Bench close-out session — V14, V13, V1 pass; a new defect found (2026-09-15, bench)
 
@@ -68,6 +68,20 @@ needs the sensor physically moved, so this matches the 2026-09-06 conditions exa
 - **V10 ⬜ partial** — the polled `8902A CALIBRATE complete, status = 0x00` line now appears after a
   real CALIBRATE, which is what #8 added; still owed a panel observation of a CALIBRATE that errors.
 - **V9 not run** — displaced by the V13 re-run.
+
+### Merged to `main` (2026-09-15)
+
+The `issue-24-sf-matrix` stack — 19 commits, everything from 2026-09-04 onward — fast-forwarded onto
+`main` with no conflicts (`origin/main` was a direct ancestor). Six ledger rows are now bench-validated
+(V1, V5, V11, V12, V13, V14); six remain awaiting the bench (V2, V6, V7, V8, V9, V10) plus V3/V4
+blocked behind V2, and one new defect is open as **[#30](https://github.com/TGoodhew/HP-Attenuator/issues/30)**
+(ledger V15).
+
+**Branches retired** now that their rows are ✅, per the keep-alive rule: `issue-4-debug-poll-falseflag`
+(V1), `issue-15-per-section-sum` (V5), `issue-21-device-level-limits` (V11),
+`issue-22-fine-step-near-floor` (V12), `issue-23-zero-dbm-ref-adaptive-steps` (V13) and
+`issue-24-sf-matrix` (V14, identical to `main` after the fast-forward). Branches for unvalidated rows
+are kept alive as the model requires.
 
 ### Ledger reconciled ahead of the merge to `main` (2026-09-15, desk)
 
