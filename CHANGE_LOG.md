@@ -13,6 +13,40 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased - not yet merged
 
+### Ledger reconciled ahead of the merge to `main` (2026-09-15, desk)
+
+Documentation only — no code change, no bench run.
+
+- **V5 marked ✅ with its result written back.** The queue table said ✅ but the detail block still read
+  "⬜ built, awaiting bench" and had no Result block, so the 2026-09-06 section-sum run existed only in
+  this file. Added the full per-section table (both 500 MHz and 3 GHz), the synthesized totals, and the
+  cross-check that licenses the summation method: digits 5/6/7 solved indirectly agree with direct
+  measurement to within 0.03 dB, while digit 8 came out 0.19 dB low — the predicted direction if
+  compression had already begun at −93.4 dBm.
+- **V14 given a real detail block.** It had a queue row and nothing else — no isolation command, no
+  pass criterion — despite being the least-tested change on the branch. Now records the 18 GHz repro
+  (source +13.20 dBm found and then discarded for a −13.232 dBm reference), both halves of the fix
+  (the 1.5-grid-step width test on the straddle shortcut, and the post-loop guard against settling
+  above target), the exact trace lines to read, and the cross-check that V13 exercises the same guard
+  from the other side.
+- **Recorded the scope of doubt V14 casts backwards.** Every frequency in the 10 MHz–26 GHz sweep was
+  levelled by the buggy code. 18 GHz is the only row where the failure is visible in the trace; a
+  smaller straddle error elsewhere would look like DUT behaviour. V11/V12 are unaffected (both settled
+  in-window at 3 GHz, no coarse jump), and the in-band section results were levelled at frequencies
+  needing little or no source boost — but the 2 GHz negative offset is worth re-reading in this light.
+- **New ledger note: validate the merge candidate, not the isolation branches.** Every row's
+  `git checkout issue-NN-...` recipe predates the V14 leveller fix, so running it would validate code
+  that is not what lands on `main`. For a close-out session, run every row from `issue-24-sf-matrix`
+  and use the per-row commands only for their flags, frequencies and pass criteria.
+- **Added a close-out run order** — five runs covering V14, V13, V8, V10, V1, V9 and the 2 GHz §5
+  repeat, ordered so the scientifically weighty ones land first. Recorded what is deliberately
+  deferred (V2/V3/V4 need an operator at the panel; V7 is low priority; 10 MHz §7/§8 needs the sensor
+  physically moved) and that V6 may be closable from V12's existing result without a new run.
+
+**Merge status:** `origin/main` is at `3cab501`; `issue-24-sf-matrix` is 17 commits ahead of it and
+`origin/main` is a direct ancestor, so the sync is a pure fast-forward with no conflicts. The local
+`main` ref is 21 commits stale and needs fetching first. Not merged yet — awaiting the bench session.
+
 ### Frequency sweep 10 MHz - 26 GHz, and a leveller bug found and fixed (2026-09-06, bench)
 - Ran `--section-sum` at 10, 100, 500, 1000, 2000 MHz and 5, 10, 18, 20, 26 GHz. Files
   `DebugResults/v25-sec-<f>.csv`. **The units are 8494G/8496G (DC-4 GHz confirmed by the author)**,

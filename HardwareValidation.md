@@ -4,7 +4,7 @@ The bench-validation queue for changes that are **on `main` (or a live branch) b
 confirmed against the real GPIB rig** in Renton. Author develops away from the hardware; this file
 is the step-by-step checklist to walk when back at the bench, plus where to fix anything that fails.
 
-Updated 2026-07-09.
+Updated 2026-09-15.
 
 ## The model (why this file exists)
 
@@ -19,6 +19,20 @@ Updated 2026-07-09.
   backed up off the travel laptop.
 - Never mark a row ✅ from a sim run. ✅ means the real 8902A / 11713A / 8340B chain, confirmed by the
   author on the bench.
+
+### ⚠ Validating the merge candidate, not the isolation branches (added 2026-09-15)
+
+Each row below carries a `git checkout issue-NN-...` recipe. That was correct while the job was
+validating **one change at a time**, in isolation, as it was written.
+
+It is **wrong for a close-out session.** Those branches all predate the leveller straddle fix (V14),
+which sits in the setup path of every measurement — so running them validates code that is *not* what
+lands on `main`. When the goal is to clear the queue and merge, **run every row from the merge
+candidate** (currently `issue-24-sf-matrix`), and keep the per-row commands only for their flags,
+frequencies and pass criteria.
+
+Use the isolation checkout only when a row has **failed** from the merge candidate and you need to
+find out whether that change or its neighbours caused it.
 
 ### Adding an entry (do this whenever a change alters HW-observable behavior)
 
@@ -53,9 +67,32 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V11 | #21 — spec-derived per-path level limits; points below the path floor are skipped, not failed | `issue-21-device-level-limits` | ✅ | — |
 | V12 | #22 — fine (1 dB) steps from 90 dB to the floor characterize the last few dB | `issue-22-fine-step-near-floor` | ✅ | — |
 | V13 | #23 — reference leveled to 0 dBm; step plan derived from the attenuator + path floor | `issue-23-zero-dbm-ref-adaptive-steps` | ⬜ | — |
-| V14 | Leveller straddle fix — a coarse jump that overshoots must not settle on the far-below sample (18 GHz: ref was 13 dB low) | `issue-24-sf-matrix` | ⬜ | — |
+| V14 | Leveller straddle fix — a coarse jump that overshoots must not settle on the far-below sample (18 GHz: ref was 13 dB low) | `issue-24-sf-matrix` | ⬜ | — **run first: every other row's reference comes from this code** |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-24-sf-matrix` | ✅ | **REINSTATED 2026-09-04**: reaches 99 dB / −100.5 dBm vs average's 96 dB, tracks linearly, fails honestly. The earlier rejection was made without measuring residual FM (18 Hz, well in spec). |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
+
+### Close-out run order (2026-09-15 session)
+
+All from `issue-24-sf-matrix` — see the merge-candidate note above. Sensor-cal once at the start,
+then `--skip-sensor-cal` for the rest. Ordered so that if the session is cut short, the runs that
+carry real weight are already done.
+
+| Order | Run | Clears | Output |
+|---|---|---|---|
+| 1 | 18 GHz `--section-sum` | **V14** (+ replaces the untrustworthy 18 GHz §3/§4 row) | `v27-sec-18000.csv` |
+| 2 | 2 GHz `--section-sum` | §5 in-band FAIL — confirm or clear the only spec failure on record | `v26-sec-2000.csv` |
+| 3 | 3 GHz `--atten-sweep --adaptive-steps` | **V13** + the other half of **V14**'s guard | `v28-adaptive.csv` |
+| 4 | 5 GHz `--atten-sweep --astep 1 --debug` | **V8**, **V10**, **V1** (one run covers all three) | `v29-empty.csv` |
+| 5 | 5 GHz same sweep, `--profile`, **no** `--debug` | **V9** | `v30-profile.csv` |
+
+**Deferred, not gating a merge:** V2/V3/V4 (needs an operator at the 8902A panel for every
+`--panel-review` prompt — a session of its own), V7 (ledger marks it low priority; manual tuning is
+the production default), and the 10 MHz §7/§8 UNCAL (needs the sensor physically moved to the 8902A
+CALIBRATION RF POWER OUTPUT and back — author only).
+
+**V6 may be closable without a run:** V12's recorded result already shows #13 flagging the three
+saturated points and reporting an honest depth. Author's call whether that counts as bench-validated
+or whether it needs its own 3 GHz deep sweep.
 
 ---
 
@@ -134,7 +171,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 - **If it fails:** the drift is a converter-path limit, not calibration → escalate to **#15**
   (per-section characterize + sum). Note the result here and in CHANGE_LOG.
 
-## V5 — #15 per-section characterize + sum  ⬜ built, awaiting bench
+## V5 — #15 per-section characterize + sum  ✅ BENCH PASS (2026-09-06)
 
 - **Branch:** `issue-15-per-section-sum` (built; sim PASS — full scale 120.83 dB @ nominal 121, worst
   section |err| 0.04 dB, all 8 sections read). Also on `main`.
@@ -158,6 +195,42 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 - **If a section reads the floor / errors:** it means that section alone is below the floor (shouldn't
   happen at ≤40 dB) or a path issue — investigate before trusting the deep sums. Fix on
   `issue-15-per-section-sum`, commit + push, re-run.
+
+### Result — PASS, 2026-09-06 (run from `issue-24-sf-matrix`, at **both** 500 MHz and 3 GHz)
+
+Run at two frequencies rather than the single 3 GHz above, to separate DUT behaviour from path
+behaviour: `DebugResults/v24-sections-500.csv` and `v24-sections-3000.csv`. **8/8 sections read
+cleanly at both** — none hit the floor, which is the premise of the method.
+
+| Digit | Unit | Nominal | err 500 MHz | err 3 GHz | Limit (Table 1-6) | Worst % of limit |
+|---|---|---|---|---|---|---|
+| 1 | 8494G | 1 dB | +0.01 | +0.00 | ±0.2 | 5% |
+| 2 | 8494G | 2 dB | +0.03 | +0.03 | ±0.3 | 10% |
+| 3 | 8494G | 4 dB | +0.03 | +0.03 | ±0.3 | 10% |
+| 4 | 8494G | 4 dB | +0.04 | +0.01 | ±0.3 | 13% |
+| 5 | 8496G | 10 dB | −0.07 | −0.06 | ±0.2 | 35% |
+| 6 | 8496G | 20 dB | −0.04 | −0.06 | ±0.4 | 15% |
+| 7 | 8496G | 40 dB | +0.41 | +0.40 | ±0.7 | 59% |
+| 8 | 8496G | 40 dB | +0.45 | +0.45 | ±0.7 | **64%** |
+
+**Every section passes at both frequencies; worst case is digit 8 at 64% of its limit.** Synthesized
+totals pass too, including ones no direct measurement can reach: 80 dB +0.86 (66% of ±1.3), 110 dB
++0.75 (42% of ±1.8), full scale **121.84 dB vs nominal 121** (+0.84 against a cascaded ±2.3).
+
+**The cross-check that licenses the method** (the "key validation" above) came from the 0–110 dB
+discriminator sweep rather than a direct `--atten-sweep`: digits 5, 6 and 7, solved indirectly from
+points above −53 dBm, agree with the direct per-section measurement to within **0.03 dB**. Digit 8,
+solved from the single 80 dB point at −93.4 dBm, came out 0.19 dB *low* — exactly the direction
+predicted if compression had already started there. So the sum is trustworthy, and it also dates the
+onset of compression: **usable linear range ends nearer −90 dBm than −100 dBm.**
+
+The sections are **frequency-flat** 500 MHz → 3 GHz — no section moves by more than 0.03 dB — despite
+one path being Direct and the other Converted. That is an independent check on the measurement chain
+itself, not just on the DUT.
+
+Consequence: the *direct* 110 dB read of −3.62 dB error is **receiver compression, not attenuator
+error**, and must not be reported as DUT accuracy. Ledger method validated — characterize each section
+where the receiver is linear, then sum.
 
 ## V6 — #13 floor/plateau detection  ⬜ built, awaiting bench
 
@@ -397,6 +470,53 @@ and no RECAL all run. That is **#17 showing up directly in the accuracy numbers*
   first time each has been measured on its own; (2) with the reference at 0 dBm instead of −1.1, the
   usable depth grows ~1 dB — does the roll-off still start around −95 dBm absolute (which would confirm
   the −96 dBm practical floor found in V12 is a property of the path, not of the reference level)?
+
+---
+
+## V14 — leveller straddle fix  ⬜ built, awaiting bench
+
+- **Branch:** `issue-24-sf-matrix` (sim-tested only; **not** hardware-validated).
+- **Why this row is the highest-risk one on the queue:** the leveller runs in the setup of *every*
+  measurement at *every* frequency. A bad reference doesn't fail loudly — it silently shifts an entire
+  frequency's results by the reference error, and every number downstream looks plausible.
+- **The defect (observed at 18 GHz, 2026-09-06):** the leveller found source **+13.20 dBm** giving
+  **+0.187 dBm** — on target — then discarded it and "settled" back on source **0.00 dBm** with a
+  reference of **−13.232 dBm**, measuring that whole frequency 13 dB low. The straddle shortcut assumed
+  its two bracketing samples were one 0.05 dB grid step apart, which holds only if level tracks source
+  power exactly 1:1; the 8340B's flatness across a 13 dB jump broke that assumption. Same defect as the
+  earlier `--ref-target -10` run that settled 2.7 dB below a −10 dBm target.
+- **What changed** (`MeasurementEngine.cs`, the leveller loop):
+  1. **Straddle shortcut now width-tested** — the bracket is only taken if the two samples are within
+     **1.5 grid steps** of each other. A coarse jump that overshoots no longer reverts to a far-away
+     baseline and calls it settled.
+  2. **New post-loop guard** — if the iteration budget runs out (or the source clamps) on a reading
+     *above* the target, fall back to the best reading at or below it. At the 0 dBm Tuned RF Level
+     ceiling, settling above the target is an over-range.
+- **Isolate & run** — 18 GHz is the known repro, so this is the run that proves it:
+  ```powershell
+  git checkout issue-24-sf-matrix
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --section-sum `
+    --freq 18000 --detector sync --ref-target 0 --debug --skip-sensor-cal `
+    --out DebugResults/v27-sec-18000.csv
+  ```
+- **Expect (PASS) — read the `level:` trace, not just the table:**
+  - The leveller **keeps** the high-source solution: source lands near **+13 dBm** with the reference
+    near the 0 dBm target, instead of reverting to source 0.00 dBm / ref −13.232 dBm.
+  - The reference **never settles above** the target. If the fallback fires, the trace says
+    `level: iteration budget ended above the target - falling back to the best reading at or below it.`
+  - §3 and §4 come into line. The old 18 GHz row read **−1.03 / +1.36** against a reference 13 dB low;
+    those values are not trustworthy and should not be carried forward. This run replaces them.
+- **Cross-check at 3 GHz:** the V13 run exercises the same guard from the other side — its pass
+  criterion ("converges within 0.1 dB **below** 0 dBm and never settles above it") *is* this fix.
+  V13 and V14 validate together; neither alone covers both branches of the change.
+- **⚠ Scope of the doubt:** every frequency in the 2026-09-06 10 MHz–26 GHz sweep was levelled by the
+  buggy code. 18 GHz is the only row where the failure is *visible* in the trace, but a smaller
+  straddle error elsewhere would be invisible and would look like DUT behaviour. **V11 and V12 are
+  unaffected** — both settled in-window at 3 GHz, where no coarse jump occurs. The in-band section
+  results (V5) were levelled at frequencies needing little or no source boost, so they are very likely
+  sound — but the 2 GHz row's systematic negative offset is worth re-reading with this in mind.
+- **If it fails:** fix on `issue-24-sf-matrix`, commit + push, re-run. Nothing else on the queue should
+  be trusted until this one passes, because every other run's reference comes from this code.
 
 ---
 
