@@ -21,6 +21,7 @@ namespace HpAttenuator.TestHarness
         public bool SectionTest;    // --section-test : isolate the 8496's two 40 dB sections (digit 7 vs 8)
         public int HoldAtDb = -1;       // --hold-at-db N : hold before the step at N dB instead of before all stepping
         public string HoldBeforeSteps;  // --hold-before-steps <file> : pause after setup until the file appears
+        public string HoldBeforeCal;    // --hold-before-cal <file> : pause immediately BEFORE each CALIBRATE until the file appears
         public bool SourceCheck;   // --source-check : characterize the 8340B through the chain
         public int StabilityReads = 10;  // --stability-reads : level samples for the source check
         public bool NoiseFloor;    // --noise-floor : measure the RF-off noise floor vs LO drive
@@ -95,6 +96,7 @@ namespace HpAttenuator.TestHarness
                     case "--section-test": o.SectionTest = true; break;
                     case "--section-sum": o.SectionSum = true; break;
                     case "--hold-before-steps": o.HoldBeforeSteps = Need(args, ++i); break;
+                    case "--hold-before-cal": o.HoldBeforeCal = Need(args, ++i); break;
                     case "--hold-at-db": o.HoldAtDb = I(Need(args, ++i)); break;
                     case "--source-check": o.SourceCheck = true; break;
                     case "--stability-reads": o.StabilityReads = I(Need(args, ++i)); break;

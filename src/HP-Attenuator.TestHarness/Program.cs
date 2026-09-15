@@ -119,6 +119,42 @@ namespace HpAttenuator.TestHarness
                     MeasurementEngine.PanelReview = FrontPanelReview.Ask;
                 }
 
+                // Same hooks, released by a FILE instead of a keypress (--hold-before-cal). The engine
+                // already invokes PanelWatch immediately before each CALIBRATE, which is exactly where a
+                // front-panel observation has to happen — but --panel-review is a no-op whenever stdin is
+                // redirected (FrontPanelReview.CanPrompt), i.e. every run driven by a tool rather than a
+                // person at this terminal. Gating on a file lets the driver sound an alarm, release the
+                // hold, and have the CALIBRATE fire within a fraction of a second, so the operator is
+                // looking at the panel at the moment it happens instead of watching for minutes.
+                // Takes precedence over --panel-review when both are given.
+                if (!string.IsNullOrWhiteSpace(opt.HoldBeforeCal) && !bench.IsSimulated)
+                {
+                    string calGate = opt.HoldBeforeCal;
+                    MeasurementEngine.PanelWatch = what =>
+                    {
+                        try { if (File.Exists(calGate)) File.Delete(calGate); } catch { }
+                        AnsiConsole.MarkupLine($"[bold yellow]CAL-HOLD: {what.EscapeMarkup()}[/]");
+                        AnsiConsole.MarkupLine($"[grey]Waiting for [/]{calGate.EscapeMarkup()}[grey] to appear.[/]");
+                        var swCal = System.Diagnostics.Stopwatch.StartNew();
+                        while (!File.Exists(calGate))
+                        {
+                            if (swCal.Elapsed > TimeSpan.FromMinutes(30))
+                            {
+                                AnsiConsole.MarkupLine("[yellow]CAL-HOLD timed out after 30 minutes - continuing.[/]");
+                                break;
+                            }
+                            System.Threading.Thread.Sleep(250);
+                        }
+                        try { if (File.Exists(calGate)) File.Delete(calGate); } catch { }
+                        AnsiConsole.MarkupLine("[bold green]CAL-RELEASED - CALIBRATE firing now.[/]");
+                    };
+                    MeasurementEngine.PanelReview = q =>
+                    {
+                        AnsiConsole.MarkupLine($"[bold yellow]CAL-DONE: {q.EscapeMarkup()}[/]");
+                        return "";
+                    };
+                }
+
                 if (opt.Detect)
                     return RunDetect(opt, bench);
 
