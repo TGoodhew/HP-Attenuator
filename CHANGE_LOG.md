@@ -11,6 +11,44 @@ kept alive** (not deleted/cleaned up) until their change is bench-validated and 
 What's on `main` but not yet confirmed against the real hardware is tracked in
 **[HardwareValidation.md](HardwareValidation.md)** — the step-by-step bench checklist for Renton.
 
+## Unreleased - branch `issue-17-cal-hold-gate`
+
+### Bench: V2 and V10 FAIL, V16 passes — the harness lies about CALIBRATE success (2026-09-15, bench)
+
+The session's most important finding, and it was only findable with the operator watching the panel.
+
+- **NEW: `--hold-before-cal <file>` (ledger V16, PASS).** Wires the engine's existing `PanelWatch` /
+  `PanelReview` hooks — which already fire immediately before and after each `Calibrate()` — to a
+  **file gate** instead of a keypress, so a run can be held at the exact instant of a CALIBRATE and
+  released on demand. `--panel-review` cannot do this when Claude drives the harness:
+  `FrontPanelReview.CanPrompt` requires `!Console.IsInputRedirected`, so every prompt silently
+  no-ops. No measurement-engine change — only which delegates the harness binds. Used 5x across two
+  hardware runs; it is what made both findings below visible.
+- **V10 FAIL → [#34](https://github.com/TGoodhew/HP-Attenuator/issues/34). The harness reported
+  `status = 0x00` for a CALIBRATE that raised Error 33 on the front panel — twice.** `Calibrate()`
+  sends `C1`, sleeps a **fixed 2500 ms**, then polls **once**; settled cycles on this bench take
+  **6.5-7.4 s**. The poll samples before the CALIBRATE finishes and the error raises afterwards with
+  nobody looking — exactly the failure the method's own comment says it exists to prevent, just at
+  2500 ms rather than 0 ms. **This invalidates every "CALIBRATE succeeded" the harness has reported**,
+  including an earlier `range-cal: 3 CALIBRATE(s) fired` with all three at `0x00`.
+- **V2 FAIL → [#35](https://github.com/TGoodhew/HP-Attenuator/issues/35). `--force-range-cal` works
+  only on the top range.** Of the three forced CALIBRATEs at `{ 0, 20, 55 }` dB, 0 dB succeeds and
+  20 dB raises **Error 33, "Power sensor reference error"**, reproducibly. Reading: the CALIBRATE
+  needs a level the power sensor can reference against and does not have one once the attenuator is
+  in the path. The cutoff between 0 and 20 dB is unmeasured.
+- **Not a sensor-cal problem — proven.** The second run followed a full sensor calibration performed
+  at the bench: zeroed to 0.0 nW residual, then calibrated against the 50 MHz reference reading
+  exactly **1.000 mW (0.00 dBm)**. Error 33 returned unchanged at the same depth.
+- **V4 is untestable** until a 3-range calibration is achievable at all (#35).
+- **#17 independently confirmed, by eye.** The operator observed **no RECAL and no UNCAL** at either
+  forced depth. Until now that rested entirely on the harness's own status reads — which #34 shows
+  can be wrong about calibration state.
+- **V3 reclassified.** It is not blocked by V2; it is blocked on *Tony running the harness himself*,
+  since the prompts no-op whenever stdin is redirected.
+- Sensor-cal note: `--sensor-calibrate` does not call `SensorCalSession.Mark()`, so a cal done via the
+  primitives leaves the harness believing none has happened. Only the interactive `--sensor-cal` path
+  marks it. Small gap, worth closing.
+
 ## Merged to `main` — 2026-09-15
 
 ### V9 bench PASS — the sweep is read-bound, and two-thirds of that is unattributed (2026-09-15, bench)

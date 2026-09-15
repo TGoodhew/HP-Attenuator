@@ -55,20 +55,21 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | # | Change | Branch | Status | Blocked by |
 |---|--------|--------|--------|-----------|
 | V1 | #4 — `--debug` no longer false-flags a failed serial poll | `issue-4-debug-poll-falseflag` | ✅ | — |
-| V2 | #17 — real pre-`SET REF` 3-range CALIBRATE (`--force-range-cal`) + descent observability | `issue-17-range-cal-observability` | ⬜ | — |
-| V3 | `--panel-review` actually pauses on each CALIBRATE | `issue-14-synchronous-deep-sweep` | 🔒 | V2 |
-| V4 | #14 — 3-range cal genuinely improves 80–95 dB accuracy | `issue-14-synchronous-deep-sweep` | 🔒 | V2 |
+| V2 | #17 — real pre-`SET REF` 3-range CALIBRATE (`--force-range-cal`) + descent observability | `issue-17-range-cal-observability` | ❌ | **#35** — Error 33 below the top range |
+| V3 | `--panel-review` actually pauses on each CALIBRATE | `issue-14-synchronous-deep-sweep` | 🔒 | Tony must run it himself — Claude stdin is redirected, so the prompts no-op |
+| V4 | #14 — 3-range cal genuinely improves 80–95 dB accuracy | `issue-14-synchronous-deep-sweep` | 🔒 | V2 — untestable until a 3-range cal is achievable (#35) |
 | V5 | #15 — per-section characterize + sum reaches a validated full 110/121 dB | `issue-15-per-section-sum` | ✅ | — |
 | V6 | #13 — deep saturated points flagged FLOOR (not failed); verdict/depth honest | `issue-13-floor-detection` | ⬜ | — needs a step-increment test; 100 dB was missed (2026-09-15) |
 | V7 | #3 — verify the automatic-tuning HP-IB code + acquire-then-hold sequence | `issue-3-tune-mode` | ⬜ | — |
 | V8 | #6 — empty/transient read recovers in place (auto-range boundary) instead of failing | `issue-6-empty-read-recovery` | ⬜ | — glitch did not occur 2026-09-15; unproven |
 | V9 | #2 — `--profile` gives the real wall-clock breakdown to drive sweep optimization | `issue-2-sweep-profiling` | ✅ | — |
-| V10 | #8 — a CALIBRATE error (Error 35) is now polled + logged + surfaced, not silently latched | `issue-8-calibrate-error-surface` | ⬜ | — |
+| V10 | #8 — a CALIBRATE error (Error 35) is now polled + logged + surfaced, not silently latched | `issue-8-calibrate-error-surface` | ❌ | **#34** — reported 0x00 through a real Error 33, twice |
 | V11 | #21 — spec-derived per-path level limits; points below the path floor are skipped, not failed | `issue-21-device-level-limits` | ✅ | — |
 | V12 | #22 — fine (1 dB) steps from 90 dB to the floor characterize the last few dB | `issue-22-fine-step-near-floor` | ✅ | — |
 | V13 | #23 — reference leveled to 0 dBm; step plan derived from the attenuator + path floor | `issue-23-zero-dbm-ref-adaptive-steps` | ✅ | — |
 | V14 | Leveller straddle fix — a coarse jump that overshoots must not settle on the far-below sample (18 GHz: ref was 13 dB low) | `issue-24-sf-matrix` | ✅ | — |
 | V15 | **#30** — leveller silently no-ops when the first level read is UNCAL, taking the adaptive step plan and #21 limits down with it | _needs a branch_ | 🔨 | — found 2026-09-15 |
+| V16 | `--hold-before-cal` — gate each CALIBRATE on a file so an observation can be timed to it | `issue-17-cal-hold-gate` | ✅ | — used 5x on 2026-09-15; found #34 and #35 |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-24-sf-matrix` | ✅ | **REINSTATED 2026-09-04**: reaches 99 dB / −100.5 dBm vs average's 96 dB, tracks linearly, fails honestly. The earlier rejection was made without measuring residual FM (18 Hz, well in spec). |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -95,6 +96,27 @@ CALIBRATION RF POWER OUTPUT and back — author only).
 **V6 may be closable without a run:** V12's recorded result already shows #13 flagging the three
 saturated points and reporting an honest depth. Author's call whether that counts as bench-validated
 or whether it needs its own 3 GHz deep sweep.
+
+---
+
+## V16 — `--hold-before-cal`, the observation gate  ✅ BENCH PASS (2026-09-15)
+
+- **Branch:** `issue-17-cal-hold-gate` (serves #17's observability goal).
+- **Why it exists:** a front-panel observation has to be timed to the instant of the event. Asking the
+  operator to "watch the panel for the next few minutes" loses the observation — proven on 2026-09-15,
+  where a whole forced-cal run was wasted that way. `--panel-review` is the designed mechanism but is a
+  **no-op whenever Claude drives the harness**: `FrontPanelReview.CanPrompt` requires
+  `!Console.IsInputRedirected`, and a tool-driven run's stdin is always redirected.
+- **What it does:** wires the engine's existing `PanelWatch` / `PanelReview` hooks — which already fire
+  immediately before and after each `Calibrate()` — to a **file gate** instead of a keypress. The run
+  blocks printing `CAL-HOLD:`, and proceeds the moment the named file appears. No measurement-engine
+  change; only which delegates the harness binds. Skipped in sim, 30-minute timeout so an unattended
+  run cannot wedge, takes precedence over `--panel-review`.
+- **Usage:** `--hold-before-cal <file>`; the driver sounds an alarm, creates the file, and the CALIBRATE
+  fires within ~250 ms, so the operator is looking at the panel at the moment it happens.
+- **Result — PASS.** Used **5 times across two hardware runs**. Every hold engaged, printed, waited, and
+  released cleanly; the CALIBRATE followed immediately each time. It is what made **#34** and **#35**
+  findable at all — both were invisible in the logs and only observable on the panel.
 
 ---
 
@@ -152,6 +174,37 @@ the fix suppresses the false positive without blinding the poll.
   `ForceCalDepthsDb` if not).
 - **If it fails:** fix on `issue-17-range-cal-observability`, commit + push, re-run. Feeds **V4** (does the
   forced cal actually improve 80–95 dB accuracy?).
+
+### Result — FAIL, 2026-09-15 → issue #35
+
+**Step A confirmed, and now by eye as well as by log.** The descent fires nothing on its own, and the
+operator confirmed directly that **no RECAL and no UNCAL was lit** at either forced depth. That is the
+first independent, non-software confirmation of #17 — it had previously rested entirely on the
+harness's own status reads, which #34 shows can be wrong about calibration state.
+
+**Step B failed.** Of the three forced CALIBRATEs at `ForceCalDepthsDb = { 0, 20, 55 }`, only 0 dB
+succeeds. 20 dB raises **Error 33 — "Power sensor reference error"** (service manual, *Tuned RF Level
+Calibration Errors 30-39*), reproducibly across two runs, and 55/60 dB is deeper still.
+
+| CALIBRATE | Level | run `v34` | run `v37` (after a fresh sensor cal) |
+|---|---|---|---|
+| 0 dB | ~0 dBm | clean | clean |
+| 20 dB | ~-20 dBm | **Error 33** | **Error 33** |
+
+**It is not a sensor-cal problem.** `v37` ran after a verified sensor calibration — zeroed to 0.0 nW
+residual, then calibrated against the 50 MHz reference reading exactly **1.000 mW (0.00 dBm)**. Error 33
+returned unchanged.
+
+Reading: the CALIBRATE needs a level the power sensor can reference against, and does not have one once
+the attenuator is in the path. Inference from behaviour — the manual gives only the one-line
+description. The cutoff between 0 and 20 dB is unmeasured.
+
+**Consequence: V4 is untestable** until a 3-range calibration is achievable at all. Options are in #35:
+find the real cutoff, derive depths from level rather than dB, or accept that only the top range is
+calibratable and the deep ranges must run on resident factors.
+
+**Both failures were logged as `status = 0x00`.** See #34 / V10 — without the operator at the panel this
+would have been recorded as a clean 3-CALIBRATE success.
 
 ## V3 — `--panel-review` pauses on each CALIBRATE  🔒 blocked by V2
 
@@ -400,7 +453,7 @@ category told us where to look; it is not yet granular enough to say what to cha
 
 ---
 
-## V10 — #8 CALIBRATE-error surfacing  ⬜ built, awaiting bench
+## V10 — #8 CALIBRATE-error surfacing  ❌ BENCH FAIL (2026-09-15) → issue #34
 
 - **Branch:** `issue-8-calibrate-error-surface` (built; sim PASS — the cal error is hardware-only, sim's
   Calibrate is a no-op). Also on `main`.
@@ -421,7 +474,31 @@ category told us where to look; it is not yet granular enough to say what to cha
 - **If a real Error 35 shows:** that's a genuine marginal-level cal failure (too little signal to
   calibrate that range) — the honest ceiling is shallower there; relates to #1/#7 and the #13 floor.
 
-### 2026-09-15: partial evidence — the polled line now exists; panel cross-check still owed
+### 2026-09-15 (later): FAIL — a real Error 33 was reported as `status = 0x00`, twice
+
+Supersedes the partial finding below. With the operator watching the panel at the instant of each
+CALIBRATE (via `--hold-before-cal`, V16), two separate runs produced **Error 33 on the display** while
+the harness logged:
+
+```
+  8902A < C1             SB=0x00
+  8902A CALIBRATE complete, status = 0x00
+```
+
+`Calibrate()` sends `C1`, sleeps a **fixed 2500 ms**, then polls the status **once**. But settled
+measurement cycles on this bench take **6.5-7.4 s** (one outlier at 34.8 s). So the poll samples before
+the CALIBRATE has finished, reads `0x00`, and the error raises with nobody looking — precisely the
+failure the method's own comment says it exists to avoid, just at 2500 ms instead of 0 ms.
+
+Fix direction in #34: replace the blind sleep with the poll-on-status completion wait `ReadMeasurement`
+already uses, poll repeatedly rather than once, confirm `22.37SP` is in force before a bare
+`Calibrate()`, and investigate reading the actual error number over HP-IB so a failure is diagnosable
+from the log alone.
+
+**This invalidates every "CALIBRATE succeeded" the harness has ever reported**, including the earlier
+`range-cal: 3 CALIBRATE(s) fired` with all three at `0x00`.
+
+### 2026-09-15 (earlier, superseded): partial evidence — the polled line now exists
 
 Not run as its own 5 GHz recipe, but the 3 GHz run (`v28-adaptive.log`) fired a real CALIBRATE and the
 trace carries exactly what #8 added:
