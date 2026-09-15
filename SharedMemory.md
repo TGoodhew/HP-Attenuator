@@ -1,6 +1,6 @@
 # Shared Memory — HP-Attenuator working state
 
-A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-07-09.
+A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-09-15.
 (Personal per-machine notes live outside the repo; this file is the shared, committed record.)
 
 ## Working model (author is traveling — away from the GPIB rig until back in Renton)
@@ -13,6 +13,87 @@ A cross-machine handoff snapshot so work can continue from anywhere. Updated 202
   bench-validated and the author says so.
 - **Standing git default: commit + push** every change, branches included. No manual merge-to-`main`
   gate anymore — combine freely; validation is deferred to the ledger, not blocked before merge.
+
+## STOPPING POINT — 2026-09-15 afternoon, author shutting down for OS updates
+
+**Branch: `main` @ `b531797`. Clean tree, everything committed and pushed. No run in flight, no
+harness process, GPIB bus released.** The 11713A was last left by a completed 3 GHz sweep.
+
+### What this session did
+
+Closed out the `issue-24-sf-matrix` stack and merged it: **`main` went from `3cab501` (July) to
+`b531797`**, two fast-forwards, no conflicts. Then ran nine hardware runs.
+
+**Ledger: ✅ V1, V5, V9, V11, V12, V13, V14, V16 · ❌ V2, V10 · 🔒 V3, V4 · ⬜ V6, V7, V8 · 🔨 V15**
+
+### The three findings that matter
+
+1. **The harness lies about CALIBRATE success — [#34](https://github.com/TGoodhew/HP-Attenuator/issues/34), V10 FAIL.**
+   `Calibrate()` sends `C1`, sleeps a fixed 2500 ms, polls once. Settled cycles take 6.5-7.4 s, so the
+   poll samples before the CALIBRATE finishes. Two runs logged `status = 0x00` while the panel showed
+   **Error 33**. **This invalidates every "CALIBRATE succeeded" the harness has ever reported.**
+   Fix this first — until it is fixed no calibration result from this bench can be trusted, and #35,
+   V2 and V4 are all blocked behind it.
+2. **`--force-range-cal` only works on the top range — [#35](https://github.com/TGoodhew/HP-Attenuator/issues/35), V2 FAIL.**
+   0 dB calibrates cleanly; 20 dB raises **Error 33, "Power sensor reference error"**, reproducibly.
+   Not a stale sensor cal — the second run followed a verified cal reading exactly 1.000 mW. The
+   cutoff between 0 and 20 dB is unmeasured. **V4 is untestable until this is resolved.**
+3. **#17 confirmed by eye.** The author observed **no RECAL and no UNCAL** at either forced depth —
+   the first non-software confirmation that the receiver never asks to be recalibrated.
+
+### NOT YET FILED — do this first next session
+
+**A reproducible 5 GHz hang.** `--freq 5000 --astop 30 --astep 1` hangs at **exactly 13 dB**, twice
+(`DebugResults/v38-empty.log`, `v39-empty.log`): `DataReady NOT set after 134.5 s (SB=0x00)`, then the
+post-hang probe fails with `IOTimeoutException`. The same command passed all 31 points that morning
+(`v29-empty.log`).
+
+Scoped it before stopping: **3 GHz is unaffected.** `v40-scope3g` re-ran the morning's `v31` command
+verbatim — 29/29 points, full depth to 99.5 dB, PASS, deep tail within 0.11 dB of the morning run.
+So the working hypothesis that the midday sensor calibration wiped the resident range factors is
+**disproven** — 3 GHz is also converted and also references that sensor, and is fine.
+
+Fold two related defects into that issue:
+- **The post-hang probe fails exactly when needed.** `ProbeSignalAfterHang` exists to classify a hang
+  as signal-present (#10) vs signal-lost (Error 96); it threw `IOTimeoutException` both times.
+- **Three different read budgets disagree.** `ReceiverTimeoutMs` defaults to **60 s**, CHANGE_LOG
+  records #12 cutting the poll budget to **30 s**, and the observed wait was **134.5 s**.
+
+### Other open items
+
+- **V8 unproven after three attempts** (`v29`, `v38`, `v39`). The #6 empty-read glitch never occurred;
+  a different fault did. A clean sweep is not evidence — leave ⬜ and retry opportunistically.
+- **V6 needs code, not bench.** #13's floor detection missed a saturated 100 dB point (the 90→100 step
+  applied only 6.48 dB of 10). A fixed `--floor-dbm` cut cannot separate -98.54 from -97.63; suggest a
+  **step-increment test** (flag a step applying < ~50% of nominal).
+- **V9's 18.4 s/read is still unexplained.** Successful reads are metronomic at ~6 s in every run
+  measured, so variance is NOT the answer (checked and rejected this session). Instrument inside
+  `SweepTiming.Read` — split trigger / poll / retrieve — before optimizing anything.
+- **V3 can only be validated by the author**, running the harness in his own terminal. Claude's stdin
+  is always redirected, so `--panel-review` prompts silently no-op.
+- **`--sensor-calibrate` does not call `SensorCalSession.Mark()`** — a cal done via the primitives
+  leaves the harness believing none happened. Only the interactive `--sensor-cal` marks it. Unfiled.
+- **Unfiled app issues from earlier:** #25, #26, #27. Feature specs: #31, #32, #33.
+
+### Bench state to know before the next run
+
+- **The sensor was recalibrated this session** (zeroed to 0.0 nW residual, then calibrated against the
+  50 MHz / 1 mW reference reading exactly **1.000 mW / 0.00 dBm**). The author physically moved the
+  sensor to the CALIBRATION RF POWER OUTPUT and back.
+- A marker was written to `%TEMP%\hp-attenuator-sensorcal.marker`. **It will be stale after the
+  reboot**, so the next session must either redo the sensor cal or pass `--skip-sensor-cal`.
+- **Always pass `--skip-sensor-cal` when Claude drives a sweep.** Without it, a stale marker drops into
+  `InteractiveSensorCalibrate`, whose `Console.ReadLine()` returns instantly on redirected stdin — it
+  would zero the sensor **against live RF** and destroy the calibration.
+- Source power for a 0 dBm reference after the sensor move: **3 GHz +1.35 dBm, 5 GHz +2.35 dBm**.
+
+### Observation protocol (the author's standing instruction)
+
+Any run needing a front-panel observation: **sound an alarm IMMEDIATELY before the command that
+produces the event, say exactly what to look at, issue it, then stop and ask and wait.** Never "watch
+the panel for X minutes" — the author is at the bench but not staring at it, and the observation is
+lost. Use **`--hold-before-cal <file>`** (new this session, ledger V16 ✅, on `main`) to gate each
+CALIBRATE on a file so the beep and the event are a fraction of a second apart.
 
 ## STOPPING POINT — 2026-09-06 midday, author stepped away, bench left powered
 

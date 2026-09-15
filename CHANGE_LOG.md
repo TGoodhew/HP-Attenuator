@@ -11,6 +11,29 @@ kept alive** (not deleted/cleaned up) until their change is bench-validated and 
 What's on `main` but not yet confirmed against the real hardware is tracked in
 **[HardwareValidation.md](HardwareValidation.md)** — the step-by-step bench checklist for Renton.
 
+## Unreleased
+
+### Bench session close: V8 still unproven, a 5 GHz hang found and scoped (2026-09-15, bench)
+
+- **V9 PASS recorded earlier stands, but its open question is now narrower.** Successful reads are
+  metronomic at ~6 s across every run measured this session, so run-to-run variance is **not** the
+  explanation for the profile's 18.4 s/read. Rejected. Instrument inside `SweepTiming.Read` (split
+  trigger / poll / retrieve) before optimizing.
+- **V8 unproven after three attempts.** The #6 empty-read glitch never occurred. Attempt 1 passed all
+  31 points; attempts 2 and 3 both hung at **exactly 13 dB** at 5 GHz (`DataReady NOT set after
+  134.5 s`), with the post-hang probe failing with `IOTimeoutException`.
+- **The 5 GHz hang is reproducible and NOT yet filed** — first task next session. Details and the two
+  defects to fold into it are in `SharedMemory.md`.
+- **Scoped before shutting down: 3 GHz is unaffected.** `v40-scope3g` re-ran the morning's `v31`
+  command verbatim: 29/29 points, full depth to 99.5 dB, PASS, deep tail within **0.11 dB** of the
+  morning run (80 dB +0.88 vs +0.93; 99 dB +0.50 vs +0.67).
+- **Hypothesis disproven, recorded so it is not re-derived.** The midday sensor recalibration did
+  *not* wipe the resident range factors. If it had, 3 GHz — equally converted, equally referenced
+  through that sensor — would have degraded too, and it did not. Also note the source power needed for
+  a 0 dBm reference moved in *opposite* directions at the two frequencies after the sensor was moved
+  (5 GHz 0.8 dB less, 3 GHz 1.25 dB more), which is a frequency-dependent match change rather than a
+  simple loss change.
+
 ## Merged to `main` — 2026-09-15 (session 2: `--hold-before-cal` + the bench findings)
 
 ### Bench: V2 and V10 FAIL, V16 passes — the harness lies about CALIBRATE success (2026-09-15, bench)

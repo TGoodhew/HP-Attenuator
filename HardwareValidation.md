@@ -61,7 +61,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V5 | #15 — per-section characterize + sum reaches a validated full 110/121 dB | `issue-15-per-section-sum` | ✅ | — |
 | V6 | #13 — deep saturated points flagged FLOOR (not failed); verdict/depth honest | `issue-13-floor-detection` | ⬜ | — needs a step-increment test; 100 dB was missed (2026-09-15) |
 | V7 | #3 — verify the automatic-tuning HP-IB code + acquire-then-hold sequence | `issue-3-tune-mode` | ⬜ | — |
-| V8 | #6 — empty/transient read recovers in place (auto-range boundary) instead of failing | `issue-6-empty-read-recovery` | ⬜ | — glitch did not occur 2026-09-15; unproven |
+| V8 | #6 — empty/transient read recovers in place (auto-range boundary) instead of failing | `issue-6-empty-read-recovery` | ⬜ | — 3 attempts 2026-09-15, glitch never occurred; unproven |
 | V9 | #2 — `--profile` gives the real wall-clock breakdown to drive sweep optimization | `issue-2-sweep-profiling` | ✅ | — |
 | V10 | #8 — a CALIBRATE error (Error 35) is now polled + logged + surfaced, not silently latched | `issue-8-calibrate-error-surface` | ❌ | **#34** — reported 0x00 through a real Error 33, twice |
 | V11 | #21 — spec-derived per-path level limits; points below the path floor are skipped, not failed | `issue-21-device-level-limits` | ✅ | — |
@@ -384,7 +384,23 @@ Note this only bites the **average** detector. The V13 sync run reached −99.7 
 - **If it still fails there:** the boundary may need more than 5 empty retries or a longer settle — bump
   `EmptyReadRetries` / `TransientReadSettleMs`, commit + push, re-run.
 
-### 2026-09-15: run completed cleanly, but the glitch did NOT occur — still ⬜
+### 2026-09-15: THREE attempts, glitch never occurred — still ⬜ (and a different fault found)
+
+Attempt 1 (`v29-empty`) passed all 31 points cleanly. Attempts 2 and 3 (`v38-empty`, `v39-empty`) both
+**hung at exactly 13 dB** — `DataReady NOT set after 134.5 s (SB=0x00)`, read timeout, and the
+post-hang probe failing with `IOTimeoutException`. Same command all three times.
+
+So the #6 recovery path has still never been entered and nothing about it is proven. What the retries
+found instead is a **reproducible 5 GHz fault, not yet filed** — see the handoff in `SharedMemory.md`.
+Scoped before stopping: **3 GHz is unaffected** (`v40-scope3g`: 29/29 points, full depth, deep tail
+within 0.11 dB of the same morning's `v31`), so it is confined to 5 GHz and is out-of-band
+characterization territory rather than a blocker.
+
+Two defects to fold into that issue when it is written: `ProbeSignalAfterHang` throwing at exactly the
+moment it exists to diagnose the hang, and three disagreeing read budgets (`ReceiverTimeoutMs` = 60 s,
+#12's documented 30 s, observed 134.5 s).
+
+### 2026-09-15 (attempt 1, superseded): run completed cleanly, but the glitch did NOT occur
 
 The exact repro command was run (`DebugResults/v29-empty.csv`, 5 GHz, 0–30 dB in 1 dB steps):
 **PASS, worst |error| 0.15 dB, all 31 points read, no holes.** But the trace contains no
