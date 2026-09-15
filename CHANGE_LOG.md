@@ -13,6 +13,31 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Merged to `main` — 2026-09-15
 
+### V9 bench PASS — the sweep is read-bound, and two-thirds of that is unattributed (2026-09-15, bench)
+
+Ran `--profile` at 5 GHz, 0–30 dB in 1 dB steps, without `--debug` (per-command polling would distort
+the very timings being measured). Sweep PASS, worst |error| 0.17 dB; levelling normal.
+
+| Category | Time | % | Per call |
+|---|---|---|---|
+| **settled read** | **569.79 s** | **84.0%** | **18.4 s** × 31 |
+| range-cal pre-pass | 102.37 s | 15.1% | 102 s × 1 |
+| per-step settle | 3.36 s | 0.5% | 108 ms × 31 |
+| setup/other | 1.67 s | 0.2% | — |
+| attenuator set | 1.52 s | 0.2% | 49 ms × 31 |
+
+- **#2's question is answered at category level: the sweep is read-bound.** Per-command GPIB I/O is
+  negligible, so **batching writes is not worth pursuing**; and the fixed `Thread.Sleep` waits are not
+  the target either — per-step settle is 0.5% of wall clock and the 8902A's own `SettleMilliseconds`
+  is already 0. Shaving sleeps would buy nothing measurable.
+- **But the dominant number does not reconcile.** 18.4 s per settled read, against Data Ready waits
+  that the comparable `--debug` run of the same sweep logged at a **6.2 s mean** (n=45, min 6.0, max
+  10.0). A happy-path read is one trigger → poll → retrieve cycle, so ~two-thirds of the biggest bar
+  in the profile is currently unattributed. **Do not start optimizing on this number.** The next step
+  is to split `SweepTiming.Read` into trigger / poll / retrieve and re-run — the profile is granular
+  enough to say *where* to look and not yet granular enough to say *what* to change.
+
+
 ### Bench close-out session — V14, V13, V1 pass; a new defect found (2026-09-15, bench)
 
 Five runs on the real rig, all from `issue-24-sf-matrix` (the merge candidate, not the per-row

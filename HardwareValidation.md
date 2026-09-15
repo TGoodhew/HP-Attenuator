@@ -62,7 +62,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V6 | #13 — deep saturated points flagged FLOOR (not failed); verdict/depth honest | `issue-13-floor-detection` | ⬜ | — needs a step-increment test; 100 dB was missed (2026-09-15) |
 | V7 | #3 — verify the automatic-tuning HP-IB code + acquire-then-hold sequence | `issue-3-tune-mode` | ⬜ | — |
 | V8 | #6 — empty/transient read recovers in place (auto-range boundary) instead of failing | `issue-6-empty-read-recovery` | ⬜ | — glitch did not occur 2026-09-15; unproven |
-| V9 | #2 — `--profile` gives the real wall-clock breakdown to drive sweep optimization | `issue-2-sweep-profiling` | ⬜ | — |
+| V9 | #2 — `--profile` gives the real wall-clock breakdown to drive sweep optimization | `issue-2-sweep-profiling` | ✅ | — |
 | V10 | #8 — a CALIBRATE error (Error 35) is now polled + logged + surfaced, not silently latched | `issue-8-calibrate-error-surface` | ⬜ | — |
 | V11 | #21 — spec-derived per-path level limits; points below the path floor are skipped, not failed | `issue-21-device-level-limits` | ✅ | — |
 | V12 | #22 — fine (1 dB) steps from 90 dB to the floor characterize the last few dB | `issue-22-fine-step-near-floor` | ✅ | — |
@@ -341,7 +341,7 @@ nature. Leave ⬜ and re-run opportunistically; a clean sweep is not evidence.
 
 ---
 
-## V9 — #2 sweep timing profile  ⬜ built, awaiting bench
+## V9 — #2 sweep timing profile  ✅ BENCH PASS (2026-09-15)
 
 - **Branch:** `issue-2-sweep-profiling` (built; sim renders the breakdown, but sim has no real waits so
   the numbers are ~0 — the real attribution only appears on hardware). Also on `main`.
@@ -364,6 +364,39 @@ nature. Leave ⬜ and re-run opportunistically; a clean sweep is not evidence.
     profile tells you whether it's worth pursuing.
 - **Follow-up:** whatever the profile shows is the target for the next optimization pass — record the
   breakdown here so the optimization is driven by data.
+
+### Result — PASS, 2026-09-15 (`DebugResults/v30-profile.csv` / `.log`)
+
+5 GHz, 0–30 dB in 1 dB steps, `--profile`, no `--debug`. Sweep itself **PASS, worst |error| 0.17 dB**.
+Levelling ran normally (source ended at **+2.8 dBm**), so this is a healthy run, not a degraded one.
+
+| Category | Time | % | Count | Per call |
+|---|---|---|---|---|
+| **settled read** | **569.79 s** | **84.0%** | 31 | **18.4 s** |
+| range-cal pre-pass | 102.37 s | 15.1% | 1 | 102 s |
+| per-step settle | 3.36 s | 0.5% | 31 | 108 ms |
+| setup/other | 1.67 s | 0.2% | — | — |
+| attenuator set | 1.52 s | 0.2% | 31 | 49 ms |
+| **total** | **678.71 s** | 100% | | |
+
+**The answer #2 asked for: settled reads dominate at 84%, and per-command GPIB I/O is negligible.**
+So batching writes is not worth pursuing, and the fixed `Thread.Sleep` waits are not the problem
+either — `per-step settle` is 0.5% of wall clock and the 8902A's own `SettleMilliseconds` is already
+`0` (`Program.cs:291`). Shaving sleeps would buy nothing.
+
+**Unresolved, and it is the lead for the optimization pass: the 18.4 s/read does not reconcile with
+the measured Data Ready waits.** The comparable `--debug` run of the *same* sweep (`v29-empty.log`)
+logged 45 Data Ready waits averaging **6.2 s** (min 6.0, max 10.0, 280 s total). At that rate the 31
+sweep reads should account for ~190 s, not 570 s. A normal read is a single
+trigger → poll → retrieve cycle (`ReadStepWithBoundaryCal` returns on the first `ReadRelativeDb()`;
+no double-read on the happy path), so roughly **two-thirds of the dominant category is not the Data
+Ready wait** and is currently unattributed.
+
+Candidates, none confirmed: run-to-run settling variance (a 3× shift seems too large); time inside
+`ReadRelativeDb` outside the polled window; `MaybeCalibrateBoundary`, which is called at the top of
+every read attempt and sits inside the read stopwatch. **Next step is finer instrumentation inside
+`SweepTiming.Read`** — split trigger / poll / retrieve — before optimizing anything. Profiling the
+category told us where to look; it is not yet granular enough to say what to change.
 
 ---
 
