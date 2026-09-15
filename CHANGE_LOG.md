@@ -11,7 +11,7 @@ kept alive** (not deleted/cleaned up) until their change is bench-validated and 
 What's on `main` but not yet confirmed against the real hardware is tracked in
 **[HardwareValidation.md](HardwareValidation.md)** — the step-by-step bench checklist for Renton.
 
-## Unreleased - branch `issue-17-cal-hold-gate`
+## Merged to `main` — 2026-09-15 (session 2: `--hold-before-cal` + the bench findings)
 
 ### Bench: V2 and V10 FAIL, V16 passes — the harness lies about CALIBRATE success (2026-09-15, bench)
 
