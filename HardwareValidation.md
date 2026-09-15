@@ -54,20 +54,21 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 
 | # | Change | Branch | Status | Blocked by |
 |---|--------|--------|--------|-----------|
-| V1 | #4 — `--debug` no longer false-flags a failed serial poll | `issue-4-debug-poll-falseflag` | ⬜ | — |
+| V1 | #4 — `--debug` no longer false-flags a failed serial poll | `issue-4-debug-poll-falseflag` | ✅ | — |
 | V2 | #17 — real pre-`SET REF` 3-range CALIBRATE (`--force-range-cal`) + descent observability | `issue-17-range-cal-observability` | ⬜ | — |
 | V3 | `--panel-review` actually pauses on each CALIBRATE | `issue-14-synchronous-deep-sweep` | 🔒 | V2 |
 | V4 | #14 — 3-range cal genuinely improves 80–95 dB accuracy | `issue-14-synchronous-deep-sweep` | 🔒 | V2 |
 | V5 | #15 — per-section characterize + sum reaches a validated full 110/121 dB | `issue-15-per-section-sum` | ✅ | — |
-| V6 | #13 — deep saturated points flagged FLOOR (not failed); verdict/depth honest | `issue-13-floor-detection` | ⬜ | — |
+| V6 | #13 — deep saturated points flagged FLOOR (not failed); verdict/depth honest | `issue-13-floor-detection` | ⬜ | — needs a step-increment test; 100 dB was missed (2026-09-15) |
 | V7 | #3 — verify the automatic-tuning HP-IB code + acquire-then-hold sequence | `issue-3-tune-mode` | ⬜ | — |
-| V8 | #6 — empty/transient read recovers in place (auto-range boundary) instead of failing | `issue-6-empty-read-recovery` | ⬜ | — |
+| V8 | #6 — empty/transient read recovers in place (auto-range boundary) instead of failing | `issue-6-empty-read-recovery` | ⬜ | — glitch did not occur 2026-09-15; unproven |
 | V9 | #2 — `--profile` gives the real wall-clock breakdown to drive sweep optimization | `issue-2-sweep-profiling` | ⬜ | — |
 | V10 | #8 — a CALIBRATE error (Error 35) is now polled + logged + surfaced, not silently latched | `issue-8-calibrate-error-surface` | ⬜ | — |
 | V11 | #21 — spec-derived per-path level limits; points below the path floor are skipped, not failed | `issue-21-device-level-limits` | ✅ | — |
 | V12 | #22 — fine (1 dB) steps from 90 dB to the floor characterize the last few dB | `issue-22-fine-step-near-floor` | ✅ | — |
-| V13 | #23 — reference leveled to 0 dBm; step plan derived from the attenuator + path floor | `issue-23-zero-dbm-ref-adaptive-steps` | ⬜ | — |
-| V14 | Leveller straddle fix — a coarse jump that overshoots must not settle on the far-below sample (18 GHz: ref was 13 dB low) | `issue-24-sf-matrix` | ⬜ | — **run first: every other row's reference comes from this code** |
+| V13 | #23 — reference leveled to 0 dBm; step plan derived from the attenuator + path floor | `issue-23-zero-dbm-ref-adaptive-steps` | ✅ | — |
+| V14 | Leveller straddle fix — a coarse jump that overshoots must not settle on the far-below sample (18 GHz: ref was 13 dB low) | `issue-24-sf-matrix` | ✅ | — |
+| V15 | **NEW DEFECT** — leveller silently no-ops when the first level read is UNCAL, taking the adaptive step plan and #21 limits down with it | `issue-24-sf-matrix` | 🔨 | — found 2026-09-15 |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-24-sf-matrix` | ✅ | **REINSTATED 2026-09-04**: reaches 99 dB / −100.5 dBm vs average's 96 dB, tracks linearly, fails honestly. The earlier rejection was made without measuring residual FM (18 Hz, well in spec). |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -77,13 +78,14 @@ All from `issue-24-sf-matrix` — see the merge-candidate note above. Sensor-cal
 then `--skip-sensor-cal` for the rest. Ordered so that if the session is cut short, the runs that
 carry real weight are already done.
 
-| Order | Run | Clears | Output |
+| # | Run | Outcome | Output |
 |---|---|---|---|
-| 1 | 18 GHz `--section-sum` | **V14** (+ replaces the untrustworthy 18 GHz §3/§4 row) | `v27-sec-18000.csv` |
-| 2 | 2 GHz `--section-sum` | §5 in-band FAIL — confirm or clear the only spec failure on record | `v26-sec-2000.csv` |
-| 3 | 3 GHz `--atten-sweep --adaptive-steps` | **V13** + the other half of **V14**'s guard | `v28-adaptive.csv` |
-| 4 | 5 GHz `--atten-sweep --astep 1 --debug` | **V8**, **V10**, **V1** (one run covers all three) | `v29-empty.csv` |
-| 5 | 5 GHz same sweep, `--profile`, **no** `--debug` | **V9** | `v30-profile.csv` |
+| 1 | 18 GHz `--section-sum` | **V14 ✅** — leveller recovered to −0.012 dBm. §3/§4 reproduced, so the old data stands | `v27-sec-18000.csv` |
+| 2 | 2 GHz `--section-sum` | §5 **confirmed, not cleared** — −0.21 vs ±0.20, repeating 09-06's −0.23 | `v26-sec-2000.csv` |
+| 3 | 3 GHz adaptive, average detector | **Invalid for V13** (command omitted `--ref-target 0`) but exposed **V15** and disproved the V6 shortcut | `v28-adaptive.csv` |
+| 4 | 5 GHz `--astep 1 --debug` | PASS 0.15 dB. **V8 not exercised** (no glitch); **V10** evidenced from run 3 | `v29-empty.csv` |
+| 5 | 3 GHz adaptive, **sync**, `--ref-target 0` | **V13 ✅** — 29/29 points to 99.67 dB, errors flat | `v31-adaptive-sync.csv` |
+| — | 5 GHz `--profile` (V9) | **NOT RUN** — displaced by the V13 re-run | — |
 
 **Deferred, not gating a merge:** V2/V3/V4 (needs an operator at the 8902A panel for every
 `--panel-review` prompt — a session of its own), V7 (ledger marks it low priority; manual tuning is
@@ -96,7 +98,7 @@ or whether it needs its own 3 GHz deep sweep.
 
 ---
 
-## V1 — #4 debug-poll false-flag (ready now, independent)
+## V1 — #4 debug-poll false-flag  ✅ BENCH PASS (2026-09-15)
 
 - **Branch:** `issue-4-debug-poll-falseflag` (also merged on `main`)
 - **What changed:** with `--debug`, a failed/empty serial poll is no longer reported as an
@@ -112,6 +114,14 @@ or whether it needs its own 3 GHz deep sweep.
   the debug trace shows **no** spurious `INSTRUMENT ERROR` line from a serial poll.
 - **If it fails:** fix on `issue-4-debug-poll-falseflag`, commit + push, re-run. Cosmetic — does not
   gate other rows.
+
+### Result — PASS, 2026-09-15 (observed across four `--debug` runs, not a dedicated run)
+
+Validated as an overlay, which is what it is: **zero `INSTRUMENT ERROR` lines across all four
+`--debug` runs of the session** (18 GHz and 2 GHz `--section-sum`, 3 GHz adaptive, 5 GHz 1 dB sweep),
+and no serial-poll failures reported as instrument faults. Genuine status conditions still surfaced
+correctly in the same traces — `SB=0x61` was read as UNCAL and acted on, `SB=0x41` as Data Ready — so
+the fix suppresses the false positive without blinding the poll.
 
 ## V2 — #17 real 3-range CALIBRATE + descent observability  ⬜ built, awaiting bench
 
@@ -256,6 +266,23 @@ where the receiver is linear, then sum.
   `--section-sum` synthesizes by summation — so V6 tells you the direct method's honest ceiling and V5
   provides the validated number above it.
 
+### 2026-09-15: NOT closable from V12's result — the floor cut is in the wrong place
+
+The close-out plan suggested V6 might be closed from V12's existing data. **It can't.** The 3 GHz
+average-detector run (`v28-adaptive.csv`) flagged **110 dB as FLOOR but not 100 dB**, although 100 dB
+was equally saturated: it read −2.37 dB error, and the per-step table shows the 90→100 step applying
+only **6.48 dB of a nominal 10**. A point that loses 3.5 dB of a 10 dB step is at the floor by any
+reasonable definition.
+
+Cause is the default `--floor-dbm -98` against readings that plateaued near −97.6 dBm: 110 dB read
+−98.54 (caught), 100 dB read −97.63 (missed by 0.37 dB). A fixed absolute cut cannot separate these —
+the plateau is where consecutive steps stop delivering their nominal increment, which is exactly what
+the per-step table already computes. **Suggest #13 gain a step-increment test** (flag a point whose
+step applied < ~50% of nominal) rather than relying solely on an absolute threshold, then re-run.
+
+Note this only bites the **average** detector. The V13 sync run reached −99.7 dBm with errors flat to
+±0.07 dB and had nothing to flag.
+
 ---
 
 ## V7 — #3 automatic-tuning HP-IB codes  ⬜ built, awaiting bench
@@ -303,6 +330,14 @@ where the receiver is linear, then sum.
   region specifically.
 - **If it still fails there:** the boundary may need more than 5 empty retries or a longer settle — bump
   `EmptyReadRetries` / `TransientReadSettleMs`, commit + push, re-run.
+
+### 2026-09-15: run completed cleanly, but the glitch did NOT occur — still ⬜
+
+The exact repro command was run (`DebugResults/v29-empty.csv`, 5 GHz, 0–30 dB in 1 dB steps):
+**PASS, worst |error| 0.15 dB, all 31 points read, no holes.** But the trace contains no
+`empty/short read` line and no `Unrecognized 8902A reading` — the transient simply did not happen this
+time, so **the recovery path was never entered and nothing was proven.** The glitch is intermittent by
+nature. Leave ⬜ and re-run opportunistically; a clean sweep is not evidence.
 
 ---
 
@@ -352,6 +387,22 @@ where the receiver is linear, then sum.
   ClearError) or a clean status (→ cosmetic RQS latch). Cross-check against the 8902A front-panel error.
 - **If a real Error 35 shows:** that's a genuine marginal-level cal failure (too little signal to
   calibrate that range) — the honest ceiling is shallower there; relates to #1/#7 and the #13 floor.
+
+### 2026-09-15: partial evidence — the polled line now exists; panel cross-check still owed
+
+Not run as its own 5 GHz recipe, but the 3 GHz run (`v28-adaptive.log`) fired a real CALIBRATE and the
+trace carries exactly what #8 added:
+
+```
+  0 dB: read=UNCAL  [UNCAL]  -> CALIBRATE
+  8902A < C1             SB=0x00
+  8902A CALIBRATE complete, status = 0x00
+```
+
+The post-CALIBRATE status is now polled and reported rather than silently latched, and `0x00` here is
+a genuine clean result (the CALIBRATE succeeded and every subsequent read was valid). What is still
+missing for ✅ is the row's own cross-check — an observation of the 8902A front panel during a
+CALIBRATE that *does* raise an error, which no run this session produced. Left ⬜.
 
 ---
 
@@ -449,7 +500,7 @@ and no RECAL all run. That is **#17 showing up directly in the accuracy numbers*
 
 ---
 
-## V13 — #23 0 dBm reference + adaptive step plan  ⬜ built, awaiting bench
+## V13 — #23 0 dBm reference + adaptive step plan  ✅ BENCH PASS (2026-09-15)
 
 - **Branch:** `issue-23-zero-dbm-ref-adaptive-steps` (off `issue-22-fine-step-near-floor`; sim PASS).
 - **What changed:** (a) the leveller drives the source until the **8902A reads 0 dBm**, so the
@@ -471,9 +522,42 @@ and no RECAL all run. That is **#17 showing up directly in the accuracy numbers*
   usable depth grows ~1 dB — does the roll-off still start around −95 dBm absolute (which would confirm
   the −96 dBm practical floor found in V12 is a property of the path, not of the reference level)?
 
+### Result — PASS, 2026-09-15 (`DebugResults/v31-adaptive-sync.csv` / `.log`)
+
+Run with `--detector sync --ref-target 0`. **29/29 points measured, nothing skipped, nothing flagged
+FLOOR, deepest 99.67 dB.** Worst |error| **0.93 dB @ 80 dB**, verdict **PASS**.
+
+- **Leveller:** `settled at -0.028 dBm (source 0.10 dBm)` in three iterations — within 0.1 dB of the
+  0 dBm target and, as required, *below* it. This is the other half of V14's guard, from the opposite
+  direction (converging down onto the ceiling rather than recovering from a 13 dB overshoot).
+- **Plan derived from the hardware, as #23 specifies:** *"1 dB to 11, ladder … 89 dB, then 1 dB in to
+  99 dB (reference −0.03 dBm − floor −100.0 dBm)"* — the endpoint is computed from the achieved
+  reference and the path floor, not hardcoded.
+- **The 8494's 1 dB steps, measured individually for the first time:** every one of 0→11 dB within
+  **+0.01 to +0.07 dB**. That pad is excellent.
+
+**The answer to "does the roll-off still start around −95 dBm" is NO — and it supersedes V12.**
+
+| Set dB | 90 | 91 | 92 | 93 | 94 | 95 | 96 | 97 | 98 | 99 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Error dB | +0.63 | +0.63 | +0.69 | +0.71 | +0.75 | +0.77 | +0.72 | +0.69 | +0.77 | +0.67 |
+
+Flat to ±0.07 dB across the last 10 dB, down to **−99.7 dBm**. Compare V12 at the same frequency
+(average detector, reference −1.1 dBm), which compressed and plateaued at −96 dBm: +0.36 @ 90 dB
+decaying to **−2.76 @ 98 dB**.
+
+So **V12's "practical floor ≈ −96 dBm, ~4 dB short of spec" was a property of the AVERAGE detector,
+not of the path.** With the synchronous detector and the reference at 0 dBm, the 11793A converted path
+reads honestly to its stated −100 dBm floor. V12's conclusion should be read as scoped to `4.4SP`.
+
+The residual ~+0.7 dB through 90–99 dB is **not** compression — it is the §7+§8 sectional error
+(+0.40 / +0.45 measured independently in V5, summing to +0.85) showing up in every total that engages
+both 40 dB sections. The per-step table confirms it: the 30→40 and 70→80 steps apply **+0.50** and
+**+0.54**, and every other step is within ±0.11.
+
 ---
 
-## V14 — leveller straddle fix  ⬜ built, awaiting bench
+## V14 — leveller straddle fix  ✅ BENCH PASS (2026-09-15)
 
 - **Branch:** `issue-24-sf-matrix` (sim-tested only; **not** hardware-validated).
 - **Why this row is the highest-risk one on the queue:** the leveller runs in the setup of *every*
@@ -504,19 +588,121 @@ and no RECAL all run. That is **#17 showing up directly in the accuracy numbers*
     near the 0 dBm target, instead of reverting to source 0.00 dBm / ref −13.232 dBm.
   - The reference **never settles above** the target. If the fallback fires, the trace says
     `level: iteration budget ended above the target - falling back to the best reading at or below it.`
-  - §3 and §4 come into line. The old 18 GHz row read **−1.03 / +1.36** against a reference 13 dB low;
-    those values are not trustworthy and should not be carried forward. This run replaces them.
+  - ~~§3 and §4 come into line.~~ **This prediction was wrong — see the Result below.** They
+    reproduced almost exactly against a correct reference, which is itself the more useful finding.
 - **Cross-check at 3 GHz:** the V13 run exercises the same guard from the other side — its pass
   criterion ("converges within 0.1 dB **below** 0 dBm and never settles above it") *is* this fix.
   V13 and V14 validate together; neither alone covers both branches of the change.
-- **⚠ Scope of the doubt:** every frequency in the 2026-09-06 10 MHz–26 GHz sweep was levelled by the
-  buggy code. 18 GHz is the only row where the failure is *visible* in the trace, but a smaller
-  straddle error elsewhere would be invisible and would look like DUT behaviour. **V11 and V12 are
-  unaffected** — both settled in-window at 3 GHz, where no coarse jump occurs. The in-band section
-  results (V5) were levelled at frequencies needing little or no source boost, so they are very likely
-  sound — but the 2 GHz row's systematic negative offset is worth re-reading with this in mind.
+- **⚠ Scope of the doubt — RESOLVED by the 2026-09-15 run, and it was narrower than feared.** The
+  worry was that every frequency in the 2026-09-06 10 MHz–26 GHz sweep had been levelled by the buggy
+  code, so any row might be silently shifted. The re-run answers it: **a wrong reference costs
+  absolute headroom, not relative accuracy.** `--section-sum` measures each section against the 0 dB
+  reference taken at the *same* source power, so a common offset divides out. The bad 18 GHz reference
+  was 13 dB low, and the section values still reproduced to within 0.09 dB. No row of the
+  10 MHz–26 GHz sweep needs re-measuring on account of this bug.
 - **If it fails:** fix on `issue-24-sf-matrix`, commit + push, re-run. Nothing else on the queue should
   be trusted until this one passes, because every other run's reference comes from this code.
+
+### Result — PASS, 2026-09-15 (`DebugResults/v27-sec-18000.csv` / `.log`)
+
+Both halves of the fix are visible in four consecutive trace lines, and they are exactly the failure
+and the recovery:
+
+```
+level: read -13.255 dBm, target 0.0 (delta +13.255), source 0.00 dBm
+level: read  +0.183 dBm, target 0.0 (delta  -0.183), source 13.20 dBm
+level: read  -0.012 dBm, target 0.0 (delta  +0.012), source 13.00 dBm
+level: settled at -0.012 dBm (source 13.00 dBm)
+```
+
+Line 2 is the sample the old code found **and then threw away** — it reverted to the line-1 baseline
+and reported source 0.00 dBm / reference −13.232 dBm as "settled". Now the width test keeps it, the
+leveller refines 13.20 → 13.00 dBm, and the post-loop guard lands it at **−0.012 dBm — just *below*
+the 0 dBm target**, which is the guard's whole requirement. Reference error against target: **12 mdB**,
+versus **13.2 dB** before.
+
+**The prediction about §3/§4 was wrong, and the way it was wrong is worth more than the prediction.**
+
+| | §1 | §2 | §3 | §4 | §5 | §6 | §7 | §8 |
+|---|---|---|---|---|---|---|---|---|
+| 2026-09-06, ref −13.232 dBm | +0.02 | −0.02 | **−1.03** | **+1.36** | −0.13 | +0.14 | −0.42 | +0.13 |
+| 2026-09-15, ref −0.012 dBm | +0.05 | +0.03 | **−1.01** | **+1.33** | −0.18 | +0.05 | −0.45 | +0.14 |
+| Δ | 0.03 | 0.05 | **0.02** | **0.03** | 0.05 | 0.09 | 0.03 | 0.01 |
+
+Every section reproduced to within **0.09 dB** across a 13 dB change of reference level. So:
+
+1. **V14 is confirmed fixed** — on its own criterion, the leveller trace.
+2. **The old 18 GHz data was not corrupted after all.** A relative measurement anchored to a reference
+   taken at the same source power is immune to a common offset, as long as the deepest read stays above
+   the floor — and at 18 GHz it did (deepest ≈ −54 dBm against a −13 dBm reference). The bad reference
+   cost headroom, not accuracy. The ledger's earlier "not trustworthy, should not be carried forward"
+   was over-cautious and is retracted above.
+3. **§3/§4 at 18 GHz are a real, repeatable property**, not an artifact: §3 reads ~1.0 dB low and §4
+   ~1.3 dB high, and they **partially cancel in the sum** (§3+§4 = 8.32 dB vs 8 nominal, +0.32). Both
+   are nominal 4 dB sections in the 8494G at 4.5× its rated ceiling, so out-of-band mismatch ripple
+   between adjacent sections is the natural explanation. Worth noting that this is exactly the
+   "two per-section errors that cancel in aggregate and look correct" failure mode #28 was written to
+   catch — a total-path sweep would never have shown it.
+
+**Incidental observations from the same run:**
+- **V1 evidence (#4):** zero `INSTRUMENT ERROR` lines in the whole trace, and no serial-poll failures.
+- **V2/#17 reproduced again on the bench:** `range-cal: NO-OP — 0 CALIBRATEs fired … RESIDENT factors`.
+  The RF ranges are still riding resident factors, unchanged.
+- One read at 80 dB took **34.8 s** to set Data Ready (typical is 6.5–7.4 s). It completed correctly
+  and did not trip the 30 s poll budget into a failure, but it is the longest settle seen so far and
+  is worth watching if it recurs.
+
+---
+
+## V15 — leveller silently no-ops on an UNCAL first read  🔨 NEEDS CODE (found 2026-09-15)
+
+- **Branch:** defect found on `issue-24-sf-matrix`; no fix written yet.
+- **Severity: high, because it fails quietly and the symptom looks like a DUT failure.** A run that
+  never levelled is almost indistinguishable from one that did, except by the *absence* of trace lines
+  you would have to know to look for.
+- **How it was found:** the 3 GHz average-detector run (`DebugResults/v28-adaptive.log`) returned
+  **FAIL, worst |error| 2.37 dB @ 100 dB**. The attenuator was fine; the harness had disabled its own
+  safeguards.
+- **Mechanism** — `MeasurementEngine.LevelReference()`, the top of the iteration loop:
+  ```csharp
+  try { level = _receiver.ReadTunedLevelDbm(); }
+  catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
+  {
+      try { _receiver.ClearError(); } catch { }
+      break;                      // <- no Trace, achieved stays NaN
+  }
+  ```
+  The first read came back **UNCAL** (`SB=0x61`), so the loop breaks on iteration 0 **before the first
+  `Trace?.Invoke`**. `achieved` stays `NaN` and the reference is unknown.
+- **The cascade from that one silent `break`** — three failures, only one of which prints anything:
+  1. **No levelling.** Source left at its commanded baseline; the reference is whatever it happens to be.
+  2. **The adaptive step plan silently degrades.** #23 derives the plan from the reference and the path
+     floor; with a NaN reference it falls back to the plain ladder — **12 points instead of 29**, and
+     the announced plan line still claims "1 dB to 11, ladder, 1 dB for the last 10".
+  3. **#21's level limits switch off** (`limits NOT enforced (#21)` — the one visible symptom), so the
+     sweep commands 100 and 110 dB, precisely the points **V11 proved it must refuse**, reads them
+     saturated, and reports FAIL.
+- **Why it is clearly fixable:** the UNCAL condition is recoverable, and the code **40 lines further
+  down already recovers from it**. The range-cal descent hits the same UNCAL and handles it:
+  `0 dB: read=UNCAL [UNCAL] -> CALIBRATE`, `C1`, after which every read in the run was valid. The
+  leveller gives up on the one condition its immediate neighbour knows how to fix.
+- **Suggested fix, in priority order:**
+  1. **Never fail silently** — trace the abort and the reason, at minimum. A levelling step that did
+     not happen must say so.
+  2. **CALIBRATE and retry once** on UNCAL specifically, mirroring `MaybeCalibrateBoundary`, before
+     giving up. Distinguish UNCAL (recoverable) from lost lock / Error 96 (genuinely fatal).
+  3. **Make a NaN reference loud downstream.** Both the step-plan fallback and the #21 bypass should
+     be prominent warnings, not a quiet degradation — and consider whether a sweep with limits
+     disabled should refuse to command points it cannot bound at all.
+- **Regression test once fixed:** re-run the exact failing command and expect a levelled reference, a
+  29-point plan, 100/110 dB skipped by #21, and PASS:
+  ```powershell
+  dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+    --freq 3000 --astop 110 --astep 10 --adaptive-steps --debug --skip-sensor-cal `
+    --out DebugResults/v32-v15-regression.csv
+  ```
+  Note it must be run **without** `--detector sync` — the synchronous detector did not hit UNCAL at
+  3 GHz and therefore does not reproduce the defect.
 
 ---
 

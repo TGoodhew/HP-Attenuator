@@ -13,6 +13,62 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased - not yet merged
 
+### Bench close-out session — V14, V13, V1 pass; a new defect found (2026-09-15, bench)
+
+Five runs on the real rig, all from `issue-24-sf-matrix` (the merge candidate, not the per-row
+isolation branches). Sensor cal was skipped throughout — there is no session marker and a real one
+needs the sensor physically moved, so this matches the 2026-09-06 conditions exactly.
+
+- **V14 ✅ — the leveller straddle fix works.** At 18 GHz the leveller now keeps the high-source
+  solution it used to discard: `read +0.183 dBm, source 13.20` → refine to `13.00` → `settled at
+  -0.012 dBm`. Reference error against target **12 mdB**, versus **13.2 dB** before the fix, and it
+  settles *below* the target as the new guard requires.
+- **The 18 GHz data was NOT corrupted after all — earlier caution retracted.** Every section
+  reproduced to within **0.09 dB** across a 13 dB change of reference level. `--section-sum` anchors
+  each section to a reference taken at the same source power, so a common offset divides out: a bad
+  reference costs **headroom, not relative accuracy**. No row of the 10 MHz–26 GHz sweep needs
+  re-measuring on account of the bug.
+- **§3/§4 at 18 GHz are therefore real, not artifact:** §3 −1.01 dB, §4 +1.33 dB, **partially
+  cancelling in the sum** (8.32 dB vs 8 nominal). Both are 4 dB sections in the 8494G at 4.5× its
+  rated ceiling; out-of-band mismatch ripple is the natural explanation. This is exactly the "two
+  per-section errors that cancel in aggregate and look correct" case #28 was written to catch — a
+  total-path sweep would never have seen it.
+- **§5 at 2 GHz is CONFIRMED, not cleared.** The repeat reproduced 2026-09-06 to within 0.02 dB:
+  −0.21 dB against a ±0.20 limit (was −0.23). Nine days apart, with a corrected leveller. It remains
+  most likely a path artifact — the whole 2 GHz row sits 0.15–0.25 dB negative relative to both 1 GHz
+  (direct) and 3/5 GHz (converted), and §5 reads −0.06/−0.07 at 500 MHz and 3 GHz — but it is now a
+  **reproducible 0.01 dB exceedance** and must not be written up as resolved.
+- **V13 ✅, and it supersedes V12's floor conclusion.** With `--detector sync --ref-target 0`: the
+  leveller settled at **−0.028 dBm**, the plan derived itself from the hardware ("1 dB to 11, ladder
+  … then 1 dB in to 99 dB, reference −0.03 dBm − floor −100.0 dBm"), and **all 29 points measured to
+  99.67 dB** with nothing skipped or floor-flagged. Errors across 90–99 dB are **flat at +0.63 to
+  +0.77 dB (±0.07)**, where V12 at the same frequency decayed to −2.76 dB by 98 dB. **V12's
+  "practical floor ≈ −96 dBm" was a property of the AVERAGE detector, not the path** — read that
+  conclusion as scoped to `4.4SP`. The residual +0.7 dB is the §7+§8 sectional error (+0.85 summed),
+  not compression; the 30→40 and 70→80 steps apply +0.50 and +0.54 while every other step is within
+  ±0.11.
+- **The 8494's 1 dB steps, measured individually for the first time:** all of 0→11 dB within +0.01 to
+  +0.07 dB.
+- **V1 ✅** — zero spurious `INSTRUMENT ERROR` across all four `--debug` runs, while genuine `SB=0x61`
+  UNCAL and `SB=0x41` Data Ready still surfaced correctly.
+- **NEW DEFECT, ledger row V15 — the leveller silently no-ops when the first level read is UNCAL.**
+  `LevelReference()` catches the UNCAL read and `break`s **before its first trace line**, leaving the
+  reference `NaN`. Three things then fail, only one of which prints anything: no levelling; the #23
+  adaptive plan silently degrades to the plain ladder (12 points instead of 29, while still announcing
+  the adaptive plan); and **#21's level limits switch off**, so the sweep commands 100 and 110 dB —
+  the exact points V11 proved it must refuse — reads them saturated and reports **FAIL, worst |error|
+  2.37 dB**. A verdict that looks like attenuator failure, caused by a silent abort. The condition is
+  recoverable: the range-cal descent 40 lines below hits the same UNCAL and fixes it with a CALIBRATE.
+- **V6 is NOT closable from V12's result, contrary to the close-out plan.** The average-detector run
+  flagged 110 dB as FLOOR but **missed 100 dB**, which was equally saturated (the 90→100 step applied
+  6.48 dB of a nominal 10). A fixed `--floor-dbm` cut cannot separate −98.54 from −97.63; #13 should
+  gain a **step-increment test** (flag a step that applies < ~50% of nominal).
+- **V8 ⬜ unproven** — the repro ran clean (PASS, 0.15 dB, 31/31 points) but the transient did not
+  occur, so the recovery path was never entered. A clean sweep is not evidence.
+- **V10 ⬜ partial** — the polled `8902A CALIBRATE complete, status = 0x00` line now appears after a
+  real CALIBRATE, which is what #8 added; still owed a panel observation of a CALIBRATE that errors.
+- **V9 not run** — displaced by the V13 re-run.
+
 ### Ledger reconciled ahead of the merge to `main` (2026-09-15, desk)
 
 Documentation only — no code change, no bench run.
