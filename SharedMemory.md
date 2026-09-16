@@ -81,6 +81,19 @@ HP-8340B-Adjust, sim-only, and confirmed the bus was free and that no HP-Attenua
    round-trips. Cost recorded honestly: the capture read can block up to the 60 s session timeout if
    no sentinel is queued.
 
+7. **`issue-36-fail-visible-in-trace`** — STACKED on `issue-34-calibrate-completion-poll` (the scripted
+   link it needs to be testable lives there; merge #34 first, then this). `Hp8902A.Send` traced only
+   AFTER a successful write, so a wedged bus gave healthy traffic then silence with **no record of the
+   command in flight**; `VisaInstrumentLink.Write` likewise dropped rejected commands from the history
+   the app shows the user for the 11713A. Both now recorded. **Precautionary — no run traced to
+   either.** Self-test now 7/7.
+
+### BRANCH ORDER FOR MERGING (when the time comes)
+
+`issue-34-calibrate-completion-poll` → `issue-36-fail-visible-in-trace` (stacked on it).
+`issue-30-leveller-uncal-recovery` and `issue-35-decode-cal-errors` are independent, off `main`.
+Nothing has been merged and nothing is hardware-validated.
+
 ### Peer cross-check (`tony-d6`, HP-8340B-Adjust)
 
 They suggested two sensor-cal patterns. **Both are already implemented here** — `ZeroSensor()` sends
