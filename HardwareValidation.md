@@ -780,7 +780,46 @@ Every section reproduced to within **0.09 dB** across a 13 dB change of referenc
 
 ---
 
-## V15 — #30 leveller silently no-ops on an UNCAL first read  🔨 NEEDS CODE (found 2026-09-15)
+## V15 — #30 leveller silently no-ops on an UNCAL first read  ⬜ FIXED, awaiting bench
+
+### Fix built on `issue-30-leveller-uncal-recovery` (2026-09-15) — all three suggested changes below
+
+1. **The abort is no longer silent.** The `break` now traces the iteration, the reason (Error code +
+   description, "still UNCAL after a CALIBRATE retry", or the exception type), the source power it is
+   leaving behind, and that the reference is UNKNOWN.
+2. **UNCAL is recovered, once.** `ReadTunedLevelWithUncalRecovery` does what the range-cal descent 40
+   lines below already did: on `IsUncal`, CALIBRATE at this level and re-read. Budgeted to one attempt,
+   so a level that is genuinely outside the calibratable range cannot turn the leveller into a
+   CALIBRATE loop. Lost lock / Error 96 / a second UNCAL still propagate.
+3. **The downstream degradation is loud, and it distinguishes the two causes of a NaN reference.** New
+   `FreqPointResult.ReferenceLevelingFailed` separates "levelling is off (`--no-leveling`, expected)"
+   from "levelling RAN AND FAILED". The #21 bypass and the #23 step-plan fallback now both say which,
+   and the failed case says plainly that a FAIL from that run is a harness fault, not a DUT fault.
+   It **warns rather than refusing to sweep** — `--no-leveling` is a legitimate mode that also yields
+   a NaN reference, so refusing would break a working path.
+
+### Verified in simulation (all four paths), via new `--sim-uncal-first-read [n]`
+
+Sim previously could not produce an UNCAL at all, so this defect was unreachable without the bench.
+The flag makes `SimulatedReceiver.ReadTunedLevelDbm` return UNCAL for the first *n* reads. The count
+is independent of CALIBRATE so both outcomes are reachable.
+
+| Run | Result |
+|---|---|
+| baseline (no flag) | unchanged — levels to -0.024 dBm, 29-point adaptive plan, PASS |
+| `--sim-uncal-first-read 1` | **recovers**: `read 0 came back UNCAL -> CALIBRATE and retry`, then levels, 29-point plan |
+| `--sim-uncal-first-read 9` | **fails loudly**: `level: ABORTED on iteration 0 - still UNCAL after a CALIBRATE retry`, then `*** reference level UNKNOWN because LEVELLING FAILED ***` and `adaptive plan UNAVAILABLE` |
+| `--no-leveling` | correctly reports `levelling is off`, NOT "failed" |
+
+```powershell
+dotnet run --project src/HP-Attenuator.TestHarness -- --x-atten 8494 --atten-sweep --freq 3000 `
+  --astop 110 --astep 10 --adaptive-steps --sim-uncal-first-read 1 --debug
+```
+
+**Not yet run on hardware.** The bench regression is the command at the end of this row.
+
+### Original finding (2026-09-15)
+
 
 - **Issue:** [#30](https://github.com/TGoodhew/HP-Attenuator/issues/30). Found on `issue-24-sf-matrix`
   (now merged to `main`); no fix written yet, and no branch cut for it.

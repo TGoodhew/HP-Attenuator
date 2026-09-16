@@ -434,6 +434,16 @@ namespace HpAttenuator.Measurement
         /// <summary>Source power the leveler settled on for this frequency, dBm (#16).</summary>
         public double LeveledSourcePowerDbm { get; set; } = double.NaN;
 
+        /// <summary>
+        /// True when adaptive levelling (#16) was attempted for this frequency but could not produce a
+        /// reference. Distinguishes the two reasons <see cref="ReferencePowerDbm"/> can be NaN: levelling
+        /// was switched off (--no-leveling, expected, the reference is simply the commanded --power), or
+        /// levelling RAN AND FAILED (unexpected — the reference is unknown and everything downstream
+        /// that depends on it has quietly degraded). Only the second is a defect, and before #30 the two
+        /// were indistinguishable in the output.
+        /// </summary>
+        public bool ReferenceLevelingFailed { get; set; }
+
         public List<AttenPointResult> Points { get; } = new List<AttenPointResult>();
 
         /// <summary>Worst |error| over the ACCURATE points — floor-limited points (#13) are excluded, as

@@ -13,6 +13,41 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased
 
+### #30: the leveller recovers from an UNCAL first read, and never fails silently (branch `issue-30-leveller-uncal-recovery`)
+
+Ledger V15. The defect was high-severity because it **failed quietly and the symptom looked like a DUT
+failure**: a 3 GHz run reported FAIL with worst |error| 2.37 dB at 100 dB, and the attenuator was fine —
+the harness had disabled its own safeguards.
+
+- **Root cause.** `LevelReference()` caught any `Hp8902AException` and `break`-ed *before the first*
+  `Trace?.Invoke`. The first read came back UNCAL (`SB=0x61`), so the loop exited on iteration 0 with
+  `achieved` still NaN and nothing printed. Three things then degraded, only one of which said anything:
+  no levelling; the #23 adaptive step plan silently fell back to the plain ladder (**12 points instead
+  of 29**, while the announced plan line still described the adaptive one); and #21's level limits
+  switched off, so the sweep commanded 100 and 110 dB — precisely the points V11 proved it must refuse —
+  read them saturated, and reported FAIL.
+- **UNCAL is now recovered, once.** New `ReadTunedLevelWithUncalRecovery` does exactly what the range-cal
+  descent 40 lines below already did successfully: CALIBRATE at this level and re-read. UNCAL is the
+  receiver asking to be calibrated, not reporting a fault. Budgeted to a single attempt so a level
+  genuinely outside the calibratable range cannot turn the leveller into a CALIBRATE loop; lost lock,
+  Error 96 and a second UNCAL still propagate.
+- **The abort is loud.** It now traces the iteration, the reason (error code + description, "still UNCAL
+  after a CALIBRATE retry", or the exception type), the source power left in place, and that the
+  reference is UNKNOWN.
+- **The two causes of a NaN reference are now distinguished.** New `FreqPointResult.ReferenceLevelingFailed`
+  separates "levelling is off (`--no-leveling`)" from "levelling ran and failed". Both the #21 bypass and
+  the #23 step-plan fallback report which, and the failed case states that a FAIL from that run is a
+  **harness** fault, not a DUT fault. It warns rather than refusing to sweep: `--no-leveling` is a
+  legitimate mode that also yields a NaN reference, so refusing would break a working path.
+- **New `--sim-uncal-first-read [n]` (simulation only).** Sim could not produce an UNCAL at all, so this
+  defect was previously unreachable without the bench. The flag makes the first *n* Tuned RF Level reads
+  return UNCAL; the count is independent of CALIBRATE so both outcomes are reachable — `n = 1` is the
+  recoverable case, `n > 1` models a level outside the calibratable range.
+- **Verified in simulation, four paths:** baseline unchanged (levels, 29-point plan, PASS); `n 1`
+  recovers and reaches the 29-point plan; `n 9` aborts with `ABORTED on iteration 0 - still UNCAL after
+  a CALIBRATE retry` plus both downstream warnings; `--no-leveling` correctly reports "levelling is off"
+  rather than "failed". **NOT yet run on hardware** — see ledger row V15.
+
 ### Bench session close: V8 still unproven, a 5 GHz hang found and scoped (2026-09-15, bench)
 
 - **V9 PASS recorded earlier stands, but its open question is now narrower.** Successful reads are

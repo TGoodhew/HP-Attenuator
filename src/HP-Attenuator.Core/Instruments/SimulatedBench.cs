@@ -198,6 +198,20 @@ namespace HpAttenuator.Instruments
         public void EnableRecalStatus() { }
         public bool RecalRequested() => false; // simulated receiver never needs range calibration
         public int PollStatusByte() => 0;
+
+        /// <summary>
+        /// Fault injection for #30: the first N Tuned RF Level reads come back UNCAL, reproducing the
+        /// real receiver's 'calibrate me at this level' response that the leveller used to abort on
+        /// silently. Off (0) by default, so normal sim runs are unchanged; set from the harness with
+        /// --sim-uncal-first-read [n].
+        ///
+        /// The count is deliberately independent of <see cref="Calibrate"/> so BOTH outcomes are
+        /// reachable: n = 1 is the recoverable case (CALIBRATE clears it and the retry succeeds), while
+        /// n &gt; 1 models a level genuinely outside the receiver&apos;s calibratable range, where the
+        /// CALIBRATE does not help and the leveller must give up loudly instead of silently.
+        /// </summary>
+        public int UncalTunedLevelReads { get; set; }
+
         public void Calibrate() { }
         public void ClearError() { }
         public void RetuneToSignal() { }   // sim never loses lock (Error 96 only when RF is off)
@@ -222,6 +236,14 @@ namespace HpAttenuator.Instruments
             // Absolute level in dBm (pre-SET REF equivalent) — what #16 leveling reads to place the
             // reference. Mirrors real hardware: Error 96 when the source is off / no signal.
             if (!_bench.SourceRfOn) throw new Hp8902AException(96, Hp8902AException.Describe(96));
+
+            // #30 fault injection: UNCAL for the first n reads, as a cold range does on hardware.
+            if (UncalTunedLevelReads > 0)
+            {
+                UncalTunedLevelReads--;
+                throw Hp8902AException.Uncal();
+            }
+
             return _bench.MeasuredLevelDbm();
         }
 

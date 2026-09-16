@@ -305,7 +305,7 @@ namespace HpAttenuator.TestHarness
                 {
                     Source = new SimulatedSource(sim),
                     Lo = new SimulatedLo(sim),
-                    Receiver = new SimulatedReceiver(sim),
+                    Receiver = new SimulatedReceiver(sim) { UncalTunedLevelReads = opt.SimUncalReads },
                     MakeAttenuator = cfg => new SimulatedAttenuator(sim, cfg),
                     IsSimulated = true
                 };

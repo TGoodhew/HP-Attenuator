@@ -245,8 +245,14 @@ namespace HpAttenuator.Measurement
             double referenceDbm = result.ReferencePowerDbm;   // NaN when leveling is off / unreadable
             bool enforceLimits = _options.EnforceLevelLimits && !double.IsNaN(referenceDbm);
             if (_options.EnforceLevelLimits && double.IsNaN(referenceDbm))
-                Trace?.Invoke("level-limits: reference level unknown — cannot predict per-point levels, " +
-                              "limits NOT enforced (#21); falling back to post-hoc floor detection (#13).");
+                Trace?.Invoke(result.ReferenceLevelingFailed
+                    ? "level-limits: *** reference level UNKNOWN because LEVELLING FAILED *** — limits " +
+                      "NOT enforced (#21), so this sweep will command points it cannot bound, read them " +
+                      "saturated, and report them as errors. Treat a FAIL from this run as a HARNESS " +
+                      "fault, not a DUT fault, until the levelling abort above is resolved (#30)."
+                    : "level-limits: reference level unknown (levelling is off) — cannot predict " +
+                      "per-point levels, limits NOT enforced (#21); falling back to post-hoc floor " +
+                      "detection (#13).");
 
             // The 8902A SET REF can leave a small residual offset, so we also normalise in
             // software: the reading at the start attenuation defines 0 dB and every reading
@@ -259,6 +265,15 @@ namespace HpAttenuator.Measurement
 
             List<int> attenPlan = BuildAttenuationPlan(referenceDbm, pathFloorDbm);
             total = attenPlan.Count;
+
+            // The adaptive plan (#23) is derived from the reference, so an unknown reference silently
+            // degrades it to the plain ladder — 12 points where 29 were announced, while the plan line
+            // still described the adaptive one. Say it plainly instead (#30).
+            if (_options.StepPlan == AttenStepPlan.Adaptive && double.IsNaN(referenceDbm))
+                Trace?.Invoke($"step-plan: adaptive plan UNAVAILABLE (reference unknown" +
+                              (result.ReferenceLevelingFailed ? " — LEVELLING FAILED" : " — levelling is off") +
+                              $") — using the fixed ladder instead: {total} point(s). Any announced " +
+                              "adaptive plan does not describe this run (#30).");
 
             // Setup is finished; everything after this point is the measurement itself.
             BeforeStepping?.Invoke();
@@ -1084,6 +1099,40 @@ namespace HpAttenuator.Measurement
         /// signal) it leaves the source at the last commanded power and returns NaN. Records the
         /// achieved reference and settled source power on <paramref name="result"/>.
         /// </summary>
+        /// <summary>
+        /// Reads the absolute Tuned RF Level for the leveller, recovering ONCE from an UNCAL reading
+        /// by doing what the code 40 lines below already does: CALIBRATE at this level and re-read (#30).
+        ///
+        /// UNCAL on the first read is not a fault — it is the receiver saying "calibrate me here", and
+        /// the range-cal descent immediately afterwards handles exactly this condition successfully
+        /// (`0 dB: read=UNCAL [UNCAL] -&gt; CALIBRATE`, after which every read in the run was valid).
+        /// The leveller used to give up on the one condition its immediate neighbour knows how to fix,
+        /// and gave up silently, disabling the adaptive step plan and the #21 level limits with it.
+        ///
+        /// Everything else — lost lock, Error 96, no signal — is genuinely fatal here and is rethrown
+        /// for the caller to report. So is a second UNCAL: if a CALIBRATE did not clear it, the level
+        /// is out of the receiver's calibratable range and no amount of retrying will help.
+        /// </summary>
+        private double ReadTunedLevelWithUncalRecovery(int iter, ref bool calibrated)
+        {
+            try { return _receiver.ReadTunedLevelDbm(); }
+            catch (Hp8902AException ex) when (ex.IsUncal && !calibrated)
+            {
+                calibrated = true;
+                Trace?.Invoke($"level: read {iter} came back UNCAL — CALIBRATE at this level and retry " +
+                              "(the receiver is asking to be calibrated, not reporting a fault) (#30).");
+                try { _receiver.Calibrate(); }
+                catch (Exception calEx)
+                {
+                    try { _receiver.ClearError(); } catch { /* keep going */ }
+                    Trace?.Invoke($"level: the recovery CALIBRATE itself failed ({calEx.Message}) — " +
+                                  "the reference cannot be levelled at this level.");
+                    throw;
+                }
+                return _receiver.ReadTunedLevelDbm();   // a second UNCAL propagates: not recoverable
+            }
+        }
+
         private double LevelReference(FreqPointResult result)
         {
             double target = _options.TargetReferenceDbm;
@@ -1102,15 +1151,31 @@ namespace HpAttenuator.Measurement
             double bestBelowLevel = double.NaN, bestBelowPower = double.NaN;
             bool sawAbove = false;
 
+            // One CALIBRATE is allowed to rescue an UNCAL first read (#30). Budgeted like
+            // MaxBoundaryCalibrations so a receiver that is UNCAL for a real reason (too deep to
+            // calibrate) cannot turn the leveller into a CALIBRATE loop.
+            bool calibrated = false;
+
             for (int iter = 0; iter <= _options.MaxLevelIterations; iter++)
             {
                 double level;
-                try { level = _receiver.ReadTunedLevelDbm(); }
+                try { level = ReadTunedLevelWithUncalRecovery(iter, ref calibrated); }
                 catch (Exception ex) when (ex is Hp8902AException || ex is FormatException)
                 {
-                    // No settled absolute level (e.g. lost lock / no signal). Abort leveling and let
-                    // the sweep surface the fault; leave the source at the last commanded power.
+                    // Unrecoverable here (lost lock / no signal / Error 96). Leave the source at the
+                    // last commanded power and stop — but SAY SO. This used to `break` silently before
+                    // the first Trace, so a run that never levelled looked exactly like one that did,
+                    // and three safeguards switched themselves off downstream (#30).
                     try { _receiver.ClearError(); } catch { /* keep going */ }
+                    var hp = ex as Hp8902AException;
+                    string why = hp == null       ? ex.GetType().Name
+                               : hp.Code > 0      ? $"Error {hp.Code} ({Hp8902AException.Describe(hp.Code)})"
+                               : hp.IsUncal       ? "still UNCAL after a CALIBRATE retry"
+                               : hp.Message;
+                    Trace?.Invoke($"level: ABORTED on iteration {iter} — {why}. The reference was NOT " +
+                                  $"levelled; the source stays at {power:0.00} dBm and the reference is " +
+                                  "UNKNOWN. Every measurement at this frequency is anchored to an " +
+                                  "unverified reference (#30).");
                     break;
                 }
                 achieved = level;
@@ -1206,6 +1271,8 @@ namespace HpAttenuator.Measurement
             {
                 result.ReferencePowerDbm = achieved;
                 result.LeveledSourcePowerDbm = power;
+                // Levelling ran; if it produced nothing, that is a failure, not "levelling is off" (#30).
+                result.ReferenceLevelingFailed = double.IsNaN(achieved);
             }
             if (!double.IsNaN(achieved))
                 Trace?.Invoke($"level: settled at {achieved:+0.000;-0.000;0.000} dBm " +

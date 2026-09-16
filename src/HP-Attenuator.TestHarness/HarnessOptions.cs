@@ -37,6 +37,7 @@ namespace HpAttenuator.TestHarness
         public bool Profile;        // --profile : attribute sweep wall-clock by category (#2)
         public bool PanelReview;    // --panel-review : pause to have the operator read the 8902A front panel
         public bool CalProbe;       // --cal-probe : force one Tuned RF Level CALIBRATE and trace it (hunt Error 35)
+        public int SimUncalReads;   // --sim-uncal-first-read [n] : sim only — first n Tuned RF Level reads return UNCAL (#30)
         public bool ExplicitAstop;  // user gave --astop (don't auto-fill the attenuator max)
         public bool ExplicitAstep;  // user gave --astep (don't force 1 dB steps)
         public bool LoadCal;        // --load-cal : load converter cal factors into the 8902A first
@@ -114,6 +115,11 @@ namespace HpAttenuator.TestHarness
                     case "--profile": o.Profile = true; break;
                     case "--panel-review": o.PanelReview = true; break;
                     case "--cal-probe": o.CalProbe = true; break;
+                    // Sim-only fault injection for #30: make the leveller's first read(s) come back UNCAL.
+                    case "--sim-uncal-first-read":
+                        o.SimUncalReads = (i + 1 < args.Length && !args[i + 1].StartsWith("-"))
+                            ? I(Need(args, ++i)) : 1;
+                        break;
                     case "--freq": o.RfPowerFreqMHz = D(Need(args, ++i)); break;
                     case "--atten": o.RfPowerAttenDb = I(Need(args, ++i)); break;
                     case "--load-cal": o.LoadCal = true; break;
@@ -212,6 +218,11 @@ Usage: HP-Attenuator.TestHarness [options]
   --cal-max-age H      Reuse a session sensor cal up to H hours old (default 8). The cal is
                        done once per session and skipped automatically while fresh.
   --no-beep            Silence the short beep emitted on every instrument command.
+  --sim-uncal-first-read [n]
+                       SIMULATION ONLY. Makes the first n (default 1) Tuned RF Level
+                       reads return UNCAL until a CALIBRATE is done, reproducing the
+                       real receiver's 'calibrate me at this level' response. Used to
+                       exercise the #30 leveller recovery without the bench.
   --detect             Signal-presence check only (8902A RF-freq, RF on vs off);
                        no sweep. Default freqs 100 + 2000 MHz; no calibration needed.
   --rf-power           Test 1: single-point absolute RF power readback. Sets the
