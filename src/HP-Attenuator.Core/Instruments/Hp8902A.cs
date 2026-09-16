@@ -372,7 +372,10 @@ namespace HpAttenuator.Instruments
         private const byte InstrErrorBit = 0x04;
 
         /// <summary>Serial-poll interval while waiting for Data Ready, ms.</summary>
-        private const int DataReadyPollMs = 250;
+        private const int DataReadyPollMsDefault = 250;
+
+        /// <summary>Status-byte poll interval, ms. Overridable for the headless self-test.</summary>
+        public int DataReadyPollMs { get; set; } = DataReadyPollMsDefault;
 
         /// <summary>How long to watch the status byte for a completed measurement before giving up, ms.
         /// Well above the longest legitimate settled read (~6 s typical, ~12 s near the floor) so a
@@ -397,26 +400,99 @@ namespace HpAttenuator.Instruments
 
         public int PollStatusByte() => _link.SerialPoll();
 
-        /// <summary>Time to let a CALIBRATE (C1) actually complete before sampling its result, ms. The
-        /// CALIBRATE runs for ~seconds and finishes during this window; sampling the status only after it
-        /// (not just after issuing C1, when the poll still reads 0x00) is what makes a raised error — e.g.
-        /// Error 35, "level error during calibration" — visible instead of silently latched (#8).</summary>
-        private const int CalibrateSettleMs = 2500;
+        /// <summary>Minimum time to let a CALIBRATE (C1) run before its status byte is believed, ms.
+        /// The receiver does not clear Data Ready instantly on C1, so sampling immediately can read the
+        /// PREVIOUS cycle's result and call the calibration complete before it has started.</summary>
+        private const int CalibrateMinSettleMsDefault = 2500;
 
+        /// <summary>Overridable for the headless self-test, which replays scripted status bytes and
+        /// must not spend real seconds doing it. Defaults to <see cref="CalibrateMinSettleMsDefault"/>.</summary>
+        public int CalibrateMinSettleMs { get; set; } = CalibrateMinSettleMsDefault;
+
+        /// <summary>Upper bound on one CALIBRATE cycle, ms. Settled cycles measured on the bench run
+        /// 6.5-7.4 s, so this is generous; it exists only so a receiver that never reports completion
+        /// cannot hang the sweep. Reaching it is logged as UNCONFIRMED, never as success.</summary>
+        private const int CalibrateBudgetMsDefault = 30000;
+
+        /// <summary>Overridable for the headless self-test. Defaults to <see cref="CalibrateBudgetMsDefault"/>.</summary>
+        public int CalibrateBudgetMs { get; set; } = CalibrateBudgetMsDefault;
+
+        /// <summary>
+        /// Presses CALIBRATE (C1) and waits for the cycle to actually finish before judging it (#34).
+        ///
+        /// The previous implementation slept a fixed 2500 ms and polled the status byte exactly once.
+        /// Settled CALIBRATE cycles take 6.5-7.4 s, so that single sample landed roughly 4 s before the
+        /// calibration completed and could not see an error the calibration had not yet raised. Two
+        /// bench runs logged "status = 0x00" while the front panel showed **Error 33** — which means
+        /// every "CALIBRATE succeeded" this harness has ever reported was unverified.
+        ///
+        /// Now: hold the same 2500 ms minimum (so this can never finish sooner than the behaviour it
+        /// replaces), then poll the status byte until the receiver reports completion — Data Ready
+        /// (0x01) or an instrument error (0x04) — up to <see cref="CalibrateBudgetMs"/>. An error seen
+        /// at ANY poll in that window fails the calibration, instead of only an error that happened to
+        /// be latched at t=2500 ms.
+        ///
+        /// A failed serial poll is reported as a failed poll, NOT as 0x00 (#36): SerialPoll returns a
+        /// byte and can never be negative, so the old "sb &lt; 0 ? 0 : sb" rendering made a thrown poll
+        /// and a genuine zero status print identically — and those imply opposite root causes.
+        ///
+        /// Exhausting the budget without a completion signal is logged as UNCONFIRMED and does not
+        /// throw: a sweep that works today must keep working. The caller should treat an unconfirmed
+        /// calibration as untrusted rather than as a pass.
+        /// </summary>
         public void Calibrate()
         {
             Send("C1");
-            Thread.Sleep(CalibrateSettleMs);   // CALIBRATE completes during this window
 
-            // #8: sample AFTER completion. The immediate post-C1 poll (in Send under --debug) still reads
-            // 0x00 because the CALIBRATE hasn't finished; any error it raises appears only now. Surface it
-            // so the caller's cal-failure path (ClearError + carry on / don't trust the reference) runs,
-            // instead of silently proceeding on a bad 0 dB calibration that would corrupt the whole sweep.
-            int sb = -1;
-            try { sb = _link.SerialPoll(); } catch { /* poll failed; leave sb = -1 (unknown) */ }
-            bool err = sb >= 0 && (sb & InstrErrorBit) != 0;
-            DebugLog?.Invoke($"8902A CALIBRATE complete, status = 0x{(sb < 0 ? 0 : sb):X2}" +
-                             (err ? "  <-- INSTRUMENT ERROR (0x04) — reference/boundary cal FAILED" : ""));
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int sb = -1;            // last SUCCESSFUL poll; -1 = never polled successfully
+            int polls = 0, pollFailures = 0;
+            bool err = false, complete = false;
+
+            while (true)
+            {
+                Thread.Sleep(DataReadyPollMs);
+
+                polls++;
+                int s;
+                try { s = _link.SerialPoll(); }
+                catch (Exception ex)
+                {
+                    pollFailures++;
+                    // Log the first failure's type — the old code swallowed it entirely, so a wedged
+                    // bus was indistinguishable from a quiet instrument (#36).
+                    if (pollFailures == 1)
+                        DebugLog?.Invoke($"8902A CALIBRATE poll failed ({ex.GetType().Name}) — retrying");
+                    s = -1;
+                }
+
+                if (s >= 0)
+                {
+                    sb = s;
+                    if ((s & InstrErrorBit) != 0) { err = true; break; }
+                    // Only believe Data Ready once the minimum settle has passed; before that it can
+                    // still be the previous measurement's flag rather than this calibration's.
+                    if ((s & DataReadyBit) != 0 && sw.ElapsedMilliseconds >= CalibrateMinSettleMs)
+                    {
+                        complete = true;
+                        break;
+                    }
+                }
+
+                if (sw.ElapsedMilliseconds >= CalibrateBudgetMs) break;
+            }
+
+            string status = sb < 0
+                ? $"no successful poll in {polls} attempts"
+                : $"status = 0x{sb:X2}";
+            string verdict = err        ? "  <-- INSTRUMENT ERROR (0x04) — reference/boundary cal FAILED"
+                           : complete   ? ""
+                                        : "  <-- UNCONFIRMED: no completion signal within budget; do NOT trust this calibration";
+            DebugLog?.Invoke($"8902A CALIBRATE {(complete ? "complete" : err ? "failed" : "UNCONFIRMED")} " +
+                             $"after {sw.ElapsedMilliseconds / 1000.0:0.0} s, {status}" +
+                             (pollFailures > 0 ? $", {pollFailures}/{polls} polls failed" : "") +
+                             verdict);
+
             if (err) throw Hp8902AException.CalibrateError(sb);
         }
 
@@ -567,8 +643,13 @@ namespace HpAttenuator.Instruments
                 if (sb >= 0 && (sb & (DataReadyBit | InstrErrorBit)) != 0) { ready = true; break; }
                 Thread.Sleep(DataReadyPollMs);
             }
+            // A failed poll is reported as a failed poll, not as 0x00 (#36). SerialPoll returns a byte
+            // and is never negative, so sb = -1 can only come from the catch above — but the old
+            // rendering printed it as "SB=0x00", identical to a genuine zero status. Those imply
+            // opposite root causes (wedged bus vs lost status mask), and the 5 GHz hang turns on which.
             DebugLog?.Invoke($"8902A DataReady {(ready ? "SET" : "NOT set")} after " +
-                             $"{sw.ElapsedMilliseconds / 1000.0:0.0} s (SB=0x{(sb < 0 ? 0 : sb):X2})");
+                             $"{sw.ElapsedMilliseconds / 1000.0:0.0} s " +
+                             (sb < 0 ? "(serial poll failed)" : $"(SB=0x{sb:X2})"));
 
             // RECAL set but no result produced → the range needs calibrating at this level.
             if (sb >= 0 && (sb & RecalStatusBit) != 0 && !ready) throw Hp8902AException.Uncal();

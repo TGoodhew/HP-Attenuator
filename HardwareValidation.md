@@ -470,6 +470,7 @@ category told us where to look; it is not yet granular enough to say what to cha
 ---
 
 ## V10 — #8 CALIBRATE-error surfacing  ❌ BENCH FAIL (2026-09-15) → issue #34
+### → fix built on `issue-34-calibrate-completion-poll`; re-validate as **V17** below.
 
 - **Branch:** `issue-8-calibrate-error-surface` (built; sim PASS — the cal error is hardware-only, sim's
   Calibrate is a no-op). Also on `main`.
@@ -830,6 +831,54 @@ Every section reproduced to within **0.09 dB** across a 13 dB change of referenc
   ```
   Note it must be run **without** `--detector sync` — the synchronous detector did not hit UNCAL at
   3 GHz and therefore does not reproduce the defect.
+
+---
+
+## V17 — #34 CALIBRATE completion poll  ⬜ built, awaiting bench
+
+- **Issue:** [#34](https://github.com/TGoodhew/HP-Attenuator/issues/34). Branch
+  `issue-34-calibrate-completion-poll`. This is the re-validation of V10, which failed.
+- **Severity: highest open item.** Until this is confirmed on the bench, **no CALIBRATE result from
+  this rig can be trusted**, and V2/V4 and #35 all sit behind it.
+- **What was wrong:** `Hp8902A.Calibrate()` sent `C1`, slept a fixed 2500 ms, and serial-polled
+  exactly once. Settled CALIBRATE cycles measure 6.5-7.4 s on this bench, so that single sample
+  landed roughly 4 s before the calibration finished and could not see an error the instrument had
+  not raised yet. Two runs logged `status = 0x00` while the front panel showed **Error 33**.
+- **What changed:**
+  1. `Calibrate()` still holds the same 2500 ms minimum (so it can never conclude *sooner* than the
+     code it replaces), then polls the status byte until the receiver reports completion — Data Ready
+     (0x01) or instrument error (0x04) — up to a 30 s budget. An error at **any** poll fails the
+     calibration, not just one latched at t=2500 ms.
+  2. Exhausting the budget logs **UNCONFIRMED** and does **not** throw, so a sweep that works today
+     keeps working. An unconfirmed calibration must be read as untrusted, not as a pass.
+  3. A failed serial poll is now reported as a failed poll rather than `0x00` — in `Calibrate()`, in
+     `ReadMeasurement()`, and in the harness `SafePoll` (see #36). `SafePoll` returned 0 on failure,
+     which is **exactly the "0x00" the V10 runs recorded**, so part of that observation may have been
+     a failing poll rather than an early sample. The two have different fixes.
+  4. `SafePoll`'s caller tested `(sbAfter & 0x04)` on a value that is now -1 on failure; guarded,
+     since `-1 & 0x04` is non-zero and would report a phantom instrument error.
+- **Verified off-bench:** `--cal-selftest` drives the real `Hp8902A` driver over a scripted link
+  (sim mode cannot reach it — sim's `Calibrate()` is an empty method). Five cases pass, and each is
+  also run against the old algorithm: the two error cases are reported `old code: MISSED the error`,
+  so the check demonstrably discriminates rather than merely passing.
+  ```powershell
+  dotnet run --project src/HP-Attenuator.TestHarness -- --cal-selftest
+  ```
+- **Bench procedure** — this needs a front-panel observation, so use the beep-tell-act-ask protocol:
+  1. Re-run the V10/#35 probe, which reproducibly raises Error 33 at 20 dB:
+     ```powershell
+     dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --cal-probe `
+       --freq 3000 --debug --skip-sensor-cal
+     ```
+  2. **Expected:** at the depth where the panel shows **Error 33**, the log must now read
+     `8902A CALIBRATE failed after <6.5-7.4> s, status = 0x04  <-- INSTRUMENT ERROR`, and the
+     reported elapsed time must be **longer than 2.5 s**. A `status = 0x00` there means the fix did
+     not take; a `poll failed` there means the real defect is the bus, not the sample point (#36).
+  3. Confirm the elapsed time against the front panel: the cycle should complete at roughly the
+     moment the log says it did.
+- **PASS =** a real Error 33 is reported as a failure, with an elapsed time matching the observed
+  cycle, and no `0x00` standing in for a failed poll.
+- **Not yet run on hardware.**
 
 ---
 

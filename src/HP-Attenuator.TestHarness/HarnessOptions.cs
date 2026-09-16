@@ -37,6 +37,7 @@ namespace HpAttenuator.TestHarness
         public bool Profile;        // --profile : attribute sweep wall-clock by category (#2)
         public bool PanelReview;    // --panel-review : pause to have the operator read the 8902A front panel
         public bool CalProbe;       // --cal-probe : force one Tuned RF Level CALIBRATE and trace it (hunt Error 35)
+        public bool CalSelfTest;    // --cal-selftest : headless check of the CALIBRATE completion poll (#34); no instruments
         public bool ExplicitAstop;  // user gave --astop (don't auto-fill the attenuator max)
         public bool ExplicitAstep;  // user gave --astep (don't force 1 dB steps)
         public bool LoadCal;        // --load-cal : load converter cal factors into the 8902A first
@@ -114,6 +115,7 @@ namespace HpAttenuator.TestHarness
                     case "--profile": o.Profile = true; break;
                     case "--panel-review": o.PanelReview = true; break;
                     case "--cal-probe": o.CalProbe = true; break;
+                    case "--cal-selftest": o.CalSelfTest = true; break;
                     case "--freq": o.RfPowerFreqMHz = D(Need(args, ++i)); break;
                     case "--atten": o.RfPowerAttenDb = I(Need(args, ++i)); break;
                     case "--load-cal": o.LoadCal = true; break;
@@ -212,6 +214,11 @@ Usage: HP-Attenuator.TestHarness [options]
   --cal-max-age H      Reuse a session sensor cal up to H hours old (default 8). The cal is
                        done once per session and skipped automatically while fresh.
   --no-beep            Silence the short beep emitted on every instrument command.
+  --cal-selftest       Headless regression check of the CALIBRATE completion poll (#34),
+                       run against a scripted link. No instruments, no GPIB, no --hardware:
+                       drives the real Hp8902A driver over scripted status bytes. Simulation
+                       mode cannot cover this path (sim's Calibrate() is an empty method).
+                       Exit code 0 = pass, 1 = fail.
   --detect             Signal-presence check only (8902A RF-freq, RF on vs off);
                        no sweep. Default freqs 100 + 2000 MHz; no calibration needed.
   --rf-power           Test 1: single-point absolute RF power readback. Sets the

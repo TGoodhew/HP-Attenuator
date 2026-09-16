@@ -28,6 +28,10 @@ namespace HpAttenuator.TestHarness
 
             if (opt.ShowHelp) { AnsiConsole.WriteLine(HarnessOptions.HelpText); return 0; }
 
+            // Headless, instrument-free regression check of the CALIBRATE completion poll (#34).
+            // Dispatched before any bench is built: it opens no VISA session and touches no GPIB.
+            if (opt.CalSelfTest) return CalibrateSelfTest.Run();
+
             AnsiConsole.Write(new FigletText("11713A TEST").Color(Color.Aqua));
             AnsiConsole.MarkupLine("[grey]Attenuation-vs-frequency harness — 8340B + 8673B + 11793A + 8902A[/]");
             AnsiConsole.WriteLine();
@@ -767,7 +771,7 @@ namespace HpAttenuator.TestHarness
                 attenuator.SetAttenuationDb(atten);
                 System.Threading.Thread.Sleep(settle);
                 int sbBefore = SafePoll(rx);
-                AnsiConsole.MarkupLine($"[grey]CALIBRATE @ {atten} dB (SB before=0x{sbBefore:X2})...[/]");
+                AnsiConsole.MarkupLine($"[grey]CALIBRATE @ {atten} dB (SB before={Sb(sbBefore)})...[/]");
                 rx.Calibrate();
                 int sbAfter = SafePoll(rx);
 
@@ -777,9 +781,11 @@ namespace HpAttenuator.TestHarness
                 catch (Hp8902AException ex) { read = $"Error {ex.Code}"; code = ex.Code; try { rx.ClearError(); } catch { } }
                 catch (Exception ex) { read = ex.GetType().Name; try { rx.ClearError(); } catch { } }
 
-                bool instrErr = (sbAfter & 0x04) != 0;
+                // sbAfter < 0 means the poll FAILED, not that the status is 0x00 (#34). Guard the mask:
+                // -1 & 0x04 is non-zero, so an unguarded test reports a phantom instrument error.
+                bool instrErr = sbAfter >= 0 && (sbAfter & 0x04) != 0;
                 string flag = (code == 35 || instrErr) ? " [red]<-- ERROR 35 / instr-error[/]" : "";
-                AnsiConsole.MarkupLine($"   SB after=0x{sbAfter:X2}, read {read.EscapeMarkup()}{flag}");
+                AnsiConsole.MarkupLine($"   SB after={Sb(sbAfter)}, read {read.EscapeMarkup()}{flag}");
 
                 if (firstError < 0 && (code == 35 || code == 34 || instrErr)) { firstError = atten; break; }
             }
@@ -793,10 +799,17 @@ namespace HpAttenuator.TestHarness
             return firstError < 0 ? 0 : 1;
         }
 
+        /// <summary>Serial-polls the receiver, returning -1 if the poll itself failed (#34/#36).
+        /// This used to return 0 on failure, which is indistinguishable from a genuine 0x00 status —
+        /// and that is exactly the reading the V10 bench runs recorded while the front panel was
+        /// showing Error 33. Callers must render a negative result as "poll failed", not as 0x00.</summary>
         private static int SafePoll(IMeasuringReceiver rx)
         {
-            try { return rx.PollStatusByte(); } catch { return 0; }
+            try { return rx.PollStatusByte(); } catch { return -1; }
         }
+
+        /// <summary>Renders a <see cref="SafePoll"/> result without conflating a failed poll with 0x00.</summary>
+        private static string Sb(int sb) => sb < 0 ? "poll failed" : $"0x{sb:X2}";
 
         // ---- Test 3: per-attenuator individual settings -------------------
 

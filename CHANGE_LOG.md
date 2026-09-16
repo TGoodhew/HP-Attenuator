@@ -13,6 +13,62 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased
 
+### #34: CALIBRATE now waits for the cycle to finish before judging it (branch `issue-34-calibrate-completion-poll`)
+
+Fixes the highest-severity open defect: **every "CALIBRATE succeeded" this harness has ever reported
+was unverified.** V10 caught it on the bench — two runs logged `status = 0x00` while the front panel
+showed **Error 33**.
+
+- **Root cause.** `Hp8902A.Calibrate()` sent `C1`, slept a fixed 2500 ms, and serial-polled exactly
+  once. Settled CALIBRATE cycles measure **6.5-7.4 s** on this bench, so the one sample landed about
+  4 s before the calibration completed — it could not see an error the instrument had not yet raised.
+- **Fix.** Keep the 2500 ms minimum (so this can never conclude *sooner* than the code it replaces),
+  then poll the status byte until the receiver reports completion — Data Ready (0x01) or instrument
+  error (0x04) — up to a 30 s budget. An error observed at **any** poll fails the calibration.
+- **Budget exhausted is UNCONFIRMED, not success, and does not throw.** A sweep that passes today
+  keeps passing; the log says plainly that the calibration must not be trusted.
+- **A failed serial poll is no longer rendered as `0x00`** — in `Calibrate()`, in `ReadMeasurement()`,
+  and in the harness `SafePoll` (which returned 0 on failure). `SerialPoll()` returns a byte and is
+  never negative, so `-1` could only mean "the poll threw", yet it printed identically to a genuine
+  zero status. **This matters for V10 itself:** part of that `0x00` observation may have been a
+  failing poll rather than an early sample, and the two have different fixes. Same class of defect as
+  #4, which fixed only the `Send` trace. Filed for the read path as #36.
+- **Side effect worth noting for #8.** The old code polled *nothing* during the post-C1 settle, which
+  is the exact complaint in [#8](https://github.com/TGoodhew/HP-Attenuator/issues/8) ("nothing polls
+  during the post-calibrate settle", SRQ left latched). The new loop serial-polls every 250 ms through
+  the cycle — the same cadence `ReadMeasurement` already uses during a measurement — so it may also
+  clear the latched SRQ. Unconfirmed; check it when V17 runs.
+- **Guarded the mask test on the new sentinel.** `(sbAfter & 0x04)` on `-1` is non-zero, which would
+  have reported a phantom instrument error on every failed poll.
+- **New `--cal-selftest`: headless regression coverage for a hardware-only path.** Sim mode cannot
+  reach `Hp8902A.Calibrate()` at all — it substitutes `SimulatedReceiver`, whose `Calibrate()` is an
+  empty method — so this drives the **real driver** over a new `ScriptedInstrumentLink` that replays
+  chosen status-byte sequences (including polls that throw). No instruments, no GPIB, no `--hardware`.
+  Five cases: late error caught, normal completion, stale Data Ready is not completion, failed polls
+  not reported as `0x00`, and no-completion is UNCONFIRMED. Each case is **also run against the old
+  algorithm**, which is reported inline — the two error cases print `old code: MISSED the error`, so
+  the check is shown to discriminate rather than merely passing.
+- **`CalibrateMinSettleMs` / `CalibrateBudgetMs` / `DataReadyPollMs` are now overridable properties**
+  (same defaults) so the self-test can run in seconds.
+- **Verified:** `--cal-selftest` 5/5 PASS; simulated 3 GHz sweep PASS (unchanged); solution builds
+  clean. **NOT yet run on the hardware** — bench procedure is ledger row **V17** in
+  `HardwareValidation.md`.
+
+### #36 filed: the 5 GHz hang at 13 dB, plus two defects that make it undiagnosable
+
+- Filed the reproducible **5 GHz hang at exactly 13 dB** (134.5 s in both runs, `v38`/`v39`), which
+  the previous session found but did not file. 3 GHz is unaffected (`v40-scope3g`), which disproves
+  the "sensor cal wiped the range factors" hypothesis.
+- **Two new code-level findings, read from source rather than the bench:**
+  1. **`SB=0x00` in the read log is ambiguous** — it is also what a *failed* serial poll prints. So we
+     do not currently know whether the receiver reported a zero status byte at 13 dB or whether every
+     poll was timing out, and those have opposite root causes. (Fixed on the #34 branch.)
+  2. **The 30 s read budget is not enforced across a blocking poll.** `ReadMeasurement` tests the
+     deadline only *between* iterations, and `VisaInstrumentLink.SerialPoll()` blocks. This resolves
+     the "three budgets disagree" puzzle (60 s session / 30 s poll / 134.5 s observed): they do not
+     disagree — **the 30 s budget simply is not enforced**, and the time is being spent inside
+     `SerialPoll`. Still to fix.
+
 ### Bench session close: V8 still unproven, a 5 GHz hang found and scoped (2026-09-15, bench)
 
 - **V9 PASS recorded earlier stands, but its open question is now narrower.** Successful reads are
