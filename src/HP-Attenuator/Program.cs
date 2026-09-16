@@ -98,12 +98,27 @@ namespace HpAttenuator
 
         private static void ListResources()
         {
-            var resources = AnsiConsole.Status()
-                .Start("Scanning VISA bus...", _ => VisaInstrumentLink.FindResources().ToList());
+            // "VISA could not be reached" and "the bus is empty" are different answers and must not
+            // print the same message (#36). Reporting a broken VISA install as "no instruments found"
+            // sends the operator to check GPIB cabling when the fault is on this side of the connector.
+            List<string> resources = null;
+            string visaError = null;
+            AnsiConsole.Status().Start("Scanning VISA bus...",
+                _ => VisaInstrumentLink.TryFindResources(out resources, out visaError));
+
+            if (visaError != null)
+            {
+                AnsiConsole.MarkupLine($"[red]VISA could not be reached[/] — {visaError.EscapeMarkup()}");
+                AnsiConsole.MarkupLine("[grey]This is NOT 'no instruments found': the resource manager " +
+                                       "itself failed, so the bus was never scanned. Check the VISA " +
+                                       "installation/provider on this PC before checking any cabling.[/]");
+                return;
+            }
 
             if (resources.Count == 0)
             {
-                AnsiConsole.MarkupLine("[yellow]No VISA INSTR resources found.[/]");
+                AnsiConsole.MarkupLine("[yellow]No VISA INSTR resources found.[/] " +
+                                       "[grey](VISA answered — the bus really is empty.)[/]");
                 return;
             }
 

@@ -88,16 +88,41 @@ namespace HpAttenuator.Visa
             return (byte)_session.ReadStatusByte();
         }
 
-        /// <summary>Lists VISA INSTR resources visible to the resource manager.</summary>
+        /// <summary>
+        /// Lists VISA INSTR resources visible to the resource manager.
+        ///
+        /// Throws if the resource manager itself cannot be reached. It used to swallow that and return
+        /// an empty list, which made **"the bus is empty" and "VISA could not be reached" the same
+        /// answer** (#36, the same conflation as rendering a failed serial poll as 0x00). A broken VISA
+        /// install, a missing provider or a dead GPIB interface all reported as "no instruments found" —
+        /// which sends the operator to check cabling when the fault is entirely on the PC side of the
+        /// connector.
+        ///
+        /// An empty list now means what it says: VISA answered, and there is nothing on the bus.
+        /// </summary>
         public static IEnumerable<string> FindResources()
+        {
+            return new List<string>(GlobalResourceManager.Find("?*INSTR"));
+        }
+
+        /// <summary>
+        /// <see cref="FindResources"/> without the throw, for callers that want to tell the two cases
+        /// apart: returns false and sets <paramref name="error"/> if the resource manager could not be
+        /// reached, true with a (possibly empty) list if it answered.
+        /// </summary>
+        public static bool TryFindResources(out List<string> resources, out string error)
         {
             try
             {
-                return new List<string>(GlobalResourceManager.Find("?*INSTR"));
+                resources = new List<string>(GlobalResourceManager.Find("?*INSTR"));
+                error = null;
+                return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                return Array.Empty<string>();
+                resources = new List<string>();
+                error = $"{ex.GetType().Name}: {ex.Message}";
+                return false;
             }
         }
 

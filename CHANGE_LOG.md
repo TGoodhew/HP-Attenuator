@@ -13,6 +13,30 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased
 
+### #36 (third instance): an unreachable VISA reported as "no instruments found" (branch `issue-36-visa-scan-ambiguity`)
+
+Stacked on `issue-39-silent-measurement-decisions`. The same conflation as rendering a failed serial
+poll as `0x00`, now found a third time in a different layer.
+
+`VisaInstrumentLink.FindResources()` caught everything and returned an empty list, so **"the bus is
+empty" and "the resource manager could not be reached" were the same answer.** A broken VISA install,
+a missing provider or a dead GPIB interface all surfaced in the app as:
+
+> No VISA INSTR resources found.
+
+**That is a wrong diagnosis with a real cost** — it sends the operator to check GPIB cabling when the
+fault is entirely on the PC side of the connector. Unlike the sibling repo where the same defect was
+found, this one **is wired to a user-facing screen** (the app's "Scanning VISA bus…" menu option).
+
+- `FindResources()` now throws if the resource manager cannot be reached; an empty list means what it
+  says. Added `TryFindResources(out resources, out error)` for callers that want to tell them apart.
+- The app now prints **"VISA could not be reached"** with the underlying error and an explicit "this is
+NOT 'no instruments found' — check the VISA installation before checking any cabling", and the genuine
+  empty case says "(VISA answered — the bus really is empty.)"
+
+**Verified:** self-test 8/8 PASS, simulated sweep PASS. **Credit:** found by a peer session hitting the
+same defect in its own copy of this code and reporting it back.
+
 ### #39: two bare catches that silently changed what the measurement means (branch `issue-39-silent-measurement-decisions`)
 
 Stacked on `issue-37-failed-relay-write`. Result of sweeping for the rest of #37's defect class
