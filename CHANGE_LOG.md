@@ -30,6 +30,13 @@ From the O&C "Entry Errors" table (p.3-289):
 | 34 | Signal lost during calibration | Maintain frequency stability at RF INPUT during calibration |
 | 35 | Level error during calibration | Maintain signal stability at RF INPUT during calibration |
 
+**The reconstructed pairings say so in their own output.** Codes 30, 31, 32 and 34 append
+`[mapping reconstructed from an OCR-drifted table — confirm on the panel]`, so a bench log cannot
+present a guess as a fact — the same treatment the repo already gives the unverified auto-tune SF
+(`auto-tune (#3, unverified)` in the run header). **33 and 35 are deliberately NOT marked:** both are
+anchored by bench observations, and marking them too would dilute the marker until it meant nothing
+more than "an error code".
+
 **Provenance, because it matters here.** The scanned table's number column drifts a row against its
 message column, so this pairing is *reconstructed, not read off*. Two independent bench observations
 anchor it, and both land correctly under the straight sequential reading used above: **Error 33** was

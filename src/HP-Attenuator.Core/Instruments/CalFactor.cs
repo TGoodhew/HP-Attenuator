@@ -83,6 +83,16 @@ namespace HpAttenuator.Instruments
                 uncal: false, empty: false);
 
         /// <summary>
+        /// Appended to the codes whose number-to-message pairing is RECONSTRUCTED rather than read
+        /// off the scan, so a bench log cannot present a guess as a fact. Deliberately NOT applied to
+        /// 33 and 35: those two are anchored by bench observations (--force-range-cal at 20 dB raised
+        /// 33; Track Mode SF 32.9 raised 35) and marking them too would dilute the marker until it
+        /// meant nothing more than "an error code".
+        /// </summary>
+        private const string Unconfirmed =
+            "  [mapping reconstructed from an OCR-drifted table — confirm on the panel]";
+
+        /// <summary>
         /// Known 8902A operating-error messages (Operation manual, p.3-286; Entry Errors p.3-289).
         /// The message is what the front panel would be showing, so a log line carrying it saves
         /// walking to the bench to find out what the instrument already said.
@@ -112,15 +122,15 @@ namespace HpAttenuator.Instruments
                 // and matches "level error during calibration". Correct against GPIBUtils or the
                 // panel if a bench run ever contradicts one of these.
                 case 30: return "Manual input attenuation or gain selection " +
-                                "(change RF input attenuation and gain)";
+                                "(change RF input attenuation and gain)" + Unconfirmed;
                 case 31: return "Requires new power reference — CALIBRATE RF POWER before " +
-                                "attempting calibration of Tuned RF Level";
+                                "attempting calibration of Tuned RF Level" + Unconfirmed;
                 case 32: return "Calibration not possible " +
-                                "(move the input signal level into a valid calibration range)";
+                                "(move the input signal level into a valid calibration range)" + Unconfirmed;
                 case 33: return "Power sensor reference error — maintain consistency in FREQUENCY " +
                                 "AND LEVEL at the SENSOR during calibration";
                 case 34: return "Signal lost during calibration " +
-                                "(maintain frequency stability at RF INPUT during calibration)";
+                                "(maintain frequency stability at RF INPUT during calibration)" + Unconfirmed;
                 case 35: return "Level error during calibration " +
                                 "(maintain signal stability at RF INPUT during calibration)";
 
