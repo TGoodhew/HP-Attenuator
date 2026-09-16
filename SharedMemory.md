@@ -132,10 +132,31 @@ HP-8340B-Adjust, sim-only, and confirmed the bus was free and that no HP-Attenua
       can leave a residual offset, so the baseline read is what makes the first point exactly 0 dB.
     Both now trace loudly; neither changes behaviour.
 
+12. **#36 third instance fixed** — `issue-36-visa-scan-ambiguity`, STACKED on #39.
+    `VisaInstrumentLink.FindResources()` returned an empty list on ANY failure, so **"the bus is
+    empty" and "VISA could not be reached" were the same answer**. The app's "Scanning VISA bus"
+    screen is its only caller, so a broken VISA install / missing provider / dead interface printed
+    **"No VISA INSTR resources found"** — sending you to check GPIB cabling when the fault is on the
+    PC side. Now throws, with `TryFindResources` for callers that want to distinguish.
+
+### THE RECURRING DEFECT SHAPE (worth keeping in mind on any future review)
+
+**A failure returned as a legitimate value.** Found four times this session, in four different layers:
+a failed serial poll rendered as `0x00`; a refused write leaving no trace; a bus fault read as "end of
+the attenuator's range"; and an unreachable VISA reported as an empty bus. Plus two in #39 where a
+caught failure silently changed what the numbers mean.
+
+**The discriminator that makes this tractable is NOT "bare catch"** — 20 of 22 bare catches in
+`MeasurementEngine` are correct and were deliberately left alone (`ClearError` / `ReleaseBus` are
+best-effort recovery on an already-failed path). It is **"does the catch make a decision, or answer a
+question on behalf of an instrument that never answered?"** In practice: grep for catches containing
+`return` / `break` / `continue` first — every real instance found this session was one of those.
+
 ### BRANCH ORDER FOR MERGING (when the time comes)
 
 `issue-34-calibrate-completion-poll` → `issue-36-fail-visible-in-trace` → `issue-37-failed-relay-write`
-→ `issue-39-silent-measurement-decisions` (one stack, merge bottom-up).
+→ `issue-39-silent-measurement-decisions` → `issue-36-visa-scan-ambiguity`
+(one stack, merge bottom-up).
 `issue-30-leveller-uncal-recovery` and `issue-35-decode-cal-errors` are independent, off `main`.
 Nothing has been merged and nothing is hardware-validated.
 
