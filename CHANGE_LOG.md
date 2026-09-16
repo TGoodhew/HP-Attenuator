@@ -13,6 +13,45 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased
 
+### #37: a failed relay write is no longer treated as a non-event (branch `issue-37-failed-relay-write`)
+
+Stacked on `issue-36-fail-visible-in-trace` (which is stacked on `issue-34-...`), for the scripted link.
+Unlike the #36 logging gaps, these two change what the software and the operator **believe**, not just
+what gets logged.
+
+**1. A bus fault during the range-cal descent was silently reinterpreted as "end of range."**
+`CalibrateRfRanges` had `try { _attenuator.SetAttenuationDb(db); } catch { break; }` commented
+"beyond the attenuator's range — done". That is right for the `ArgumentOutOfRangeException` the solver
+raises, but this is also a **GPIB write** — and the codebase already knows it: the sweep loop's
+equivalent call carries a comment explaining it can raise `IOTimeoutException` when the previous 8902A
+cycle is still holding the bus (O&C 3-22, #11). A bare catch could not tell them apart, so **a wedged
+bus ended the descent early and reported it as a completed one.** Now only the range limit breaks
+quietly; anything else traces the fault and reports `range-cal: INCOMPLETE`, explicitly warning that
+the lower RF ranges were never visited and the deep points rest on stale factors.
+
+This also stops the two cases giving the *same* diagnosis: a faulted descent no longer prints the
+`NO-OP — RECAL never lit` message, which would send you to investigate the wrong thing. **Worth
+checking against #17/V2**, where the descent fires zero CALIBRATEs and the cause is unestablished — a
+swallowed write fault is not the leading explanation, but it was indistinguishable in the logs.
+
+**2. A failed relay command left a stale state the operator would believe.** `SetAttenuationDb`,
+`SetEngaged`, `SetBankDb` and the switch setters all wrote and *then* updated the shadow state, so a
+failed write kept the previous setting. The 11713A is **listen-only** — it cannot be asked what its
+relays are doing — and a failed write may still have reached the instrument, so the relays may or may
+not have moved. All relay writes now go through one `WriteRelay` helper that sets `DeviceState.IsKnown
+= false` on failure (a later success restores it), and the app shows **`TOTAL = UNKNOWN (last command
+FAILED)`** instead of a number that would be a guess.
+
+The measurement path is unaffected — it uses the commanded value, not the shadow — so this is a
+display-integrity fix, but it is the display the operator reads to decide what the attenuator is set to.
+
+- **Self-test gains an eighth case:** a good write leaves the state known and correct, a failed write
+  still propagates *and* marks it unknown, and a later success restores it. 8/8 PASS. Simulated sweep
+  unchanged (PASS).
+
+**Credit:** found by sweeping this codebase for a shape the peer session hit in a sibling repo, after
+they noted they had fixed one instance and not swept for the rest.
+
 ### #36: a refused write is now visible in the trace instead of silent (branch `issue-36-fail-visible-in-trace`)
 
 Stacked on `issue-34-calibrate-completion-poll`, because the scripted link that makes this testable

@@ -1009,6 +1009,7 @@ namespace HpAttenuator.Measurement
         private void CalibrateRfRanges()
         {
             int cals = 0;
+            bool rangeCalFaulted = false;   // the descent stopped on a fault, not on the range limit (#37)
             int start = _options.AttenStartDb;
             int forceIdx = 0;              // next ForceCalDepthsDb boundary awaiting a forced CALIBRATE
             double prev = double.NaN;      // previous absolute read, for the off-trend jump marker
@@ -1019,8 +1020,22 @@ namespace HpAttenuator.Measurement
 
             for (int db = start; db <= start + RangeCalReachDb && cals < MaxRfRangeCalibrations; db += _options.CalStepDb)
             {
+                // Only an unreachable VALUE is a normal end to the descent. This is also a GPIB
+                // write, and it can raise IOTimeoutException when the previous 8902A measurement cycle
+                // is still holding the bus (O&C 3-22, #11) — the sweep loop's equivalent call carries
+                // that same warning. A bare catch could not tell the two apart, so a wedged bus ended
+                // the descent early and reported it as a completed one (#37).
                 try { _attenuator.SetAttenuationDb(db); }
-                catch { break; }                       // beyond the attenuator's range — done
+                catch (ArgumentOutOfRangeException) { break; }   // beyond the attenuator's range — done
+                catch (Exception ex)
+                {
+                    Trace?.Invoke($"range-cal: ABORTED at {db} dB — the attenuator write FAILED " +
+                                  $"({ex.GetType().Name}: {ex.Message}). This is a bus/instrument fault, " +
+                                  "NOT the end of the attenuator's range: the RF ranges below this point " +
+                                  "were never visited, so any range factors they carry are stale (#37).");
+                    rangeCalFaulted = true;
+                    break;
+                }
                 Settle();
 
                 double read = double.NaN;
@@ -1063,10 +1078,19 @@ namespace HpAttenuator.Measurement
                 PanelReview?.Invoke($"After the CALIBRATE at {db} dB — did the reading stay valid (and any RECAL/UNCAL clear)?");
             }
 
-            if (cals == 0)
-                Trace?.Invoke("range-cal: NO-OP — 0 CALIBRATEs fired. The RF ranges are running on RESIDENT " +
-                              "factors, not a fresh calibration (issue #17). Add --force-range-cal to force a " +
-                              "per-range CALIBRATE, or check that RECAL lights on the panel during the descent.");
+            // Report a faulted descent as faulted. Without this, a descent cut short by a bus fault
+            // reported the same "NO-OP / RECAL never lit" diagnosis as one that ran to completion and
+            // found nothing to do — which is the wrong thing to go and investigate (#37).
+            if (rangeCalFaulted)
+                Trace?.Invoke($"range-cal: INCOMPLETE — {cals} CALIBRATE(s) fired before the descent hit a " +
+                              "bus/instrument fault (above). Do NOT read this as 'RECAL never lit': the lower " +
+                              "RF ranges were never reached at all, so this run's deep points rest on stale " +
+                              "range factors. Re-run before trusting anything below the abort point (#37).");
+            else if (cals == 0)
+                Trace?.Invoke("range-cal: NO-OP — 0 CALIBRATEs fired, descent completed normally. The RF " +
+                              "ranges are running on RESIDENT factors, not a fresh calibration (issue #17). " +
+                              "Add --force-range-cal to force a per-range CALIBRATE, or check that RECAL " +
+                              "lights on the panel during the descent.");
             else
                 Trace?.Invoke($"range-cal: {cals} CALIBRATE(s) fired.");
         }

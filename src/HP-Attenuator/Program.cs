@@ -167,8 +167,15 @@ namespace HpAttenuator
             var s9 = state.Switch9 == null ? "[grey]unset[/]" : (state.Switch9.Value ? "[green]A9[/]" : "[blue]B9[/]");
             var s0 = state.Switch0 == null ? "[grey]unset[/]" : (state.Switch0.Value ? "[green]A0[/]" : "[blue]B0[/]");
 
+            // A relay command that FAILED leaves the state unknowable: the 11713A is listen-only,
+            // so it cannot be asked, and the failed write may still have moved the relays. Show that
+            // rather than the last good setting, which the operator would otherwise read as current (#37).
+            string total = state.IsKnown
+                ? $"[bold yellow]{state.TotalDecibels(Config)} dB[/]"
+                : $"[bold red]UNKNOWN[/] [red](last command FAILED; showing {state.TotalDecibels(Config)} dB would be a guess)[/]";
+
             var panel = new Panel(table)
-                .Header($" {_atten.ResourceName.EscapeMarkup()}  •  TOTAL = [bold yellow]{state.TotalDecibels(Config)} dB[/]  •  S9={s9}  S0={s0} ")
+                .Header($" {_atten.ResourceName.EscapeMarkup()}  •  TOTAL = {total}  •  S9={s9}  S0={s0} ")
                 .Border(BoxBorder.Heavy);
             AnsiConsole.Write(panel);
         }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using HpAttenuator.Instruments;
+using HpAttenuator.Model;
 using HpAttenuator.Visa;
 using Spectre.Console;
 
@@ -79,17 +80,61 @@ namespace HpAttenuator.TestHarness
                 expectLog: "UNCONFIRMED");
 
             failures += CheckFailedWriteIsTraced(results);
+            failures += CheckFailedRelayWriteIsAdmitted(results);
 
             AnsiConsole.WriteLine();
             foreach (string r in results) AnsiConsole.MarkupLine(r);
             AnsiConsole.WriteLine();
 
             if (failures == 0)
-                AnsiConsole.MarkupLine("[green]CALIBRATE self-test PASS[/] — all 7 cases behaved as specified.");
+                AnsiConsole.MarkupLine("[green]CALIBRATE self-test PASS[/] — all 8 cases behaved as specified.");
             else
-                AnsiConsole.MarkupLine($"[red]CALIBRATE self-test FAIL[/] — {failures} of 7 cases failed.");
+                AnsiConsole.MarkupLine($"[red]CALIBRATE self-test FAIL[/] — {failures} of 8 cases failed.");
 
             return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// A relay command the bus refuses must leave the attenuator state marked UNKNOWN (#37).
+        ///
+        /// The 11713A is listen-only, so there is no readback to fall back on, and a failed write may
+        /// still have reached the instrument. Keeping the previous setting asserts something nobody
+        /// can know — and it is the value the app shows the operator as the current attenuation.
+        /// </summary>
+        private static int CheckFailedRelayWriteIsAdmitted(List<string> results)
+        {
+            var link = new ScriptedInstrumentLink();
+            var config = AttenuatorConfig.Default();
+            var atten = new Hp11713A(link, config);
+
+            atten.SetAttenuationDb(30);                 // succeeds: state is known and correct
+            bool knownAfterGood = atten.State.IsKnown;
+            int dbAfterGood = atten.State.TotalDecibels(config);
+
+            link.FailWrites = true;
+            bool threw = false;
+            try { atten.SetAttenuationDb(60); } catch { threw = true; }
+            bool knownAfterBad = atten.State.IsKnown;
+
+            link.FailWrites = false;
+            atten.SetAttenuationDb(20);                 // a later success re-establishes the state
+            bool knownAfterRecovery = atten.State.IsKnown;
+
+            var problems = new List<string>();
+            if (!knownAfterGood)      problems.Add("a successful write must leave the state KNOWN");
+            if (dbAfterGood != 30)    problems.Add($"expected 30 dB after a good write, got {dbAfterGood}");
+            if (!threw)               problems.Add("the failed relay write must still propagate");
+            if (knownAfterBad)        problems.Add("state still claims to be KNOWN after a FAILED write");
+            if (!knownAfterRecovery)  problems.Add("a later successful write must restore KNOWN");
+
+            bool ok = problems.Count == 0;
+            results.Add((ok ? "[green]  PASS[/] " : "[red]  FAIL[/] ") +
+                        "a refused relay write marks the attenuator state unknown" +
+                        (ok ? "" : "\n         [red]" + string.Join("; ", problems).EscapeMarkup() + "[/]") +
+                        "\n         [grey]The 11713A is listen-only, so a failed write leaves a setting " +
+                        "nobody can verify. The old code kept the previous value.[/]" +
+                        "\n         [grey]old code: kept the stale setting and called it current[/]");
+            return ok ? 0 : 1;
         }
 
         /// <summary>

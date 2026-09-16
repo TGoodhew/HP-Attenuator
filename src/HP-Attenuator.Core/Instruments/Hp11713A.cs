@@ -38,6 +38,28 @@ namespace HpAttenuator.Instruments
             SetEngaged(System.Array.Empty<int>());  // known state: 0 dB (all sections bypassed)
         }
 
+        /// <summary>
+        /// Writes a relay command, and marks the shadow state UNKNOWN if the write fails (#37).
+        ///
+        /// Every setter here used to write and then update <see cref="State"/>, so a failed write left
+        /// the PREVIOUS setting standing. The 11713A is listen-only — there is no readback — and a
+        /// failed write may still have reached the instrument, so the relays may or may not have moved.
+        /// Showing the old value in that situation is a lie the operator has no way to detect.
+        /// </summary>
+        private void WriteRelay(string command)
+        {
+            try
+            {
+                _link.Write(command);
+            }
+            catch
+            {
+                State.IsKnown = false;
+                throw;
+            }
+            State.IsKnown = true;   // this command defines the state
+        }
+
         private string Sense(string command)
         {
             if (!InvertSense) return command;
@@ -66,7 +88,7 @@ namespace HpAttenuator.Instruments
                     $"{db} dB is not achievable (range 0-{Config.MaxDecibels} dB).");
 
             string command = Sense(CommandBuilder.BuildString(Config.AllSections, new HashSet<int>(engaged)));
-            _link.Write(command);
+            WriteRelay(command);
 
             State.Engaged.Clear();
             foreach (var d in engaged) State.Engaged.Add(d);
@@ -81,7 +103,7 @@ namespace HpAttenuator.Instruments
         {
             var set = new HashSet<int>(digits);
             string command = Sense(CommandBuilder.BuildString(Config.AllSections, set));
-            _link.Write(command);
+            WriteRelay(command);
 
             State.Engaged.Clear();
             foreach (var d in set) State.Engaged.Add(d);
@@ -97,7 +119,7 @@ namespace HpAttenuator.Instruments
                     $"{db} dB is not achievable on this bank.");
 
             string command = Sense(CommandBuilder.BuildString(bank, new HashSet<int>(engaged)));
-            _link.Write(command);
+            WriteRelay(command);
 
             foreach (var s in bank) State.Engaged.Remove(s.Digit);
             foreach (var d in engaged) State.Engaged.Add(d);
@@ -108,7 +130,7 @@ namespace HpAttenuator.Instruments
         public string SetSwitch9(bool on)
         {
             string command = CommandBuilder.Switch9(on);
-            _link.Write(command);
+            WriteRelay(command);
             State.Switch9 = on;
             return command;
         }
@@ -117,12 +139,12 @@ namespace HpAttenuator.Instruments
         public string SetSwitch0(bool on)
         {
             string command = CommandBuilder.Switch0(on);
-            _link.Write(command);
+            WriteRelay(command);
             State.Switch0 = on;
             return command;
         }
 
         /// <summary>Sends a raw data string verbatim (not reflected in tracked state).</summary>
-        public void SendRaw(string command) => _link.Write(command);
+        public void SendRaw(string command) => WriteRelay(command);
     }
 }

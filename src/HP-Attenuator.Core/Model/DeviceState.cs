@@ -12,6 +12,16 @@ namespace HpAttenuator.Model
         /// <summary>Digits (1-8) of currently engaged attenuator sections.</summary>
         public HashSet<int> Engaged { get; } = new HashSet<int>();
 
+        /// <summary>
+        /// False once a relay command has FAILED to reach the driver (#37). The 11713A is listen-only
+        /// — it cannot be asked what its relays are doing — so after a failed write there is no way
+        /// to find out. The write may have reached the instrument, or reached it partially, so the
+        /// relays may or may not have moved: continuing to show the previous setting asserts something
+        /// nobody can know. A later successful command restores it, because that command defines the
+        /// state.
+        /// </summary>
+        public bool IsKnown { get; set; } = true;
+
         /// <summary>S9 switch: true = A9, false = B9, null = not yet set.</summary>
         public bool? Switch9 { get; set; }
 
