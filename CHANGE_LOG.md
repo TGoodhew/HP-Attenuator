@@ -13,6 +13,37 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased
 
+### Decode 8902A Entry Errors 30-35 — the CALIBRATE family (branch `issue-35-decode-cal-errors`)
+
+`Hp8902AException.Describe` had no entries for errors 30-35, so **every one of the codes behind #35,
+#17, V2 and V4 logged as "see 8902A manual error table"** — the least useful moment to have to reach
+for the manual, on a bench where reading the front panel costs a whole observation round-trip.
+
+From the O&C "Entry Errors" table (p.3-289):
+
+| Code | Message | Corrective action |
+|---|---|---|
+| 30 | Manual input attenuation or gain selection | Change RF input attenuation and gain |
+| 31 | Requires new power reference | **CALIBRATE RF POWER before attempting calibration of Tuned RF Level** |
+| 32 | Calibration not possible | Move the input signal level into a valid calibration range |
+| 33 | Power sensor reference error | **Maintain consistency in FREQUENCY AND LEVEL at the SENSOR during calibration** |
+| 34 | Signal lost during calibration | Maintain frequency stability at RF INPUT during calibration |
+| 35 | Level error during calibration | Maintain signal stability at RF INPUT during calibration |
+
+**Provenance, because it matters here.** The scanned table's number column drifts a row against its
+message column, so this pairing is *reconstructed, not read off*. Two independent bench observations
+anchor it, and both land correctly under the straight sequential reading used above: **Error 33** was
+raised by `--force-range-cal` at 20 dB and matches "power sensor reference error", and **Error 35** was
+raised by Track Mode (SF 32.9) and matches "level error during calibration". The caveat is recorded in
+the source. Correct against GPIBUtils or the panel if a bench run ever contradicts one of these.
+
+**Why this is more than tidying — it bears directly on #35.** Error 33's corrective action is
+"maintain consistency in frequency and **level** at the SENSOR during calibration", and error 31's is
+"calibrate RF Power *before* attempting calibration of Tuned RF Level". Both say the TRFL range
+CALIBRATE is referenced to the **power sensor**. That is a coherent explanation for #35's central
+puzzle — 0 dB calibrates cleanly and 20 dB raises Error 33 — because at 20 dB the level at the sensor
+is 20 dB away from where the sensor reference was established. See the analysis on #35.
+
 ### Bench session close: V8 still unproven, a 5 GHz hang found and scoped (2026-09-15, bench)
 
 - **V9 PASS recorded earlier stands, but its open question is now narrower.** Successful reads are

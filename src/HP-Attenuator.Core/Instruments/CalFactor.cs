@@ -82,7 +82,11 @@ namespace HpAttenuator.Instruments
                 "the 8902A front panel for the code (e.g. Error 35, level error during calibration)",
                 uncal: false, empty: false);
 
-        /// <summary>Known 8902A operating-error messages (Operation manual, p.3-286).</summary>
+        /// <summary>
+        /// Known 8902A operating-error messages (Operation manual, p.3-286; Entry Errors p.3-289).
+        /// The message is what the front panel would be showing, so a log line carrying it saves
+        /// walking to the bench to find out what the instrument already said.
+        /// </summary>
         public static string Describe(int code)
         {
             switch (code)
@@ -94,6 +98,32 @@ namespace HpAttenuator.Instruments
                 case 15: return "Calibration factor error (load cal factors)";
                 case 17: return "Tuned RF Level circuits underdriven";
                 case 18: return "RF Power will not calibrate";
+
+                // Entry Errors 30-35 (O&C "Entry Errors" table, p.3-289). These are the CALIBRATE
+                // family — the codes behind #35, #17, V2 and V4 — and until now every one of them
+                // logged as "see 8902A manual error table", which is the least useful moment to have
+                // to reach for the manual.
+                //
+                // PROVENANCE: the scanned table's number column drifts a row against its message
+                // column, so the pairing is reconstructed, not read off. Two independent bench
+                // observations anchor it and both land correctly under the straight sequential
+                // reading used here: Error 33 was raised by --force-range-cal at 20 dB and matches
+                // "power sensor reference error", and Error 35 was raised by Track Mode (SF 32.9)
+                // and matches "level error during calibration". Correct against GPIBUtils or the
+                // panel if a bench run ever contradicts one of these.
+                case 30: return "Manual input attenuation or gain selection " +
+                                "(change RF input attenuation and gain)";
+                case 31: return "Requires new power reference — CALIBRATE RF POWER before " +
+                                "attempting calibration of Tuned RF Level";
+                case 32: return "Calibration not possible " +
+                                "(move the input signal level into a valid calibration range)";
+                case 33: return "Power sensor reference error — maintain consistency in FREQUENCY " +
+                                "AND LEVEL at the SENSOR during calibration";
+                case 34: return "Signal lost during calibration " +
+                                "(maintain frequency stability at RF INPUT during calibration)";
+                case 35: return "Level error during calibration " +
+                                "(maintain signal stability at RF INPUT during calibration)";
+
                 case 96: return "No input signal sensed (cannot tune to a signal)";
                 default: return "see 8902A manual error table";
             }
