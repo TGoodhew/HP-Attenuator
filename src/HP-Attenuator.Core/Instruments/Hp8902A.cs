@@ -493,7 +493,44 @@ namespace HpAttenuator.Instruments
                              (pollFailures > 0 ? $", {pollFailures}/{polls} polls failed" : "") +
                              verdict);
 
-            if (err) throw Hp8902AException.CalibrateError(sb);
+            if (err) throw CalibrateFailure(sb);
+        }
+
+        /// <summary>
+        /// Builds the exception for a CALIBRATE that raised the instrument-error bit, capturing the
+        /// ACTUAL error code where possible instead of telling the operator to go and read the panel.
+        ///
+        /// The status byte only says "an error occurred" (0x04) — but the 8902A delivers the code in
+        /// the measurement read, as the sentinel +900000NNNNE+01 that <see cref="ParseReading"/>
+        /// already decodes. So one triggered read after the error bit turns "status 0x04, read the
+        /// front panel" into "Error 33: power sensor reference error — maintain consistency in
+        /// frequency and level at the SENSOR". On this bench a front-panel observation costs a whole
+        /// operator round-trip, so capturing the code over HP-IB is worth one extra read.
+        ///
+        /// Strictly best-effort: any failure here falls back to the status-byte-only message. This
+        /// must never change control flow — the caller's cal-failure path has to run either way.
+        ///
+        /// COST, stated honestly: the instrument-error bit is already set, so ReadMeasurement's poll
+        /// returns on the first iteration and the retrieve normally follows at once. But if the 8902A
+        /// has no sentinel queued, the retrieve can block up to the VISA session timeout (60 s) before
+        /// the catch below swallows it. That is bounded and only happens on an already-failed
+        /// CALIBRATE, which is a stop-the-run event anyway — but it is not free, and V17 should note
+        /// how long the failing CALIBRATE actually took.
+        /// </summary>
+        private Hp8902AException CalibrateFailure(int sb)
+        {
+            try
+            {
+                ReadMeasurement();   // expected to throw with the decoded code
+            }
+            catch (Hp8902AException ex) when (ex.Code > 0)
+            {
+                DebugLog?.Invoke($"8902A CALIBRATE error code {ex.Code}: {Hp8902AException.Describe(ex.Code)}");
+                return ex;
+            }
+            catch { /* no code available — fall through to the status-byte message */ }
+
+            return Hp8902AException.CalibrateError(sb);
         }
 
         public void SetReference()

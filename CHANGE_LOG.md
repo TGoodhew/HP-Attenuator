@@ -33,6 +33,18 @@ showed **Error 33**.
   zero status. **This matters for V10 itself:** part of that `0x00` observation may have been a
   failing poll rather than an early sample, and the two have different fixes. Same class of defect as
   #4, which fixed only the `Send` trace. Filed for the read path as #36.
+- **The real error code is now captured instead of deferred to the front panel.** The status byte only
+  says "an error occurred" (0x04), but the 8902A delivers the code in the measurement read, as the
+  `+900000NNNNE+01` sentinel `ParseReading` already decodes. So one triggered read after the error bit
+  turns *"status 0x04 — read the 8902A front panel for the code"* into *"Error 33: power sensor
+  reference error"*. On this bench a panel observation costs a whole operator round-trip, so that is
+  worth one extra read. Strictly best-effort and it never changes control flow.
+  **Cost, stated honestly:** the error bit is already set so the poll returns immediately, but if the
+  8902A has no sentinel queued the retrieve can block up to the 60 s session timeout before being
+  swallowed. Bounded, and only on an already-failed CALIBRATE — V17 should note how long it took.
+  **Cross-branch note:** the decoded *text* for codes 30-35 lives on `issue-35-decode-cal-errors`.
+  Until both are merged this branch logs `error code 33: see 8902A manual error table` — the code is
+  captured either way, only the description waits.
 - **Side effect worth noting for #8.** The old code polled *nothing* during the post-C1 settle, which
   is the exact complaint in [#8](https://github.com/TGoodhew/HP-Attenuator/issues/8) ("nothing polls
   during the post-calibrate settle", SRQ left latched). The new loop serial-polls every 250 ms through

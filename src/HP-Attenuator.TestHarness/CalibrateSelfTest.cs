@@ -38,9 +38,17 @@ namespace HpAttenuator.TestHarness
 
             failures += Check(results, "late error is caught",
                 "Error raised at ~6 s, after the old 2500 ms sample point — the #34 regression.",
-                link => link.Poll(0x00, 100).Poll(0x04, 1),
+                link => ErrorScript(link, 100),
                 expectThrow: true,
                 expectLog: "INSTRUMENT ERROR");
+
+            failures += Check(results, "the real error code is captured, not deferred to the panel",
+                "The status byte only says 0x04. The 8902A carries the code in the read sentinel, so " +
+                "one extra read turns 'read the front panel' into 'Error 33: power sensor reference " +
+                "error' — worth it where a panel observation costs an operator round-trip.",
+                link => ErrorScript(link, 100),
+                expectThrow: true,
+                expectLog: "error code 33");
 
             failures += Check(results, "normal completion",
                 "Data Ready after the minimum settle: completes, does not throw.",
@@ -51,7 +59,7 @@ namespace HpAttenuator.TestHarness
             failures += Check(results, "stale Data Ready is not completion",
                 "Data Ready already set on entry (left by the previous read) must not end the wait " +
                 "before the minimum settle, or a later error is missed.",
-                link => link.Poll(0x41, 10).Poll(0x00, 80).Poll(0x04, 1),
+                link => ErrorScript(link.Poll(0x41, 10), 80),
                 expectThrow: true,
                 expectLog: "INSTRUMENT ERROR");
 
@@ -75,11 +83,23 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.WriteLine();
 
             if (failures == 0)
-                AnsiConsole.MarkupLine("[green]CALIBRATE self-test PASS[/] — all 5 cases behaved as specified.");
+                AnsiConsole.MarkupLine("[green]CALIBRATE self-test PASS[/] — all 6 cases behaved as specified.");
             else
-                AnsiConsole.MarkupLine($"[red]CALIBRATE self-test FAIL[/] — {failures} of 5 cases failed.");
+                AnsiConsole.MarkupLine($"[red]CALIBRATE self-test FAIL[/] — {failures} of 6 cases failed.");
 
             return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Script for a CALIBRATE that runs quietly for <paramref name="quiet"/> polls and then raises
+        /// an instrument error. The trailing 0x04 and the queued sentinel let the follow-up read inside
+        /// the driver retrieve the actual code: +9000003300E+01 decodes to Error 33, the "power sensor
+        /// reference error" that --force-range-cal reproducibly raises at 20 dB (#35).
+        /// </summary>
+        private static ScriptedInstrumentLink ErrorScript(ScriptedInstrumentLink link, int quiet)
+        {
+            link.TrailingPoll = 0x04;                       // the error stays latched for the read
+            return link.Poll(0x00, quiet).Poll(0x04, 1).Reads("+9000003300E+01");
         }
 
         private static int Check(

@@ -876,6 +876,11 @@ Every section reproduced to within **0.09 dB** across a 13 dB change of referenc
      not take; a `poll failed` there means the real defect is the bus, not the sample point (#36).
   3. Confirm the elapsed time against the front panel: the cycle should complete at roughly the
      moment the log says it did.
+- **Also expected now:** the log should name the code itself — `8902A CALIBRATE error code 33: ...` —
+  captured from the read sentinel rather than asking you to read the panel. **Check the panel anyway
+  on this one run**, precisely to confirm the captured code matches what the instrument displays; that
+  is what licenses trusting it on every run afterwards. Note how long the failing CALIBRATE took: the
+  capture read can in principle block up to 60 s if no sentinel is queued.
 - **PASS =** a real Error 33 is reported as a failure, with an elapsed time matching the observed
   cycle, and no `0x00` standing in for a failed poll.
 - **Not yet run on hardware.**
