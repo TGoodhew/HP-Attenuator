@@ -146,6 +146,11 @@ a failed serial poll rendered as `0x00`; a refused write leaving no trace; a bus
 the attenuator's range"; and an unreachable VISA reported as an empty bus. Plus two in #39 where a
 caught failure silently changed what the numbers mean.
 
+**Severity lives in the CALLER, not the function.** The `FindResources` defect was identical in a
+sibling repo and free to fix there because nothing called it; here it backs the app's "Scanning VISA
+bus" screen, so it had been giving a wrong diagnosis to whoever was standing at the bench. When
+triaging an instance of a shape, look at who calls it before deciding it is cosmetic.
+
 **The discriminator that makes this tractable is NOT "bare catch"** — 20 of 22 bare catches in
 `MeasurementEngine` are correct and were deliberately left alone (`ClearError` / `ReleaseBus` are
 best-effort recovery on an already-failed path). It is **"does the catch make a decision, or answer a
