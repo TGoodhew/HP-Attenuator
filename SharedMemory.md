@@ -109,10 +109,33 @@ HP-8340B-Adjust, sim-only, and confirmed the bus was free and that no HP-Attenua
    in exactly the places now fixed — `Hp8902A.Send`, `VisaInstrumentLink.Write`, `Hp11713A`'s setters,
    and `CalibrateRfRanges`. **No further instances.**
 
+10. **[#38](https://github.com/TGoodhew/HP-Attenuator/issues/38) filed (Tony's request): abstract the
+    measurement chain** so a single 8720C VNA could replace the 8902A + 8340B + 8673B + 11793A chain.
+    Finding: the seam exists in name (`IMeasuringReceiver`) but sits at instrument level — **27
+    members, ~3 of which survive contact with a VNA**, and `Interfaces.cs` itself references
+    `Hp8902AException` (28 uses outside the driver; the engine branches on `IsUncal`/`IsEmpty`/`Code
+    == 96`). The 8902A's *method* is in the engine too (SET REF substitution, 3-range CALIBRATE,
+    levelling under a 0 dBm ceiling, the #21/#13 floor model). **A VNA does not swap in behind the
+    receiver interface** — it replaces source + LO + converter + receiver at once and changes the
+    method. Proposed seam is one level up ("measure attenuation at this setting; say when it is not
+    trustworthy"), sequenced so step 1 (get `Hp8902AException` out of the engine's control flow) pays
+    off even if the VNA never happens. Prerequisite for #29; cross-referenced from #28/#29.
+
+11. **[#39](https://github.com/TGoodhew/HP-Attenuator/issues/39) filed and fixed** —
+    `issue-39-silent-measurement-decisions`, STACKED on #37. Swept the rest of #37's defect class.
+    **22 bare catches in `MeasurementEngine`; 20 are correct** (best-effort `ClearError` / `ReleaseBus`
+    on an already-failed path) **and were left alone.** Two were not:
+    - `MaybeCalibrateBoundary` caught the `RecalRequested()` poll and returned — so a **failed poll was
+      indistinguishable from "no RECAL"**, silently skipping the boundary CALIBRATE and letting the
+      sweep cross an uncalibrated RF range. That produces plausible-but-wrong numbers, not an error.
+    - A **failed baseline read silently un-normalised every point** of a per-attenuator run. SET REF
+      can leave a residual offset, so the baseline read is what makes the first point exactly 0 dB.
+    Both now trace loudly; neither changes behaviour.
+
 ### BRANCH ORDER FOR MERGING (when the time comes)
 
 `issue-34-calibrate-completion-poll` → `issue-36-fail-visible-in-trace` → `issue-37-failed-relay-write`
-(one stack, merge bottom-up).
+→ `issue-39-silent-measurement-decisions` (one stack, merge bottom-up).
 `issue-30-leveller-uncal-recovery` and `issue-35-decode-cal-errors` are independent, off `main`.
 Nothing has been merged and nothing is hardware-validated.
 
