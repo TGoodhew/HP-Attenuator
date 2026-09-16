@@ -13,6 +13,37 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased
 
+### #39: two bare catches that silently changed what the measurement means (branch `issue-39-silent-measurement-decisions`)
+
+Stacked on `issue-37-failed-relay-write`. Result of sweeping for the rest of #37's defect class
+instead of stopping at the first instance.
+
+**Most bare catches in the engine are fine and were left alone.** `try { ClearError(); } catch {}` and
+`try { ReleaseBus(); } catch {}` are best-effort recovery on an already-failed path — swallowing is
+correct there. Of 22 bare catches in `MeasurementEngine`, **two** made a decision that silently
+changed the meaning of the output.
+
+1. **A failed serial poll silently meant "no range calibration needed."** `MaybeCalibrateBoundary` had
+   `try { recal = _receiver.RecalRequested(); } catch { return; }`, so a bus fault returned exactly as
+   though the receiver had said no. The sweep then carried on across an RF range boundary that was
+   never calibrated — which does not raise an error, it produces **plausible numbers that are wrong**
+   (the drift signature of the #14 sync run). Now traced, and explicitly warns against reading it as
+   "RECAL never lit". Same ambiguity as #36: a failed poll and a poll that answered were conflated.
+
+2. **A failed baseline read silently un-normalised every point** of a per-attenuator run. The comment
+   said so; nothing told the operator. The software normalisation is not decorative — SET REF can
+   leave a small residual offset, and the baseline read is what guarantees the first point is exactly
+   0 dB — so losing it puts an unreported offset into every point while the results look normal. Now
+   a prominent trace saying the numbers are raw readings, not attenuation, and to re-run.
+
+Neither changes behaviour: a run that completes today still completes. Both now say what happened.
+
+**Deliberately left alone:** `ReadTrflCalFactor` / `ReadFirmwareDateCode` return `double.NaN` from a
+bare catch. That is documented, callers check the NaN, and "unreadable" is a legitimate answer for a
+diagnostic read.
+
+**Verified:** self-test 8/8 PASS, simulated sweep PASS, simulated per-attenuator run PASS.
+
 ### #37: a failed relay write is no longer treated as a non-event (branch `issue-37-failed-relay-write`)
 
 Stacked on `issue-36-fail-visible-in-trace` (which is stacked on `issue-34-...`), for the scripted link.

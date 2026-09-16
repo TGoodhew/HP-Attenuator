@@ -747,7 +747,18 @@ namespace HpAttenuator.Measurement
             bool haveBaseline = false;
             double baselineRelDb = 0.0;
             try { baselineRelDb = ReadRelativeDbWithRetry(ReferenceReadAttempts); haveBaseline = true; }
-            catch { /* baseline read failed; points reported un-normalised */ }
+            catch (Exception ex)
+            {
+                // Say it. The run still completes — but every point below now carries an unknown
+                // offset, and without this line the results look entirely normal (#39). The software
+                // normalisation is not decorative: SET REF can leave a small residual offset, and this
+                // baseline read is what guarantees the first point is exactly 0 dB.
+                Trace?.Invoke($"*** BASELINE READ FAILED ({ex.GetType().Name}) *** — the 0 dB reference " +
+                              "for this attenuator could not be read, so every point below is reported " +
+                              "UN-NORMALISED: raw receiver readings, not attenuation relative to 0 dB. " +
+                              "They carry whatever residual offset SET REF left. Treat this run's numbers " +
+                              "as indicative only and re-run before trusting them (#39).");
+            }
 
             int index = 0, total = settings.Count;
             foreach (var s in settings)
@@ -923,8 +934,23 @@ namespace HpAttenuator.Measurement
         {
             if (!_options.RangeCalibrate || boundaryCals >= MaxBoundaryCalibrations) return;
 
+            // A FAILED poll is not the same answer as "no recalibration needed" (#39). This used to
+            // return on both, so a bus fault silently skipped the boundary CALIBRATE and the sweep
+            // carried on across an uncalibrated RF range — which does not error, it just produces
+            // plausible numbers that are wrong (the drift signature of the #14 sync run).
             bool recal;
-            try { recal = _receiver.RecalRequested(); } catch { return; }
+            try
+            {
+                recal = _receiver.RecalRequested();
+            }
+            catch (Exception ex)
+            {
+                Trace?.Invoke($"boundary-cal: the RECAL poll FAILED ({ex.GetType().Name}) — the boundary " +
+                              "CALIBRATE was SKIPPED for this point. Do NOT read this as 'RECAL never lit': " +
+                              "we do not know what the receiver would have said, so any range crossed here " +
+                              "may be running uncalibrated (#39).");
+                return;
+            }
             if (!recal) return;
 
             try
