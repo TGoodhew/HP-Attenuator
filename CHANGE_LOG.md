@@ -13,6 +13,30 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased
 
+### #36: a refused write is now visible in the trace instead of silent (branch `issue-36-fail-visible-in-trace`)
+
+Stacked on `issue-34-calibrate-completion-poll`, because the scripted link that makes this testable
+lives there.
+
+**Precautionary, not a fix for an observed failure** — no run has been traced to this. It is the same
+defect class as the two #36 ambiguities already found, in the same theme: *the diagnostic record is
+least trustworthy exactly where it matters most.*
+
+- **`Hp8902A.Send` traced only AFTER a successful write.** If `_link.Write` threw, nothing was logged —
+  so a wedged bus produced an unbroken run of healthy traffic, then silence, with **no record of which
+  command was in flight**. Now traced as `WRITE FAILED (<type>)` before the exception propagates. The
+  exception still propagates: this is about the record, not about recovery.
+- **`VisaInstrumentLink.Write` appended to `_history` only after a successful write**, so a command the
+  bus rejected vanished from the history entirely. That history is what the app shows the user as
+  "what was sent" for the 11713A, and it drives their mental model of the switch state — **a command
+  that failed is precisely the one they need to see**, because it means the attenuator is not where
+  they think it is. Now recorded as `<cmd>   <-- WRITE FAILED`.
+- **Self-test gains a seventh case** (`ScriptedInstrumentLink.FailWrites`): the failure must propagate,
+  the trace must contain `WRITE FAILED`, and it must say *which* command failed. 7/7 PASS.
+
+**Credit:** found by checking this codebase against a defect the peer session hit in HP-8340B-Adjust
+(its bus audit log went quiet at the failure because `Log()` sat after the throwing call).
+
 ### #34: CALIBRATE now waits for the cycle to finish before judging it (branch `issue-34-calibrate-completion-poll`)
 
 Fixes the highest-severity open defect: **every "CALIBRATE succeeded" this harness has ever reported

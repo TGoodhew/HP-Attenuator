@@ -78,16 +78,55 @@ namespace HpAttenuator.TestHarness
                 expectThrow: false,
                 expectLog: "UNCONFIRMED");
 
+            failures += CheckFailedWriteIsTraced(results);
+
             AnsiConsole.WriteLine();
             foreach (string r in results) AnsiConsole.MarkupLine(r);
             AnsiConsole.WriteLine();
 
             if (failures == 0)
-                AnsiConsole.MarkupLine("[green]CALIBRATE self-test PASS[/] — all 6 cases behaved as specified.");
+                AnsiConsole.MarkupLine("[green]CALIBRATE self-test PASS[/] — all 7 cases behaved as specified.");
             else
-                AnsiConsole.MarkupLine($"[red]CALIBRATE self-test FAIL[/] — {failures} of 6 cases failed.");
+                AnsiConsole.MarkupLine($"[red]CALIBRATE self-test FAIL[/] — {failures} of 7 cases failed.");
 
             return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// A write the bus refuses must still appear in the trace (#36). The trace used to be emitted
+        /// only after a SUCCESSFUL write, so a wedged bus made the log fall silent at exactly the point
+        /// of failure — healthy traffic, then nothing, with no record of the command in flight. The
+        /// exception must still propagate: this is about the diagnostic record, not about recovery.
+        /// </summary>
+        private static int CheckFailedWriteIsTraced(List<string> results)
+        {
+            var link = new ScriptedInstrumentLink { FailWrites = true };
+            var log = new StringBuilder();
+            var rx = new Hp8902A(link) { CalibrateMinSettleMs = MinSettleMs, CalibrateBudgetMs = BudgetMs };
+
+            Action<string> previous = Hp8902A.DebugLog;
+            Hp8902A.DebugLog = m => log.AppendLine(m);
+            bool threw = false;
+            try { rx.Calibrate(); }
+            catch { threw = true; }
+            finally { Hp8902A.DebugLog = previous; }
+
+            string text = log.ToString();
+            var problems = new List<string>();
+            if (!threw) problems.Add("the write failure must still propagate");
+            if (text.IndexOf("WRITE FAILED", StringComparison.Ordinal) < 0)
+                problems.Add("the failed write is missing from the trace");
+            if (text.IndexOf("C1", StringComparison.Ordinal) < 0)
+                problems.Add("the trace does not say WHICH command failed");
+
+            bool ok = problems.Count == 0;
+            results.Add((ok ? "[green]  PASS[/] " : "[red]  FAIL[/] ") +
+                        "a refused write is traced, not silent" +
+                        (ok ? "" : "\n         [red]" + string.Join("; ", problems).EscapeMarkup() + "[/]") +
+                        "\n         [grey]A wedged bus used to make the log fall silent at the moment " +
+                        "of failure, with no record of the command in flight.[/]" +
+                        "\n         [grey]old code: logged nothing at all[/]");
+            return ok ? 0 : 1;
         }
 
         /// <summary>

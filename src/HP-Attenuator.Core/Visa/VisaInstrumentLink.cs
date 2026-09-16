@@ -49,7 +49,22 @@ namespace HpAttenuator.Visa
         public void Write(string command)
         {
             if (command == null) throw new ArgumentNullException(nameof(command));
-            _session.RawIO.Write(command + "\n");
+
+            // Record the command even when the write fails (#36). This used to append to _history
+            // only after a SUCCESSFUL write, so a command the bus rejected vanished from the history
+            // entirely. The 11713A history is what the app shows the user as "what was sent", which
+            // drives their mental model of the switch state — and a command that failed is exactly
+            // the one they need to see, because it means the attenuator is NOT where they think.
+            try
+            {
+                _session.RawIO.Write(command + "\n");
+            }
+            catch
+            {
+                _history.Add(command + "   <-- WRITE FAILED");
+                throw;
+            }
+
             _history.Add(command);
             Beep();
         }

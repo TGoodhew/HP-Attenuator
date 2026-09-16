@@ -58,7 +58,15 @@ namespace HpAttenuator.Visa
 
         public void Clear() { _history.Add("<CLEAR>"); }
 
-        public void Write(string command) => _history.Add(command);
+        /// <summary>When set, <see cref="Write"/> throws — models a bus that will not accept the
+        /// command, so the trace's behaviour on a failed write is testable (#36).</summary>
+        public bool FailWrites { get; set; }
+
+        public void Write(string command)
+        {
+            if (FailWrites) throw new TimeoutException("scripted write fault");
+            _history.Add(command);
+        }
 
         public string Read() => _reads.Count > 0 ? _reads.Dequeue() : string.Empty;
 

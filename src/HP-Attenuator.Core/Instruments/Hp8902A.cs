@@ -48,7 +48,22 @@ namespace HpAttenuator.Instruments
         /// </summary>
         private void Send(string command)
         {
-            _link.Write(command);
+            // Trace the command even if the WRITE throws (#36). The trace used to be emitted only
+            // after a successful write, so a wedged bus made the log fall silent at exactly the moment
+            // things broke — an unbroken run of healthy traffic, then nothing, with no record of which
+            // command was in flight. That is the same class of defect as rendering a failed poll as
+            // 0x00: the diagnostic record is least trustworthy precisely where it matters most.
+            try
+            {
+                _link.Write(command);
+            }
+            catch (Exception ex)
+            {
+                DebugLog?.Invoke($"8902A < {command,-14} WRITE FAILED ({ex.GetType().Name}) " +
+                                 "<-- the bus did not accept this command; nothing after it ran");
+                throw;
+            }
+
             if (DebugLog == null) return;
 
             int sb = PollStatusForTrace();
