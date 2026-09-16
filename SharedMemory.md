@@ -88,9 +88,31 @@ HP-8340B-Adjust, sim-only, and confirmed the bus was free and that no HP-Attenua
    the app shows the user for the 11713A. Both now recorded. **Precautionary — no run traced to
    either.** Self-test now 7/7.
 
+8. **[#37](https://github.com/TGoodhew/HP-Attenuator/issues/37) filed and fixed** —
+   `issue-37-failed-relay-write`, STACKED on #36. Unlike the #36 logging gaps these change what the
+   software and the operator **believe**:
+   - **A bus fault during the range-cal descent was reinterpreted as "end of range."**
+     `CalibrateRfRanges` had `catch { break; }` — right for the solver's `ArgumentOutOfRangeException`,
+     wrong for the `IOTimeoutException` this same GPIB write can raise when the previous 8902A cycle
+     holds the bus (#11). A wedged bus ended the descent early and reported it complete, printing the
+     *same* "NO-OP / RECAL never lit" diagnosis as a clean descent. Now `range-cal: INCOMPLETE`.
+     **Check against #17/V2** — not the leading explanation for the zero-CALIBRATE descent, but it was
+     indistinguishable in the logs.
+   - **A failed relay command left a stale state.** The 11713A is listen-only — no readback — and a
+     failed write may still have moved the relays. `DeviceState.IsKnown` now goes false on a failed
+     write and the app shows `TOTAL = UNKNOWN`. Measurement path unaffected (it uses the commanded
+     value), so this is display integrity — but it is the display the operator reads.
+
+9. **Sweep done, and it came back clean.** After #37 I checked every driver for the same
+   "record/act after the throwing call" shape: `Hp8340B` and `Hp8673B` are stateless expression-bodied
+   writes with no shadow state, and `SerialPoll` already lets exceptions propagate. The shape existed
+   in exactly the places now fixed — `Hp8902A.Send`, `VisaInstrumentLink.Write`, `Hp11713A`'s setters,
+   and `CalibrateRfRanges`. **No further instances.**
+
 ### BRANCH ORDER FOR MERGING (when the time comes)
 
-`issue-34-calibrate-completion-poll` → `issue-36-fail-visible-in-trace` (stacked on it).
+`issue-34-calibrate-completion-poll` → `issue-36-fail-visible-in-trace` → `issue-37-failed-relay-write`
+(one stack, merge bottom-up).
 `issue-30-leveller-uncal-recovery` and `issue-35-decode-cal-errors` are independent, off `main`.
 Nothing has been merged and nothing is hardware-validated.
 
