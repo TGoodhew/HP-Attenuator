@@ -56,6 +56,40 @@ HP-8340B-Adjust, sim-only, and confirmed the bus was free and that no HP-Attenua
    failed" at the #21 bypass and the #23 step-plan fallback. New **`--sim-uncal-first-read [n]`** makes
    the defect reproducible in sim, which it never was before.
 
+### Added after the first pass (same session, still code-only)
+
+4. **`issue-35-decode-cal-errors`** — `Describe()` had **no entries for errors 30-35**, the entire
+   CALIBRATE family, so every code behind #35/#17/V2/V4 logged as "see 8902A manual error table".
+   Added, with the reconstruction caveat recorded in source (the scan's number column drifts a row;
+   bench observations of Error 33 and Error 35 both anchor the sequential reading).
+
+5. **A hypothesis for #35, from that table.** Error 31 = "CALIBRATE RF POWER *before* attempting
+   calibration of Tuned RF Level" and Error 33 = "maintain consistency in frequency **and level** at
+   the SENSOR during calibration". Both say the TRFL range CALIBRATE is **referenced to the power
+   sensor** — which would explain why 0 dB calibrates cleanly and 20 dB raises Error 33: 0 dB is the
+   only depth where the level at the sensor still matches where the reference was established. If it
+   holds, `--force-range-cal` cannot work at arbitrary depth *by design*, and #35 becomes a
+   characterisation ("how far can the sensor level drift before the reference is rejected"), not a bug
+   hunt. **Hypothesis from a reconstructed table — not a finding.** Test = step the forced CALIBRATE
+   depth 0/2/5/10/15/20 dB and look for a sharp edge. **Do it only after V17 passes**, since the old
+   `Calibrate()` reported `status = 0x00` through a real Error 33, so even "0 dB calibrates cleanly"
+   is currently unverified.
+
+6. **`Calibrate()` now captures the actual error code** (on the #34 branch) from the read sentinel the
+   8902A already returns, so a failed CALIBRATE logs `error code 33` instead of "read the front panel".
+   That is what makes the six-depth experiment above practical — otherwise it costs six operator
+   round-trips. Cost recorded honestly: the capture read can block up to the 60 s session timeout if
+   no sentinel is queued.
+
+### Peer cross-check (`tony-d6`, HP-8340B-Adjust)
+
+They suggested two sensor-cal patterns. **Both are already implemented here** — `ZeroSensor()` sends
+`C0` before `ZR`, and `CalibrateSensor()` already refuses to `SC` when the reference reads below
+-10 dBm. Their copy was derived from reading this repo's `Hp8902A.cs`, so this is our own pattern
+coming back. Recorded so nobody "adopts" it twice. Their third point — a post-condition on the TRFL
+CALIBRATE — has its applicable form on the #30 branch already (CALIBRATE, re-read, a second UNCAL
+propagates). They also found and fixed the same unenforced-deadline bug in their own poller.
+
 ### Next, in order
 
 1. **Bench: V17** (#34). Highest priority — until it is confirmed, no CALIBRATE result from this rig
@@ -64,7 +98,7 @@ HP-8340B-Adjust, sim-only, and confirmed the bus was free and that no HP-Attenua
 2. **Bench: V15** (#30) — the 3 GHz regression command in its ledger row.
 3. **#36's structural half** — bound the poll itself and log per-poll durations. That instrumentation
    also serves **V9**, whose unexplained 18.4 s/read needs the same trigger/poll/retrieve split.
-4. **#35**, then the rest.
+4. **#35** — the sensor-reference hypothesis above, after V17. Then the rest.
 
 ### Unchanged and still true
 
