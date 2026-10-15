@@ -1,6 +1,6 @@
 # Shared Memory — HP-Attenuator working state
 
-A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-10-15.
+A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-10-15 (evening).
 (Personal per-machine notes live outside the repo; this file is the shared, committed record.)
 
 ## Working model (author is traveling — away from the GPIB rig until back in Renton)
@@ -13,6 +13,48 @@ A cross-machine handoff snapshot so work can continue from anywhere. Updated 202
   bench-validated and the author says so.
 - **Standing git default: commit + push** every change, branches included. No manual merge-to-`main`
   gate anymore — combine freely; validation is deferred to the ledger, not blocked before merge.
+
+## STOPPING POINT — 2026-10-15 evening, bench session then code (instruments powered OFF)
+
+**The author powered the bench down at the end. Today's sensor cal is therefore stale: the next
+session must zero and calibrate again** (the non-interactive way: RF off on 20/19, `--sensor-zero`, move
+the sensor, `--sensor-calibrate`, move it back; never the interactive `--sensor-cal` from Claude).
+
+**Run everything from `bench-2026-10-15`**, the merge candidate. It is the #34 stack +
+`issue-36-bounded-poll` + `issue-30` + `issue-35` + `issue-34-srq-completion` + `issue-41-trfl-cal-errors`.
+Nothing is merged to `main`.
+
+### Bench results (details in HardwareValidation.md)
+- **V17 ❌, and conclusively: this 8902A does not report a TRFL CALIBRATE error over HP-IB at all.**
+  Error 33 at 60 dB, watched on the panel four times: status byte 0x00 with mask 22.37 in force, **SRQ
+  lamp never lit**, and a read straight after C1 returned a normal level. Polling continuously was a
+  separate real bug (O&C 3-32), fixed on `issue-34-srq-completion`, but the fix does not make 33 visible.
+- **#35 re-scoped:** 20 dB calibrated clean 3/3 once nothing moved the level mid-cycle. The 9/15 Error 33
+  at 20 dB was the old 2.5 s code stepping the attenuator during a 6.5-7.4 s CALIBRATE. Real limit:
+  between 20 and 60 dB. A failed deep CALIBRATE shifts the absolute 0 dB reading (+1.0 / +0.37 dB);
+  `--trfl-recal` restores it.
+- **Candidate detector:** a CALIBRATE holds the bus, ~18 s clean (20 dB) vs ~6.7 s failing (60 dB).
+  Two points; V19 is there to gather more.
+- **V15 ⬜:** no regression, but the first read was not UNCAL, so the #30 recovery did not run. The FAIL
+  verdict was depth (80/90 dB +1.6/+2.7, V4's known average-detector drift), not #30.
+- **V18 not run.** Partial evidence: a settled read is ONE poll blocking 6-9 s, so the 15 s poll floor
+  was necessary.
+- **VISA SRQ events are unavailable here** (`NativeVisaException` from EnableEvent/WaitOnEvent).
+
+### Code (after the bench was stopped)
+- **#41** (from the author's pasted task): one error decoder (`Hp8902AReading`, manual text), a
+  `Calibrate()` that confirms positively (stability gate → C1 → read → decode, per-error handling, bus-hold
+  SUSPECT flag), and engine stops so nothing steps after an unconfirmed CALIBRATE. New MSTest project,
+  63/63. **Fixed:** the old `Describe` table had Operating Errors 01-18 shifted by one.
+- **#42** filed: the bench diagnostic (30-series vs Operating Error under 22.36SP).
+
+### Next, in order
+1. Fresh sensor cal. 2. **V19** (V17's command, panel watched) — gathers the hold-time data. 3. **V18**
+(5 GHz hang re-run). 4. **#42** diagnostic. 5. **#35**: bisect 30/40/50 dB by panel.
+
+### Observation protocol addition
+**One beep = start watching the panel, two beeps = you can stop.** Time the double beep to the visible
+end of the event (~15 s after a CALIBRATE release), not to when the harness finishes.
 
 ## STOPPING POINT — 2026-10-15, code-only session (bench never touched)
 
