@@ -63,7 +63,7 @@ Checked against the scan (8902A.pdf p. 3-104) and today's bench data:
 
 **Filed upstream:** [TGoodhew/GPIB-MCP#168](https://github.com/TGoodhew/GPIB-MCP/issues/168) —
 gpib-mcp `manual_search` returns "no text extractor available" for every 8902A PDF (needs `pdftotext`;
-a copy exists at `C:\Program Files\Git\mingw64in\pdftotext.exe`, not on the server's PATH). Use
+a copy exists at `C:\Program Files\Git\mingw64\bin\pdftotext.exe`, not on the server's PATH). Use
 ManualForge `read_manual_page` for the manuals meanwhile.
 
 ### Protocol notes
