@@ -8,7 +8,7 @@ namespace HpAttenuator.Instruments
     /// <summary>
     /// Settings for a Tuned RF Level CALIBRATE (#41). All are configurable (harness flags
     /// <c>--cal-gate-samples</c>, <c>--cal-gate-tol</c>, <c>--cal-retries</c>, <c>--cal-retry-wait-ms</c>,
-    /// <c>--cal-result-timeout-ms</c>, <c>--cal-suspect-hold-ms</c>); none is hard-coded in the routine.
+    /// <c>--cal-result-timeout-ms</c>, <c>--cal-suspect-cycle-ms</c>); none is hard-coded in the routine.
     /// </summary>
     public sealed class TrflCalibrationOptions
     {
@@ -37,14 +37,19 @@ namespace HpAttenuator.Instruments
         public int ResultTimeoutMs { get; set; } = 60000;
 
         /// <summary>
-        /// A CALIBRATE that releases the bus sooner than this is flagged SUSPECT, ms; 0 = off. Basis: on
-        /// 2026-10-15 a clean CALIBRATE at 20 dB held the bus ~18 s and one that raised Error 33 at
-        /// 60 dB only ~6.7 s. That is two data points, so by default this only WARNS.
+        /// A CALIBRATE whose cycle — C1 sent to result read — is shorter than this is flagged SUSPECT, ms;
+        /// 0 = off. Error 33 never reaches HP-IB on this receiver (V17), but a failing CALIBRATE ends
+        /// early. Bench, 2026-10-15/16, every point checked against the panel at 3 GHz:
+        /// clean 19.4-24.0 s (0, 20, 50 dB and two 0 dB --trfl-recal), Error 33 14.2-16.4 s
+        /// (30, 40, 60 dB). The bus-hold time (C1 to the trigger write being accepted) separated them
+        /// too, except that in --trfl-recal the 8902A accepted the write at once and made the poll wait
+        /// instead — a 0.1 s "hold" on a clean CALIBRATE — so the whole cycle is the measure used.
+        /// Nine points from one frequency: by default this only WARNS.
         /// </summary>
-        public int SuspectHoldMs { get; set; } = 10000;
+        public int SuspectCycleMs { get; set; } = 18000;
 
-        /// <summary>Treat a SUSPECT (short-hold) CALIBRATE as a failure instead of a warning.</summary>
-        public bool SuspectHoldIsFailure { get; set; }
+        /// <summary>Treat a SUSPECT (short-cycle) CALIBRATE as a failure instead of a warning.</summary>
+        public bool SuspectCycleIsFailure { get; set; }
     }
 
     /// <summary>How a CALIBRATE ended.</summary>
@@ -52,7 +57,7 @@ namespace HpAttenuator.Instruments
     {
         /// <summary>A valid reading after C1, with RECAL/UNCAL not asserted.</summary>
         Confirmed,
-        /// <summary>Confirmed, but the cycle was shorter than <see cref="TrflCalibrationOptions.SuspectHoldMs"/>.</summary>
+        /// <summary>Confirmed, but the cycle was shorter than <see cref="TrflCalibrationOptions.SuspectCycleMs"/>.</summary>
         ConfirmedSuspect,
         /// <summary>The level never steadied within tolerance — C1 was not sent.</summary>
         Unstable,

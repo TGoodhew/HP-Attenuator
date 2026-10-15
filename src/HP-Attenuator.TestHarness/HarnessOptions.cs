@@ -134,8 +134,8 @@ namespace HpAttenuator.TestHarness
                     case "--cal-retries": o.Cal.MaxRetries = I(Need(args, ++i)); break;
                     case "--cal-retry-wait-ms": o.Cal.RetryWaitMs = I(Need(args, ++i)); break;
                     case "--cal-result-timeout-ms": o.Cal.ResultTimeoutMs = I(Need(args, ++i)); break;
-                    case "--cal-suspect-hold-ms": o.Cal.SuspectHoldMs = I(Need(args, ++i)); break;
-                    case "--cal-suspect-fails": o.Cal.SuspectHoldIsFailure = true; break;
+                    case "--cal-suspect-cycle-ms": o.Cal.SuspectCycleMs = I(Need(args, ++i)); break;
+                    case "--cal-suspect-fails": o.Cal.SuspectCycleIsFailure = true; break;
                     case "--cal-probe-depths":
                         o.CalProbeDepths = System.Array.ConvertAll(Need(args, ++i).Split(','), x => I(x.Trim()));
                         break;
@@ -245,10 +245,10 @@ Usage: HP-Attenuator.TestHarness [options]
   --cal-retry-wait-ms  Wait before re-gating and retrying (default 3000).
   --cal-result-timeout-ms
                        Wait for the post-C1 result read (default 60000).
-  --cal-suspect-hold-ms
-                       Flag a CALIBRATE that releases the bus sooner than this as SUSPECT
-                       (default 10000; 0 = off). Two bench points only: ~18 s clean, ~6.7 s
-                       with Error 33. Warn-only unless --cal-suspect-fails.
+  --cal-suspect-cycle-ms
+                       Flag a CALIBRATE whose C1-to-result cycle is shorter than this as
+                       SUSPECT (default 18000; 0 = off). Bench: clean 19.4-24.0 s, Error 33
+                       14.2-16.4 s (9 points, 3 GHz). Warn-only unless --cal-suspect-fails.
   --cal-suspect-fails  Treat a SUSPECT CALIBRATE as failed (stop) instead of warning.
   --cal-selftest       Headless regression check of the CALIBRATE completion poll (#34),
                        run against a scripted link. No instruments, no GPIB, no --hardware:

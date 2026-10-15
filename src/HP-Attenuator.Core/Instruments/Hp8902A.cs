@@ -536,7 +536,7 @@ namespace HpAttenuator.Instruments
         /// KNOWN LIMIT: on this unit Error 33 reaches the bus neither way, so a 33 that the panel shows
         /// can still end here as Confirmed. The bus-hold time is the one signal seen so far that
         /// differs (~18 s clean vs ~6.7 s failing, two points); below
-        /// <see cref="TrflCalibrationOptions.SuspectHoldMs"/> the result is ConfirmedSuspect.
+        /// <see cref="TrflCalibrationOptions.SuspectCycleMs"/> the result is ConfirmedSuspect.
         /// </summary>
         public void Calibrate()
         {
@@ -619,16 +619,16 @@ namespace HpAttenuator.Instruments
                 // 3. Decide ------------------------------------------------------------------------
                 if (a.Result != null && a.Result.IsValue && !recal)
                 {
-                    bool suspect = o.SuspectHoldMs > 0 && a.HoldMs < o.SuspectHoldMs;
+                    bool suspect = o.SuspectCycleMs > 0 && a.CycleMs < o.SuspectCycleMs;
                     a.Verdict = suspect
-                        ? $"CONFIRMED but SUSPECT — the CALIBRATE released the bus after {a.HoldMs / 1000.0:0.0} s, under " +
-                          $"{o.SuspectHoldMs / 1000.0:0.0} s (a failing one held ~6.7 s, a clean one ~18 s on 2026-10-15). " +
-                          "Error 33 does not reach HP-IB on this unit; check the panel."
+                        ? $"CONFIRMED but SUSPECT — the cycle took {a.CycleMs / 1000.0:0.0} s, under " +
+                          $"{o.SuspectCycleMs / 1000.0:0.0} s (Error 33 cycles ran 14.2-16.4 s, clean ones 19.4-24.0 s " +
+                          "on the bench). Error 33 does not reach HP-IB on this unit; check the panel."
                         : "CONFIRMED";
                     CalibrationLog?.Invoke($"{tag}: {sentLine} -> {a.Result} -> {a.Verdict}");
-                    if (suspect && o.SuspectHoldIsFailure)
+                    if (suspect && o.SuspectCycleIsFailure)
                         Fail(result, a, TrflCalibrationOutcome.NotConfirmed, null,
-                             $"the CALIBRATE held the bus only {a.HoldMs / 1000.0:0.0} s (SUSPECT, treated as failure).");
+                             $"the CALIBRATE cycle took only {a.CycleMs / 1000.0:0.0} s (SUSPECT, treated as failure).");
                     result.Outcome = suspect ? TrflCalibrationOutcome.ConfirmedSuspect : TrflCalibrationOutcome.Confirmed;
                     result.Message = $"{a.Verdict} after {number} attempt(s), {result.Retries} retr{(result.Retries == 1 ? "y" : "ies")}: " +
                                      $"reads {a.Result}";

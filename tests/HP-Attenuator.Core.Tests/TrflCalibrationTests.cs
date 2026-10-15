@@ -37,7 +37,7 @@ namespace HpAttenuator.Tests
                     StabilityToleranceDb = 0.10,
                     MaxRetries = 2,
                     RetryWaitMs = 0,
-                    SuspectHoldMs = 0,          // scripted cycles are instantaneous; tested separately
+                    SuspectCycleMs = 0,         // scripted cycles are instantaneous; tested separately
                 },
             };
             _log = new List<string>();
@@ -117,9 +117,9 @@ namespace HpAttenuator.Tests
         }
 
         [TestMethod]
-        public void ShortBusHold_IsSuspect_ButOnlyWarnsByDefault()
+        public void ShortCycle_IsSuspect_ButOnlyWarnsByDefault()
         {
-            _rx.CalibrationOptions.SuspectHoldMs = 10000;   // the scripted cycle holds the bus ~0 ms
+            _rx.CalibrationOptions.SuspectCycleMs = 18000;  // a scripted cycle takes ~0 ms
             Gate(Steady, Steady, Steady);
             Result(Steady);
 
@@ -130,10 +130,10 @@ namespace HpAttenuator.Tests
         }
 
         [TestMethod]
-        public void ShortBusHold_CanBeMadeAFailure()
+        public void ShortCycle_CanBeMadeAFailure()
         {
-            _rx.CalibrationOptions.SuspectHoldMs = 10000;
-            _rx.CalibrationOptions.SuspectHoldIsFailure = true;
+            _rx.CalibrationOptions.SuspectCycleMs = 18000;
+            _rx.CalibrationOptions.SuspectCycleIsFailure = true;
             Gate(Steady, Steady, Steady);
             Result(Steady);
 
