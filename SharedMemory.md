@@ -14,6 +14,65 @@ A cross-machine handoff snapshot so work can continue from anywhere. Updated 202
 - **Standing git default: commit + push** every change, branches included. No manual merge-to-`main`
   gate anymore — combine freely; validation is deferred to the ledger, not blocked before merge.
 
+## STOPPING POINT — 2026-09-15 evening, code-only session (bench never touched)
+
+**`main` @ this commit. Two new branches pushed, neither merged. No hardware was used at any point:
+no GPIB, no VISA session, no `--hardware` run.** A peer Claude session (`tony-d6`) was working in
+HP-8340B-Adjust, sim-only, and confirmed the bus was free and that no HP-Attenuator files overlapped.
+
+### Done
+
+1. **[#36](https://github.com/TGoodhew/HP-Attenuator/issues/36) filed** — the 5 GHz hang at exactly
+   13 dB, which the previous session found but never filed, with the three defects folded in. **Two
+   new findings, read from source rather than the bench:**
+   - **`SB=0x00` in the log is ambiguous** — it is also what a *failed* serial poll prints, because
+     `SerialPoll()` returns a `byte` (never negative) yet `sb = -1` was rendered `0x00`. So we do not
+     currently know whether the receiver reported a zero status byte at 13 dB or whether every poll
+     was timing out. Opposite root causes. Same defect class as #4, which fixed only the `Send` trace.
+   - **The 30 s read budget is not enforced across a blocking poll.** `ReadMeasurement` tests the
+     deadline only *between* iterations and `VisaInstrumentLink.SerialPoll()` blocks. **This resolves
+     the "three budgets disagree" puzzle** (60 s session / 30 s poll / 134.5 s observed): they do not
+     disagree — the 30 s budget simply is not enforced, and the time is spent inside `SerialPoll`.
+     Still to fix.
+
+2. **[#34](https://github.com/TGoodhew/HP-Attenuator/issues/34) fixed** — branch
+   `issue-34-calibrate-completion-poll`, ledger row **V17**. `Calibrate()` keeps the 2500 ms minimum
+   (so it can never conclude *sooner* than the code it replaces) then polls until the receiver reports
+   completion, up to 30 s. An error at **any** poll fails the calibration. Budget exhausted =
+   UNCONFIRMED, logged loudly, does **not** throw.
+   - **This changes the V10 diagnosis.** The harness `SafePoll` returned `0` on failure — and that is
+     the code path the `status = 0x00` observation came through. **Part of what was recorded as 0x00
+     may have been a failing poll, not an early sample.** Both are fixed; the log now says which.
+   - New **`--cal-selftest`**: headless regression coverage for a path simulation cannot reach at all
+     (sim substitutes `SimulatedReceiver`, whose `Calibrate()` is an empty method). Drives the real
+     driver over a new `ScriptedInstrumentLink`. 5/5 PASS, and each case is **also run against the old
+     algorithm** — the two error cases print `old code: MISSED the error`, so it demonstrably
+     discriminates rather than merely passing.
+
+3. **[#30](https://github.com/TGoodhew/HP-Attenuator/issues/30) fixed** — branch
+   `issue-30-leveller-uncal-recovery`, ledger row **V15**. UNCAL on the leveller's first read is now
+   recovered once (CALIBRATE + re-read, exactly what the range-cal descent below it already did); the
+   abort is loud; and `ReferenceLevelingFailed` distinguishes "levelling is off" from "levelling
+   failed" at the #21 bypass and the #23 step-plan fallback. New **`--sim-uncal-first-read [n]`** makes
+   the defect reproducible in sim, which it never was before.
+
+### Next, in order
+
+1. **Bench: V17** (#34). Highest priority — until it is confirmed, no CALIBRATE result from this rig
+   is trustworthy, and **#35, V2 and V4 all sit behind it**. Procedure is in HardwareValidation.md;
+   it needs a front-panel observation, so use the beep-tell-act-ask protocol.
+2. **Bench: V15** (#30) — the 3 GHz regression command in its ledger row.
+3. **#36's structural half** — bound the poll itself and log per-poll durations. That instrumentation
+   also serves **V9**, whose unexplained 18.4 s/read needs the same trigger/poll/retrieve split.
+4. **#35**, then the rest.
+
+### Unchanged and still true
+
+Everything in the section below still applies — bench state, the `--skip-sensor-cal` warning, source
+powers, and the observation protocol. Nothing on the bench was altered by this session.
+
+---
+
 ## STOPPING POINT — 2026-09-15 afternoon, author shutting down for OS updates
 
 **Branch: `main` @ `b531797`. Clean tree, everything committed and pushed. No run in flight, no
