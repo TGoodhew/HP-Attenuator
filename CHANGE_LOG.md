@@ -13,6 +13,19 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased
 
+### #41 follow-up, #35 bisect tool, #42 diagnostic (2026-10-16 bench session)
+
+- **SUSPECT now uses the C1-to-result cycle time** (`--cal-suspect-cycle-ms`, default 18000; was
+  `--cal-suspect-hold-ms`). Bench: clean 19.4-24.0 s, Error 33 14.2-16.4 s, nine panel-checked points.
+  The bus-hold measure gave a 0.1 s false alarm in `--trfl-recal`, where the 8902A made the poll wait
+  instead of the trigger write. Branch `issue-41-trfl-cal-errors`.
+- **`--cal-routine`**: runs the full #41 CALIBRATE at `--cal-probe-depths`, pre-SET-REF, gated by
+  `--hold-before-cal`. Used for the #35 depth bisect.
+- **`--srq-diag`** (#42, branch `issue-42-srq-diagnostic`): under mask 22.36SP, provokes an Entry Error
+  control, two C1s and an Operating Error, reading the status byte once after each. Suppresses
+  `--debug`'s per-command poll for the run. Bench: the controls read 0x46 / 0x44 without holds, but
+  **0x00 after a long hold** — see HardwareValidation.md, "#35 / #42 bench findings".
+
 ### #41: TRFL CALIBRATE confirmed positively, not by SRQ; one error decoder; stability gate; per-error handling (branch `issue-41-trfl-cal-errors`)
 
 Based on `bench-2026-10-15`. Ledger row **V19**. Driven by V17's bench result: **this 8902A does not report

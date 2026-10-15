@@ -71,8 +71,8 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V15 | **#30** — leveller silently no-ops when the first level read is UNCAL, taking the adaptive step plan and #21 limits down with it | `issue-30-leveller-uncal-recovery` | ⬜ | — 2026-10-15: no regression, but the first read was not UNCAL, so the recovery path was not exercised |
 | V16 | `--hold-before-cal` — gate each CALIBRATE on a file so an observation can be timed to it | `issue-17-cal-hold-gate` | ✅ | — used 5x on 2026-09-15; found #34 and #35 |
 | V17 | **#34** — CALIBRATE waits for completion instead of sampling 2500 ms in | `issue-34-calibrate-completion-poll` → `issue-34-srq-completion` | ❌ | **2026-10-15: the 8902A never reports a CALIBRATE's Error 33 over HP-IB** — not in the status byte, not on the read. See V17 below |
-| V19 | **#41** — TRFL CALIBRATE confirmed by gate + result read, per-error handling, stops on failure | `issue-41-trfl-cal-errors` | ⬜ | — needs V17's panel watching again; see V19 below |
-| V18 | **#36** — read budget enforced across a blocking poll; per-poll timing; bus release verified | `issue-36-bounded-poll` | ⬜ | — not run (bench stopped 2026-10-15). Partial: the per-poll timing worked on every read, see V18 |
+| V19 | **#41** — TRFL CALIBRATE confirmed by gate + result read, per-error handling, stops on failure | `issue-41-trfl-cal-errors` | ✅ | — 2026-10-16: SUSPECT caught the 60 dB Error 33; heuristic moved to cycle time after a false alarm |
+| V18 | **#36** — read budget enforced across a blocking poll; per-poll timing; bus release verified | `issue-36-bounded-poll` | ⬜ | — 2026-10-16: 31/31 PASS at 5 GHz, the hang did NOT recur, so the bound was not exercised; instrumentation clean |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-24-sf-matrix` | ✅ | **REINSTATED 2026-09-04**: reaches 99 dB / −100.5 dBm vs average's 96 dB, tracks linearly, fails honestly. The earlier rejection was made without measuring residual FM (18 Hz, well in spec). |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -1026,7 +1026,11 @@ inferred: from the bus-hold time, from the reference shift, or by not issuing de
      settled-read table.
 - **PASS =** the hang (if it recurs) is bounded and attributed to one of the cases above, and the
   release line tells the truth about the bus.
-- **Not run as its own recipe** (bench stopped 2026-10-15). **Partial evidence from the V17/V15 runs:**
+- **2026-10-16 (`v50-v18`): 31/31 PASS, worst 0.09 dB, and the hang did NOT recur** (13 dB read 12.94 dB).
+  So the bound and the release check were not exercised by a hang. Levelling needed the source at
+  **+3.55 dBm**; the 9/15 run that passed needed +3.15, and the two that hung +2.35. The pattern fits a
+  level dependence but proves nothing. Leave ⬜; retry opportunistically, as with V8.
+- **Earlier partial evidence from the V17/V15 runs:**
   the per-poll lines worked on every read, and showed that **a settled read is ONE serial poll that
   blocks 6.0-9.0 s** (`poll #1 took 6.1 s (SB=0x41)`). The 8902A holds the poll until its cycle ends
   (O&C 3-22), so the old "DataReady SET after 6.0 s" was never many fast polls. **This confirms the 15 s
@@ -1058,9 +1062,59 @@ inferred: from the bus-hold time, from the reference shift, or by not issuing de
   4. The gate's logged spread tests the source-wander hypothesis: expect a few thousandths of a dB.
 - **PASS =** every CALIBRATE logged with raw strings and hold time, no attenuator step after a failure,
   and a SUSPECT flag on the 60 dB Error 33 (or a recorded counter-example that kills the heuristic).
-- **Not yet run on hardware.**
+
+### Result — PASS, 2026-10-16 (`v48-v19`, plus the #35 bisect `v51` and two recals)
+
+Fresh sensor cal first (1.000 mW). V17's command, every CALIBRATE watched; one beep as C1 went out, two
+when the cycle ended (the gate runs ~18 s before C1, so the hold release itself is silent).
+
+| CALIBRATE | Panel | Gate spread | Held bus | Cycle | Log |
+|---|---|---|---|---|---|
+| 0 dB | clean | 0.006 dB | 15.4 s | 21.5 s | CONFIRMED |
+| 20 dB | clean | 0.000 dB | 17.3 s | 23.4 s | CONFIRMED |
+| 60 dB | **Error 33** | 0.000 dB | **6.8 s** | **14.3 s** | **CONFIRMED but SUSPECT** |
+| 30 dB (bisect) | **Error 33** | 0.000 dB | 8.9 s | 16.4 s | SUSPECT |
+| 40 dB (bisect) | **Error 33** | — | 6.8 s | 14.8 s | SUSPECT |
+| 50 dB (bisect) | clean | — | 14.6 s | 20.9 s | CONFIRMED |
+| 0 dB `--trfl-recal` ×2 | (not watched; scale restored) | 0.000 dB | **0.1 s** | 19.4-19.5 s | SUSPECT — **false alarm** |
+
+- **Every CALIBRATE logged with raw strings, spread and timing; every Error 33 flagged SUSPECT.**
+- **The gate's spread was 0.000-0.006 dB every time**, including on each Error 33, which rules out source
+  wander as the cause of Error 33 on this bench.
+- **Heuristic changed after the run:** in `--trfl-recal` the 8902A accepted the trigger write at once and
+  made the poll wait, so the "hold" read 0.1 s on a clean CALIBRATE. The whole C1-to-result **cycle**
+  separates every point (clean 19.4-24.0 s, Error 33 14.2-16.4 s), so SUSPECT now uses it
+  (`--cal-suspect-cycle-ms`, default 18000). The recal re-run afterwards read plain CONFIRMED.
+- "No attenuator step after a failure" was not exercised on hardware (no CALIBRATE was reported as
+  failed); it is covered by the engine unit tests.
+- The sweep after the forced CALIBRATEs passed (0-30 dB within 0.14 dB).
 
 ---
+
+## #35 / #42 bench findings, 2026-10-16 (not ledger rows; recorded for the issues)
+
+- **#35, the forced-CALIBRATE depth map** at 3 GHz (panel-watched): 0 clean, 20 clean, **30 Error 33,
+  40 Error 33**, 50 clean, **60 Error 33**. Not a depth limit. **Hypothesis:** a CALIBRATE succeeds at the
+  8902A's RF input-range boundaries and raises Error 33 in between, consistent with the manual's
+  RECAL-driven procedure and "two input range-to-range calibration factors" (O&C p. 3-115).
+  `ForceCalDepthsDb = {0, 20, 55}` lands on 60, off-boundary. Test {0, 20, 50}.
+- **A clean 20 dB forced CALIBRATE shifts the next range ~+0.5 dB** (30 dB read -29.4 instead of -29.9,
+  twice), and a failed one at 60 dB moves the 0 dB absolute reading (+0.42 dB today).
+- **After the clean 50 dB CALIBRATE, the 0-110 sweep's deep error fell:** 80 dB +1.60 → +1.18, 90 dB
+  +2.70 → +1.32 (`v53-check`, PASS), against V15's morning run. One comparison, but it is V4's question.
+- **30 dB then calibrated clean** in the #42 run, an hour after raising Error 33. The one change in between
+  was the clean 50 dB CALIBRATE (and a recal), so Error 33 may depend on the stored range factors, not
+  depth alone. Speculative.
+- **#42:** under mask 22.36SP, an Entry Error (24) read **0x46** and an Operating Error (01, source RF
+  off) read **0x44**, with the SRQ lamp lit for both. No 30-series error occurred in that run, so the
+  only 30-series observation remains V17's Error 33 with the SRQ lamp dark.
+- **Lost status byte after a long hold:** in the *held* `--srq-diag` run (`v54`), both controls lit the
+  SRQ lamp yet the harness read **0x00**, and the lamp then went out. Without holds (`v55`), the same
+  events read 0x46/0x44. A plain 64-bit NI-VISA session and the 32-bit gpib-mcp both read 0x46 after a
+  3 s delay. So something consumes the status byte while the harness sits idle at a hold with SRQ
+  asserted (UNCAL raises it during the wait). Not yet explained. NI-488.2 automatic serial polling is the
+  leading suspect. **Any status read made after a hold is suspect until this is found**, which includes
+  V17's 0x00 readings (the SRQ-lamp observations are unaffected).
 
 ## Not on the bench queue (for reference)
 
