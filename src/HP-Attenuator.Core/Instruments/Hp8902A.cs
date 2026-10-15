@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using HpAttenuator.Visa;
@@ -466,117 +467,299 @@ namespace HpAttenuator.Instruments
         /// add another full session timeout before anything is released (#36).</summary>
         public int PollStatusByte() => _link.SerialPoll(PollTimeoutMs);
 
-        /// <summary>Minimum time to let a CALIBRATE (C1) run before its status byte is believed, ms.
-        /// The receiver does not clear Data Ready instantly on C1, so sampling immediately can read the
-        /// PREVIOUS cycle's result and call the calibration complete before it has started.</summary>
-        private const int CalibrateMinSettleMsDefault = 2500;
-
-        /// <summary>Overridable for the headless self-test, which replays scripted status bytes and
-        /// must not spend real seconds doing it. Defaults to <see cref="CalibrateMinSettleMsDefault"/>.</summary>
-        public int CalibrateMinSettleMs { get; set; } = CalibrateMinSettleMsDefault;
-
-        /// <summary>Upper bound on one CALIBRATE cycle, ms. Settled cycles measured on the bench run
-        /// 6.5-7.4 s, so this is generous; it exists only so a receiver that never reports completion
-        /// cannot hang the sweep. Reaching it is logged as UNCONFIRMED, never as success.</summary>
-        private const int CalibrateBudgetMsDefault = 30000;
-
-        /// <summary>Overridable for the headless self-test. Defaults to <see cref="CalibrateBudgetMsDefault"/>.</summary>
-        public int CalibrateBudgetMs { get; set; } = CalibrateBudgetMsDefault;
+        /// <summary>Settings for <see cref="Calibrate"/> — gate size and tolerance, retries, timeouts
+        /// (#41). Configurable from the harness; nothing in the routine is hard-coded.</summary>
+        public TrflCalibrationOptions CalibrationOptions { get; set; } = new TrflCalibrationOptions();
 
         /// <summary>
-        /// Presses CALIBRATE (C1) and judges it by the status byte — WITHOUT polling during the cycle.
+        /// Every CALIBRATE attempt is logged here — raw HP-IB strings, decoded result, gate spread,
+        /// retry count, bus-hold time and outcome (#41). Separate from <see cref="DebugLog"/> so it can
+        /// be on for every run, not only under <c>--debug</c>.
+        /// </summary>
+        public static Action<string> CalibrationLog;
+
+        /// <summary>
+        /// Called on Error 31 ("requires new power reference — calibrate RF Power before attempting
+        /// calibration of Tuned RF Level", O&amp;C p. 3-289) so the host can walk the operator through
+        /// the RF Power zero and calibration, which needs the sensor moved to the CALIBRATION RF POWER
+        /// OUTPUT. The CALIBRATE still fails: the sensor procedure presets the 8902A, so the run has to
+        /// be re-established afterwards anyway.
+        /// </summary>
+        public Action<TrflCalibrationResult> RfPowerCalibrationRequired { get; set; }
+
+        /// <summary>The last <see cref="Calibrate"/>, for callers that want the record of a success.</summary>
+        public TrflCalibrationResult LastCalibration { get; private set; }
+
+        /// <summary>
+        /// Tuned RF Level CALIBRATE (C1), confirmed positively rather than by the status byte (#41).
         ///
-        /// History, because each step was a bench finding:
-        /// - The original slept a fixed 2500 ms and polled once. Settled cycles take 6.5-7.4 s, so two
-        ///   runs logged "status = 0x00" while the panel showed Error 33 (V10, #34).
-        /// - The first #34 fix polled every 250 ms for up to 30 s. On the bench (2026-10-15, V17) it
-        ///   logged 0x00 for the whole 30 s while the panel showed Error 33 at 60 dB — and never saw a
-        ///   completion signal on the clean ones either. The manual says why (O&amp;C 3-32): "The
-        ///   Measuring Receiver cannot alter the Status Byte while in serial poll mode; therefore, it is
-        ///   not possible to continually poll the Status Byte while waiting for a condition to cause a
-        ///   bit to be set." Continuous polling held off the very bit it was waiting for.
+        /// WHY NOT SRQ / THE STATUS BYTE. The obvious design — unmask Instrument Error (22.<n>SP, bit
+        /// weight 4, O&amp;C p. 3-30/3-31) and wait for it — cannot detect a failed calibration on this
+        /// receiver:
+        /// <list type="bullet">
+        /// <item>Bench, 2026-10-15 (V17): Error 33 on the display at 60 dB with mask 22.37 in force; the
+        /// SRQ lamp never lit and the status byte read 0x00. A read taken straight after C1 also
+        /// returned a normal level, not the +9000003300E+01 sentinel.</item>
+        /// <item>The status byte cannot change while the instrument is being polled (p. 3-32), so
+        /// "poll until the bit appears" holds off the bit it waits for.</item>
+        /// <item>The RECAL/UNCAL bit (32) is asserted when the annunciator TURNS ON (p. 3-31) — it is
+        /// edge-triggered, and a failed calibration that leaves RECAL lit makes no new edge.</item>
+        /// </list>
+        /// Status-byte use for Data Ready in the settled read is unchanged: that part works.
         ///
-        /// Now, as the manual intends: clear any stale status, press C1, WAIT FOR SRQ without polling,
-        /// and serial-poll once when it arrives. The same page also says "once any Status Byte bit has
-        /// been set, it remains set until the Status Byte is read", so even if SRQ events never reach
-        /// us, the single poll at the end of the budget still sees a latched error. Data Ready seen
-        /// before <see cref="CalibrateMinSettleMs"/> is not believed (it can be the previous cycle's).
+        /// THE ROUTINE, per attempt:
+        /// <list type="number">
+        /// <item>Stability gate: <see cref="TrflCalibrationOptions.StabilitySamples"/> settled readings;
+        /// proceed only if their spread is within <see cref="TrflCalibrationOptions.StabilityToleranceDb"/>.
+        /// The manual's procedure is "hold the signal level steady" (p. 3-115) and Error 33's corrective
+        /// action is "maintain consistency in frequency and level at SENSOR during calibration"
+        /// (p. 3-289).</item>
+        /// <item>C1, then a triggered read: the manual's completion signal is "hold the signal level
+        /// steady until a valid measurement is displayed" (p. 3-115). The 8902A holds the bus for the
+        /// whole cycle, so the trigger write itself waits it out; how long it held is logged.</item>
+        /// <item>Success = a valid numeric reading AND RECAL/UNCAL not asserted — no UNCAL fill, no
+        /// RECAL-without-result during the read, and no bit 32 in the poll after it. There is no HP-IB
+        /// query for RECAL state in the manual, so those are the only ways to see it.</item>
+        /// <item>Any decoded error fails the attempt, handled per code below.</item>
+        /// </list>
+        /// Per error (codes and texts O&amp;C p. 3-289; class p. 3-286):
+        /// 33/34/35 — wait, re-gate, retry up to <see cref="TrflCalibrationOptions.MaxRetries"/>, then
+        /// stop and suggest a source stability check or the E4438C. 31 — stop, and call
+        /// <see cref="RfPowerCalibrationRequired"/>. 32 — stop and report the level. 30 — set Special
+        /// Functions 1 and 9 to automatic selection (1.0SP, 9.0SP: p. 3-286, "setting Special Functions
+        /// 1 and 9 to automatic selection") and retry once. NOT 'AU': AUTOMATIC OPERATION resets every
+        /// special function 1-10 and most others, which would wipe the Tuned RF Level setup.
         ///
-        /// No SRQ within <see cref="CalibrateBudgetMs"/> and a clean final poll is logged as
-        /// "no error raised" — not "complete": a CALIBRATE in hold mode may produce no Data Ready, so
-        /// the absence of an error is the strongest positive statement available. It does not throw.
-        /// A failed serial poll is reported as a failed poll, never as 0x00 (#36).
+        /// On failure this throws <see cref="TrflCalibrationFailedException"/>, and callers must stop:
+        /// never step the attenuator or change the source after an unconfirmed calibration.
+        ///
+        /// KNOWN LIMIT: on this unit Error 33 reaches the bus neither way, so a 33 that the panel shows
+        /// can still end here as Confirmed. The bus-hold time is the one signal seen so far that
+        /// differs (~18 s clean vs ~6.7 s failing, two points); below
+        /// <see cref="TrflCalibrationOptions.SuspectHoldMs"/> the result is ConfirmedSuspect.
         /// </summary>
         public void Calibrate()
         {
-            // Stale state first: an SRQ queued by the previous read, or a latched status bit, must not
-            // be mistaken for this calibration's result. Reading the status byte clears it.
-            try { _link.DiscardServiceRequests(); } catch { /* best effort; the min-settle rule still applies */ }
-            try { _link.SerialPoll(PollTimeoutMs); } catch { /* best effort */ }
+            var o = CalibrationOptions ?? new TrflCalibrationOptions();
+            var result = new TrflCalibrationResult();
+            LastCalibration = result;
+            bool autoRestored = false;
 
-            Send("C1");
-
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            int sb = -1;            // last SUCCESSFUL poll; -1 = never polled successfully
-            int polls = 0, pollFailures = 0, srqs = 0;
-            bool err = false, complete = false, srqUnavailable = false;
-
-            while (true)
+            for (int number = 1; ; number++)
             {
-                long remaining = CalibrateBudgetMs - sw.ElapsedMilliseconds;
-                if (remaining <= 0) break;
+                var a = new TrflCalibrationAttempt { Number = number };
+                result.Attempts.Add(a);
+                string tag = $"TRFL CAL attempt {number}";
 
-                bool srq;
-                try { srq = _link.WaitForServiceRequest((int)remaining); }
+                // 1. Stability gate --------------------------------------------------------------
+                string gateProblem = RunStabilityGate(a, o, result);
+                CalibrationLog?.Invoke($"{tag}: {a.GateSummary(o.StabilityToleranceDb)}" +
+                                       (a.GateRaw.Count > 0 ? $" raw [{string.Join(", ", a.GateRaw)}]" : "") +
+                                       (gateProblem == null ? (o.StabilitySamples > 0 ? " — steady" : "") : $" — {gateProblem}"));
+                if (gateProblem != null)
+                {
+                    if (a.Result?.Error != null)
+                    {
+                        // An error before C1 was even sent (e.g. 96, no signal): not a calibration
+                        // problem, and nothing to retry until the signal is back.
+                        Fail(result, a, TrflCalibrationOutcome.Error, a.Result.Error,
+                             $"the receiver reported {a.Result.Error} before CALIBRATE was sent — fix that first.");
+                    }
+                    if (result.Retries < o.MaxRetries)
+                    {
+                        result.Retries++;
+                        a.Verdict = $"level not steady — retry {result.Retries}/{o.MaxRetries} after {o.RetryWaitMs} ms";
+                        CalibrationLog?.Invoke($"{tag}: {a.Verdict}");
+                        Thread.Sleep(Math.Max(0, o.RetryWaitMs));
+                        continue;
+                    }
+                    Fail(result, a, TrflCalibrationOutcome.Unstable, null,
+                         $"the level did not steady within {o.StabilityToleranceDb:0.###} dB over {o.StabilitySamples} " +
+                         $"readings after {result.Retries} retries ({gateProblem}); CALIBRATE was not sent. " +
+                         "Check the source's level stability (8340B), or substitute the E4438C.");
+                }
+
+                // 2. C1, then the result read ------------------------------------------------------
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                Send("C1");
+                a.Sent.Add("C1");
+                long sendMs = sw.ElapsedMilliseconds;   // includes the --debug trace poll, if on
+                RawRead r;
+                try
+                {
+                    a.Sent.Add("T3");
+                    r = ReadRawMeasurement(Math.Max(1, o.ResultTimeoutMs));
+                }
                 catch (Exception ex)
                 {
-                    // No SRQ support: sit out the budget without polling, then poll once below. The
-                    // latched bit makes that sufficient to catch an error, just not early.
-                    if (!srqUnavailable)
-                        DebugLog?.Invoke($"8902A CALIBRATE: SRQ wait unavailable ({ex.GetType().Name}) — " +
-                                         "waiting out the budget, then polling once");
-                    srqUnavailable = true;
-                    Thread.Sleep((int)Math.Max(0, CalibrateBudgetMs - sw.ElapsedMilliseconds));
-                    break;
+                    a.CycleMs = sw.ElapsedMilliseconds;
+                    a.Verdict = $"no result: {ex.GetType().Name}";
+                    CalibrationLog?.Invoke($"{tag}: > C1 > T3 — no result after {a.CycleMs / 1000.0:0.0} s " +
+                                           $"({ex.GetType().Name}: {ex.Message})");
+                    throw;   // a bus fault, not a calibration verdict: let the caller's bus handling see it
                 }
-                if (!srq) break;                          // budget spent with no service request
-                srqs++;
+                a.CycleMs = sw.ElapsedMilliseconds;
+                // The trigger write waits for the CALIBRATE to release the bus, so C1 + that write is
+                // how long the cycle held it.
+                a.HoldMs = sendMs + r.TriggerMs;
+                a.ResultRaw = r.Raw;
+                a.Result = r.RecalNoResult ? null : Hp8902AReading.Decode(r.Raw);
 
-                int s = PollOnce(ref polls, ref pollFailures);
-                if (s < 0) { Thread.Sleep(DataReadyPollMs); continue; }
-                sb = s;
-                if ((s & InstrErrorBit) != 0) { err = true; break; }
-                if ((s & DataReadyBit) != 0 && sw.ElapsedMilliseconds >= CalibrateMinSettleMs) { complete = true; break; }
-                // Anything else (stale Data Ready, a mode-change bit) — keep waiting for the next SRQ.
-            }
+                // RECAL is visible only as bit 32 or as the UNCAL fill (no HP-IB query for it is given
+                // in the manual). Read it once, after the result, without polling continuously (p. 3-32).
+                try { a.StatusAfter = _link.SerialPoll(PollTimeoutMs); } catch { a.StatusAfter = -1; }
+                bool recal = r.RecalNoResult
+                             || a.Result?.Kind == Hp8902AReadingKind.Uncal
+                             || (a.StatusAfter >= 0 && (a.StatusAfter & RecalStatusBit) != 0);
 
-            // The decisive read if no SRQ settled it: one poll, after the cycle, of a latched byte.
-            if (!err && !complete)
-            {
-                int s = PollOnce(ref polls, ref pollFailures);
-                if (s >= 0)
+                string sentLine = $"> {string.Join(" > ", a.Sent)} < '{(r.RecalNoResult ? "(none: RECAL/UNCAL)" : r.Raw)}' " +
+                                  $"(held bus {a.HoldMs / 1000.0:0.0} s, cycle {a.CycleMs / 1000.0:0.0} s, " +
+                                  $"SB after {(a.StatusAfter < 0 ? "poll failed" : $"0x{a.StatusAfter:X2}")})";
+
+                // 3. Decide ------------------------------------------------------------------------
+                if (a.Result != null && a.Result.IsValue && !recal)
                 {
-                    sb = s;
-                    if ((s & InstrErrorBit) != 0) err = true;
-                    else if ((s & DataReadyBit) != 0) complete = true;
+                    bool suspect = o.SuspectHoldMs > 0 && a.HoldMs < o.SuspectHoldMs;
+                    a.Verdict = suspect
+                        ? $"CONFIRMED but SUSPECT — the CALIBRATE released the bus after {a.HoldMs / 1000.0:0.0} s, under " +
+                          $"{o.SuspectHoldMs / 1000.0:0.0} s (a failing one held ~6.7 s, a clean one ~18 s on 2026-10-15). " +
+                          "Error 33 does not reach HP-IB on this unit; check the panel."
+                        : "CONFIRMED";
+                    CalibrationLog?.Invoke($"{tag}: {sentLine} -> {a.Result} -> {a.Verdict}");
+                    if (suspect && o.SuspectHoldIsFailure)
+                        Fail(result, a, TrflCalibrationOutcome.NotConfirmed, null,
+                             $"the CALIBRATE held the bus only {a.HoldMs / 1000.0:0.0} s (SUSPECT, treated as failure).");
+                    result.Outcome = suspect ? TrflCalibrationOutcome.ConfirmedSuspect : TrflCalibrationOutcome.Confirmed;
+                    result.Message = $"{a.Verdict} after {number} attempt(s), {result.Retries} retr{(result.Retries == 1 ? "y" : "ies")}: " +
+                                     $"reads {a.Result}";
+                    CalibrationLog?.Invoke($"TRFL CAL: {result.Message}");
+                    return;
+                }
+
+                Hp8902AError err = a.Result?.Error;
+                CalibrationLog?.Invoke($"{tag}: {sentLine} -> " +
+                                       (err != null ? err.ToString() : recal ? "RECAL/UNCAL still asserted" : $"{a.Result?.Kind}"));
+                if (err != null) { try { ClearError(); a.Sent.Add("CL"); } catch { /* best effort */ } }
+
+                if (err == null || err.Code == 33 || err.Code == 34 || err.Code == 35)
+                {
+                    // Recoverable in principle: the level or frequency moved during the cycle, or the
+                    // CALIBRATE did not take. Wait, re-gate, retry.
+                    if (result.Retries < o.MaxRetries)
+                    {
+                        result.Retries++;
+                        a.Verdict = $"retry {result.Retries}/{o.MaxRetries} after {o.RetryWaitMs} ms";
+                        CalibrationLog?.Invoke($"{tag}: {a.Verdict}");
+                        Thread.Sleep(Math.Max(0, o.RetryWaitMs));
+                        continue;
+                    }
+                    if (err != null)
+                        Fail(result, a, TrflCalibrationOutcome.Error, err,
+                             $"{err} — still failing after {result.Retries} retries. The level at the sensor is " +
+                             "not holding steady through the cycle: check the source's level stability (8340B), " +
+                             "or substitute the E4438C.");
+                    Fail(result, a, TrflCalibrationOutcome.NotConfirmed, null,
+                         (recal ? "RECAL/UNCAL was still asserted" : $"no valid reading ({a.Result?.Kind})") +
+                         $" after {result.Retries} retries — the calibration could not be confirmed.");
+                }
+
+                switch (err.Code)
+                {
+                    case 30 when !autoRestored:
+                        // Manual input attenuation/gain: put SF 1 and SF 9 back to automatic (p. 3-286)
+                        // and try once more. This does not count against the retry budget.
+                        autoRestored = true;
+                        Send("1.0SP"); a.Sent.Add("1.0SP");
+                        Send("9.0SP"); a.Sent.Add("9.0SP");
+                        a.Verdict = "Error 30: set SF 1 and SF 9 to automatic (1.0SP, 9.0SP), retrying once";
+                        CalibrationLog?.Invoke($"{tag}: {a.Verdict}");
+                        continue;
+
+                    case 31:
+                        Fail(result, a, TrflCalibrationOutcome.NeedsRfPowerCalibration, err,
+                             $"{err} Zero and calibrate RF Power with the sensor on the CALIBRATION RF POWER " +
+                             "OUTPUT, then re-run.", notifyRfPower: true);
+                        break;
+
+                    case 32:
+                        Fail(result, a, TrflCalibrationOutcome.Error, err,
+                             $"{err} The level before C1 was " +
+                             (double.IsNaN(result.LevelBefore) ? "unknown" : $"{result.LevelBefore:0.00} dB(m)") +
+                             " — not in a valid calibration range for this RF input range.");
+                        break;
+
+                    default:
+                        Fail(result, a, TrflCalibrationOutcome.Error, err, $"{err}");
+                        break;
                 }
             }
+        }
 
-            string status = sb < 0
-                ? $"no successful poll in {polls} attempts"
-                : $"status = 0x{sb:X2}";
-            string outcome = err ? "failed" : complete ? "complete" : sb >= 0 ? "no error raised" : "UNCONFIRMED";
-            string verdict = err      ? "  <-- INSTRUMENT ERROR (0x04) — reference/boundary cal FAILED"
-                           : complete ? ""
-                           : sb >= 0  ? "  (no Data Ready either — normal in hold mode; no error bit was latched)"
-                                      : "  <-- UNCONFIRMED: the status byte could not be read; do NOT trust this calibration";
-            DebugLog?.Invoke($"8902A CALIBRATE {outcome} after {sw.ElapsedMilliseconds / 1000.0:0.0} s, {status}, " +
-                             $"{srqs} SRQ(s), {polls} poll(s)" +
-                             (pollFailures > 0 ? $", {pollFailures} failed" : "") +
-                             (srqUnavailable ? ", SRQ unavailable" : "") +
-                             verdict);
+        /// <summary>
+        /// Takes the gate readings for one attempt. Returns null if the level is steady (or the gate is
+        /// off), otherwise why not. A reading that is not a number ends the gate: UNCAL is the normal
+        /// reason to be calibrating at all, so it is NOT a gate failure — there is just no level to
+        /// compare; an error code is reported through <c>a.Result</c>.
+        /// </summary>
+        private string RunStabilityGate(TrflCalibrationAttempt a, TrflCalibrationOptions o, TrflCalibrationResult result)
+        {
+            if (o.StabilitySamples <= 0) return null;
 
-            if (err) throw CalibrateFailure(sb);
+            for (int i = 0; i < o.StabilitySamples; i++)
+            {
+                RawRead g = ReadRawMeasurement(DataReadyBudgetMs);
+                a.Sent.Add("T3");
+                string raw = g.RecalNoResult ? "(none: RECAL/UNCAL)" : g.Raw;
+                a.GateRaw.Add(raw);
+                var d = g.RecalNoResult ? null : Hp8902AReading.Decode(g.Raw);
+
+                if (d == null || d.Kind == Hp8902AReadingKind.Uncal)
+                {
+                    a.GateReadings.Add(double.NaN);
+                    a.GateSpreadDb = double.NaN;
+                    a.Sent.Clear();   // the gate's T3s are not part of the calibration exchange
+                    return null;      // UNCAL/RECAL: nothing to compare, and the reason to calibrate
+                }
+                if (d.Kind == Hp8902AReadingKind.Error)
+                {
+                    a.GateReadings.Add(double.NaN);
+                    a.Result = d;
+                    a.Sent.Clear();
+                    return $"gate read {i + 1} returned {d.Error}";
+                }
+                if (!d.IsValue)
+                {
+                    a.GateReadings.Add(double.NaN);
+                    a.Sent.Clear();
+                    return $"gate read {i + 1} was {d.Kind} ('{raw}')";
+                }
+                a.GateReadings.Add(d.Value);
+            }
+
+            a.Sent.Clear();
+            double min = a.GateReadings.Min(), max = a.GateReadings.Max();
+            a.GateSpreadDb = max - min;
+            result.LevelBefore = a.GateReadings.Average();
+            return a.GateSpreadDb <= o.StabilityToleranceDb
+                ? null
+                : $"spread {a.GateSpreadDb:0.000} dB exceeds {o.StabilityToleranceDb:0.###} dB";
+        }
+
+        private void Fail(TrflCalibrationResult result, TrflCalibrationAttempt a, TrflCalibrationOutcome outcome,
+                          Hp8902AError err, string message, bool notifyRfPower = false)
+        {
+            result.Outcome = outcome;
+            result.Error = err;
+            result.Message = message;
+            a.Verdict = $"FAILED: {outcome}";
+            CalibrationLog?.Invoke($"TRFL CAL: FAILED ({outcome}) after {result.Attempts.Count} attempt(s), " +
+                                   $"{result.Retries} retr{(result.Retries == 1 ? "y" : "ies")}: {message}");
+            if (notifyRfPower)
+            {
+                try { RfPowerCalibrationRequired?.Invoke(result); }
+                catch (Exception ex) { CalibrationLog?.Invoke($"TRFL CAL: the RF Power calibration prompt failed ({ex.GetType().Name})"); }
+            }
+            throw new TrflCalibrationFailedException(result);
         }
 
         /// <summary>
@@ -586,57 +769,6 @@ namespace HpAttenuator.Instruments
         /// read sentinel instead.
         /// </summary>
         public void PressCalibrate() => Send("C1");
-
-        /// <summary>One bounded serial poll for <see cref="Calibrate"/>; -1 if it failed. The first
-        /// failure's type is logged — a wedged bus must not look like a quiet instrument (#36).</summary>
-        private int PollOnce(ref int polls, ref int failures)
-        {
-            polls++;
-            try { return _link.SerialPoll(PollTimeoutMs); }
-            catch (Exception ex)
-            {
-                if (++failures == 1)
-                    DebugLog?.Invoke($"8902A CALIBRATE poll failed ({ex.GetType().Name})");
-                return -1;
-            }
-        }
-
-        /// <summary>
-        /// Builds the exception for a CALIBRATE that raised the instrument-error bit, capturing the
-        /// ACTUAL error code where possible instead of telling the operator to go and read the panel.
-        ///
-        /// The status byte only says "an error occurred" (0x04) — but the 8902A delivers the code in
-        /// the measurement read, as the sentinel +900000NNNNE+01 that <see cref="ParseReading"/>
-        /// already decodes. So one triggered read after the error bit turns "status 0x04, read the
-        /// front panel" into "Error 33: power sensor reference error — maintain consistency in
-        /// frequency and level at the SENSOR". On this bench a front-panel observation costs a whole
-        /// operator round-trip, so capturing the code over HP-IB is worth one extra read.
-        ///
-        /// Strictly best-effort: any failure here falls back to the status-byte-only message. This
-        /// must never change control flow — the caller's cal-failure path has to run either way.
-        ///
-        /// COST, stated honestly: the instrument-error bit is already set, so ReadMeasurement's poll
-        /// returns on the first iteration and the retrieve normally follows at once. But if the 8902A
-        /// has no sentinel queued, the retrieve can block up to the VISA session timeout (60 s) before
-        /// the catch below swallows it. That is bounded and only happens on an already-failed
-        /// CALIBRATE, which is a stop-the-run event anyway — but it is not free, and V17 should note
-        /// how long the failing CALIBRATE actually took.
-        /// </summary>
-        private Hp8902AException CalibrateFailure(int sb)
-        {
-            try
-            {
-                ReadMeasurement();   // expected to throw with the decoded code
-            }
-            catch (Hp8902AException ex) when (ex.Code > 0)
-            {
-                DebugLog?.Invoke($"8902A CALIBRATE error code {ex.Code}: {Hp8902AException.Describe(ex.Code)}");
-                return ex;
-            }
-            catch { /* no code available — fall through to the status-byte message */ }
-
-            return Hp8902AException.CalibrateError(sb);
-        }
 
         public void SetReference()
         {
@@ -815,11 +947,38 @@ namespace HpAttenuator.Instruments
         /// </summary>
         private double ReadMeasurement()
         {
+            RawRead r = ReadRawMeasurement(DataReadyBudgetMs);
+
+            // RECAL set but no result produced → the range needs calibrating at this level.
+            if (r.RecalNoResult) throw Hp8902AException.Uncal();
+
+            try { return ParseReading(r.Raw); }
+            catch (FormatException)
+            {
+                if ((_link.SerialPoll(PollTimeoutMs) & RecalStatusBit) != 0) throw Hp8902AException.Uncal();
+                throw;
+            }
+        }
+
+        /// <summary>One settled read, undecoded: what <see cref="ReadMeasurement"/> sees before it
+        /// interprets anything. The CALIBRATE routine (#41) needs the raw string and the timings.</summary>
+        private struct RawRead
+        {
+            public string Raw;            // null when RecalNoResult
+            public int StatusByte;        // last successful poll; -1 if none succeeded
+            public bool Ready;
+            public bool RecalNoResult;    // RECAL/UNCAL asserted and no result was produced
+            public long TriggerMs;        // how long the T3 write took to be accepted
+        }
+
+        private RawRead ReadRawMeasurement(int budgetMs)
+        {
             var t = ReadTimes;
             var phase = System.Diagnostics.Stopwatch.StartNew();
             _link.Write("T3");                       // trigger; do NOT block-read yet
             t.Reads++;
-            t.TriggerMs += phase.ElapsedMilliseconds;
+            long triggerMs = phase.ElapsedMilliseconds;
+            t.TriggerMs += triggerMs;
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             int sb = -1;
@@ -829,7 +988,7 @@ namespace HpAttenuator.Instruments
             string firstFailure = null;
             while (true)
             {
-                long remaining = DataReadyBudgetMs - sw.ElapsedMilliseconds;
+                long remaining = budgetMs - sw.ElapsedMilliseconds;
                 if (remaining <= 0) { budgetSpent = true; break; }
 
                 // Give this poll only what is left of the budget, so it cannot carry the wait past it.
@@ -866,10 +1025,11 @@ namespace HpAttenuator.Instruments
                              $" — {polls} polls, {insidePolls / 1000.0:0.0} s inside them, longest " +
                              $"{longest / 1000.0:0.00} s" +
                              (failed > 0 ? $", {failed} FAILED (first: {firstFailure})" : "") +
-                             (budgetSpent ? $" — {DataReadyBudgetMs / 1000.0:0.#} s read budget spent" : ""));
+                             (budgetSpent ? $" — {budgetMs / 1000.0:0.#} s read budget spent" : ""));
 
             // RECAL set but no result produced → the range needs calibrating at this level.
-            if (sb >= 0 && (sb & RecalStatusBit) != 0 && !ready) throw Hp8902AException.Uncal();
+            if (sb >= 0 && (sb & RecalStatusBit) != 0 && !ready)
+                return new RawRead { StatusByte = sb, RecalNoResult = true, TriggerMs = triggerMs };
 
             phase.Restart();
             string raw;
@@ -888,12 +1048,7 @@ namespace HpAttenuator.Instruments
             phase.Restart();
             Settle();
             t.SettleMs += phase.ElapsedMilliseconds;
-            try { return ParseReading(raw); }
-            catch (FormatException)
-            {
-                if ((_link.SerialPoll(PollTimeoutMs) & RecalStatusBit) != 0) throw Hp8902AException.Uncal();
-                throw;
-            }
+            return new RawRead { Raw = raw, StatusByte = sb, Ready = ready, TriggerMs = triggerMs };
         }
 
         private void Settle()
@@ -910,44 +1065,17 @@ namespace HpAttenuator.Instruments
         /// </summary>
         internal static double ParseReading(string raw)
         {
-            // A read that raced Data Ready / an RF-range auto-range can come back empty or as a stray
-            // control byte that renders as '' — a transient timing glitch, not bad data (#6). Strip
-            // control chars and treat a no-numeric-content read as a retriable EMPTY read, distinct from
-            // genuinely unrecognized (non-numeric but printable) data.
-            if (string.IsNullOrWhiteSpace(raw))
-                throw Hp8902AException.EmptyRead();
-
-            string s = Regex.Replace(raw, @"[\x00-\x1F\x7F]", "").Trim();
-            if (s.Length == 0)
-                throw Hp8902AException.EmptyRead();
-
-            // UNCAL fill: instead of a number the 8902A returns a run of repeated letters when the
-            // current RF range is uncalibrated — 'CCCC…' (RF Power) or 'AAAA…'/'aaaa…' (Tuned RF
-            // Level). This does NOT reliably set the RECAL status bit, so recognise it from the
-            // response itself and surface it as UNCAL so the caller can CALIBRATE at this level.
-            if (Regex.IsMatch(s, "^[A-Za-z]+$"))
-                throw Hp8902AException.Uncal();
-
-            // No numeric content at all (after stripping control chars) is a transient/short read, not
-            // "unrecognized" — retry it rather than failing the point (#6).
-            if (!Regex.IsMatch(s, "[0-9]"))
-                throw Hp8902AException.EmptyRead();
-
-            double v;
-            if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v))
+            // One decoder for every raw 8902A response (#41); this keeps the exception contract the
+            // engine has always relied on (UNCAL, EMPTY, FormatException, Hp8902AException(code)).
+            var r = Hp8902AReading.Decode(raw);
+            switch (r.Kind)
             {
-                Match m = Regex.Match(s, @"[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?");
-                if (!m.Success || !double.TryParse(m.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out v))
-                    throw new FormatException($"Unrecognized 8902A reading: '{raw}'.");
+                case Hp8902AReadingKind.Value: return r.Value;
+                case Hp8902AReadingKind.Uncal: throw Hp8902AException.Uncal();
+                case Hp8902AReadingKind.Empty: throw Hp8902AException.EmptyRead();
+                case Hp8902AReadingKind.Error: throw new Hp8902AException(r.Error.Code, r.Error.Describe());
+                default: throw new FormatException($"Unrecognized 8902A reading: '{raw}'.");
             }
-
-            // Error sentinel: +900000NNNNE+01  =>  code = (value - 9e10) / 1000.
-            if (v >= 9e10)
-            {
-                int code = (int)Math.Round((v - 9e10) / 1000.0);
-                throw new Hp8902AException(code, Hp8902AException.Describe(code));
-            }
-            return v;
         }
     }
 }

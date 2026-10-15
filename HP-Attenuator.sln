@@ -11,6 +11,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HP-Attenuator.Core", "src\H
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HP-Attenuator.TestHarness", "src\HP-Attenuator.TestHarness\HP-Attenuator.TestHarness.csproj", "{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HP-Attenuator.Core.Tests", "tests\HP-Attenuator.Core.Tests\HP-Attenuator.Core.Tests.csproj", "{5B030787-F8BF-4CCF-99FB-26082B0BA160}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -57,6 +61,18 @@ Global
 		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Release|x64.Build.0 = Release|Any CPU
 		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Release|x86.ActiveCfg = Release|Any CPU
 		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975}.Release|x86.Build.0 = Release|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Debug|x64.Build.0 = Debug|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Debug|x86.Build.0 = Debug|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Release|x64.ActiveCfg = Release|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Release|x64.Build.0 = Release|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Release|x86.ActiveCfg = Release|Any CPU
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -65,5 +81,6 @@ Global
 		{0E567908-897B-4695-A460-C3FC5FE29081} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{DCD6508A-78E9-46B1-8C02-7BC88BCBD8E9} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{8D8FA1B3-EF43-4A8D-BB14-A11863E06975} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{5B030787-F8BF-4CCF-99FB-26082B0BA160} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

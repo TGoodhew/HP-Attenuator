@@ -218,7 +218,11 @@ namespace HpAttenuator.Instruments
         /// <summary>Raw serial-poll status byte, for diagnostics. Returns -1 if not applicable.</summary>
         int PollStatusByte();
 
-        /// <summary>Performs one range-calibration step (CALIBRATE) at the current level.</summary>
+        /// <summary>
+        /// Performs one range-calibration step (CALIBRATE) at the current level and confirms it
+        /// positively. Throws <see cref="TrflCalibrationFailedException"/> if it cannot be confirmed;
+        /// the caller must then stop, not step the attenuator or the source (#41).
+        /// </summary>
         void Calibrate();
 
         /// <summary>Clears a displayed error/condition on the instrument (8902A CL key).</summary>

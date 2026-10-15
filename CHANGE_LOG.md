@@ -13,6 +13,53 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased
 
+### #41: TRFL CALIBRATE confirmed positively, not by SRQ; one error decoder; stability gate; per-error handling (branch `issue-41-trfl-cal-errors`)
+
+Based on `bench-2026-10-15`. Ledger row **V19**. Driven by V17's bench result: **this 8902A does not report
+a TRFL CALIBRATE error over HP-IB at all**. Error 33 was on the panel while the status byte read 0x00
+(mask 22.37, SRQ lamp never lit), and a read issued straight after C1 returned a normal level.
+
+- **One decoder**, `Hp8902AReading.Decode`: raw reading → value, or a typed `Hp8902AError` (code, class,
+  manual message and corrective action), plus UNCAL fill / empty / unrecognized. Every value ≥ 9×10¹⁰ is
+  an error; texts for 01–19, 20–26, 30–35 and 96 come from the manual (pp. 3-287, 3-289; classes
+  p. 3-285/3-286); undocumented codes are typed, not dropped. `ParseReading` and `Describe` now delegate
+  to it.
+- **Bug fixed on the way: the old `Describe` table had Operating Errors 01–18 shifted.** It gave
+  1 = "Input level too high" (that is 02; 01 is "IF frequency error"), and 5, 6 and 17 were likewise
+  off, so every Operating Error has been logged with its neighbour's message.
+- **`Calibrate()` rewritten.**
+  - **Stability gate:** N settled readings, and C1 only if their spread is within tolerance.
+  - **C1, then a triggered read:** the manual's "hold the signal level steady until a valid
+    measurement is displayed" (p. 3-115).
+  - **Success** = a valid reading AND RECAL/UNCAL not asserted. The manual gives no HP-IB query for
+    RECAL, so it is checked via the UNCAL fill and a single bit-32 poll after the read.
+  - **Per error:** 33/34/35 retried after re-gating, then stop with a source-stability / E4438C hint.
+    31 stops and walks the operator through the RF Power zero + cal (Spectre prompt; prints the
+    commands instead when stdin is redirected, so it can never zero against live RF). 32 stops and
+    reports the level. 30 sends `1.0SP` + `9.0SP` (SF 1 and 9 to automatic, p. 3-286) and retries once.
+    **Not `AU`**, which would reset every special function 1–10 and wipe the TRFL setup.
+  - **Bus-hold time** is logged for every attempt, and one under `--cal-suspect-hold-ms` is flagged
+    SUSPECT (warn-only by default). That is the one signal seen to differ for a failing CALIBRATE,
+    on two data points.
+- **Nothing is stepped after an unconfirmed CALIBRATE.** `TrflCalibrationFailedException` stops the
+  range-cal descent, the sweep and the per-setting runs where they are; the harness ends with
+  `STOPPED:` (exit 3). Before, all three call sites swallowed any failure and stepped on.
+- **Every attempt is logged** (`Hp8902A.CalibrationLog`, on for every run, not just `--debug`): raw
+  HP-IB strings, decoded result, gate spread, retry count, bus-hold and cycle time, outcome.
+- **Configurable:** `--cal-gate-samples` (3), `--cal-gate-tol` (0.10 dB), `--cal-retries` (2),
+  `--cal-retry-wait-ms` (3000), `--cal-result-timeout-ms` (60000), `--cal-suspect-hold-ms` (10000),
+  `--cal-suspect-fails`.
+- **SRQ / serial-poll use for Data Ready is unchanged**, with the reasons it is not used for calibration
+  failures in the `Calibrate()` comment (pp. 3-30, 3-31, 3-32).
+- **New MSTest project** `tests/HP-Attenuator.Core.Tests` (`dotnet test`): 63 tests covering the decoder
+  against the manual's text, the calibration routine through the scripted link, and the engine stopping
+  on a failed CALIBRATE in both the descent and the sweep. The SRQ-era CALIBRATE cases left
+  `--cal-selftest` (5 cases remain).
+
+**Known limit, stated in the code:** on this unit Error 33 reaches HP-IB neither way, so a 33 the panel
+shows can still end as Confirmed. Only SUSPECT (short bus hold) hints at it, and that threshold rests on
+two points. **Not run on hardware.**
+
 ### #36 (structural half): the read budget is enforced, every poll is timed, the bus release is checked (branch `issue-36-bounded-poll`)
 
 Stacked on `issue-36-visa-scan-ambiguity`. Ledger row **V18**. The two items that actually explain

@@ -37,6 +37,12 @@ namespace HpAttenuator.TestHarness
             AnsiConsole.WriteLine();
 
             VisaInstrumentLink.BeepOnCommand = !opt.NoBeep;
+
+            // Every TRFL CALIBRATE attempt is logged — raw strings, decode, gate spread, retries,
+            // bus-hold time, outcome (#41). On for every run: a calibration is never routine enough to
+            // go unrecorded, and on this receiver the log is the only record of it over HP-IB.
+            Hp8902A.CalibrationLog = s => AnsiConsole.MarkupLine($"[aqua]  {s.EscapeMarkup()}[/]");
+
             if (opt.Debug)
             {
                 Hp8902A.DebugLog = s => AnsiConsole.MarkupLine($"[grey]  {s.EscapeMarkup()}[/]");
@@ -275,6 +281,16 @@ namespace HpAttenuator.TestHarness
                 var engine = new MeasurementEngine(bench.Source, bench.Lo, attenuator, bench.Receiver, opt.Sweep);
                 return RunSweep(opt, engine, config, bench.Receiver as Hp8902A);
             }
+            catch (TrflCalibrationFailedException ex)
+            {
+                // The routine has already logged every attempt. The attenuator and source were left
+                // where they were: nothing is stepped after an unconfirmed CALIBRATE (#41).
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine($"[red bold]STOPPED:[/] [red]{ex.Message.EscapeMarkup()}[/]");
+                AnsiConsole.MarkupLine("[grey]Nothing was stepped after the failed CALIBRATE. Results up to this point " +
+                                       "were written as they completed.[/]");
+                return 3;
+            }
             catch (Exception ex)
             {
                 AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
@@ -327,8 +343,10 @@ namespace HpAttenuator.TestHarness
             var attLink = Open(opt.AddrAttenuator, disposables);
 
             var source = new Hp8340B(sourceLink);
+            _calSource = source;
             var lo = new Hp8673B(loLink);
             var receiver = new Hp8902A(rxLink) { SettleMilliseconds = 0 };
+            ConfigureCalibration(receiver, opt, source: null);
 
             // Clear + preset every device on first connect so no stale errors or latched
             // SRQ from a previous session carry into this run.
@@ -364,6 +382,7 @@ namespace HpAttenuator.TestHarness
             }
             AnsiConsole.MarkupLine($"[green]Mode:[/] HARDWARE (8902A @ {opt.AddrReceiver.EscapeMarkup()})");
             var rx = new Hp8902A(Open(opt.AddrReceiver, disposables, opt.ReceiverTimeoutMs));
+            ConfigureCalibration(rx, opt, source: null);
             AnsiConsole.MarkupLine("[grey]Clearing + presetting 8902A...[/]");
             rx.Initialize();   // device clear + preset (no stale errors/SRQ)
             return rx;
@@ -774,7 +793,13 @@ namespace HpAttenuator.TestHarness
                 System.Threading.Thread.Sleep(settle);
                 int sbBefore = SafePoll(rx);
                 AnsiConsole.MarkupLine($"[grey]CALIBRATE @ {atten} dB (SB before={Sb(sbBefore)})...[/]");
-                rx.Calibrate();
+                try { rx.Calibrate(); }
+                catch (TrflCalibrationFailedException cex)
+                {
+                    AnsiConsole.MarkupLine($"   [red]CALIBRATE not confirmed at {atten} dB:[/] {cex.Result.Message.EscapeMarkup()}");
+                    firstError = atten;
+                    break;
+                }
                 int sbAfter = SafePoll(rx);
 
                 string read;
@@ -860,6 +885,45 @@ namespace HpAttenuator.TestHarness
             }
             attenuator.SetAttenuationDb(0);
             return 0;
+        }
+
+        /// <summary>The bench source, for the Error 31 guide (RF must be off while the sensor zeroes).</summary>
+        private static ISignalSource _calSource;
+
+        /// <summary>
+        /// Applies the --cal-* settings to a real 8902A and installs the Error 31 guide (#41). Error 31
+        /// is "requires new power reference — calibrate RF Power before attempting calibration of Tuned
+        /// RF Level" (O&C p. 3-289): the sensor has to be zeroed with no RF, then calibrated on the
+        /// CALIBRATION RF POWER OUTPUT, which is a physical move only the operator can make.
+        /// </summary>
+        private static void ConfigureCalibration(Hp8902A rx, HarnessOptions opt, ISignalSource source)
+        {
+            rx.CalibrationOptions = opt.Cal;
+            if (source != null) _calSource = source;
+            rx.RfPowerCalibrationRequired = result =>
+            {
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine("[yellow bold]Error 31: the 8902A needs a new RF Power reference before it can " +
+                                       "calibrate Tuned RF Level.[/]");
+                if (Console.IsInputRedirected)
+                {
+                    // No operator at this terminal (e.g. a tool-driven run): the interactive procedure
+                    // would read empty answers and zero the sensor against live RF. Say what to run.
+                    AnsiConsole.MarkupLine("[yellow]This run cannot prompt (stdin is redirected). With the source RF OFF, run:[/]");
+                    AnsiConsole.MarkupLine("[grey]  1. --hardware --sensor-zero        (sensor sees no RF)[/]");
+                    AnsiConsole.MarkupLine("[grey]  2. move the sensor to the 8902A CALIBRATION RF POWER OUTPUT[/]");
+                    AnsiConsole.MarkupLine("[grey]  3. --hardware --sensor-calibrate   (expects 1.000 mW)[/]");
+                    AnsiConsole.MarkupLine("[grey]  4. move the sensor back, then re-run this measurement[/]");
+                    return;
+                }
+                if (!AnsiConsole.Confirm("Walk through the RF Power zero and calibration now?", defaultValue: true))
+                    return;
+                try { _calSource?.RfOff(); AnsiConsole.MarkupLine("[grey]  Source RF switched OFF for the zero.[/]"); }
+                catch (Exception ex) { AnsiConsole.MarkupLine($"[red]  Could not switch the source off ({ex.GetType().Name}) — turn it off by hand.[/]"); }
+                if (InteractiveSensorCalibrate(rx)) SensorCalSession.Mark();
+                AnsiConsole.MarkupLine("[yellow]Move the sensor back to the measurement position, then re-run — the " +
+                                       "sensor procedure presets the 8902A, so this run's setup is gone.[/]");
+            };
         }
 
         private static int SafePoll(IMeasuringReceiver rx)

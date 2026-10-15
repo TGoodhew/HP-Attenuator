@@ -25,61 +25,19 @@ namespace HpAttenuator.TestHarness
         // Scaled-down timings so the scripted cases run in seconds, not minutes. The RATIOS match the
         // bench: the minimum settle is a fraction of the budget, and completion arrives after it.
         private const int PollMs = 5;
-        private const int MinSettleMs = 300;
-        private const int BudgetMs = 3000;
 
         public static int Run()
         {
             AnsiConsole.MarkupLine("[yellow]Mode:[/] SELF-TEST (scripted link — no instruments, no GPIB)");
-            AnsiConsole.MarkupLine("[grey]Exercising Hp8902A.Calibrate() against scripted status-byte sequences (#34).[/]");
+            AnsiConsole.MarkupLine("[grey]Exercising the real Hp8902A / Hp11713A drivers against scripted links (#34, #36, #37).[/]");
             AnsiConsole.WriteLine();
 
             var results = new List<string>();
             int failures = 0;
 
-            failures += Check(results, "late error is caught",
-                "Error raised at ~6 s, after the old 2500 ms sample point — the #34 regression.",
-                link => ErrorScript(link, 100),
-                expectThrow: true,
-                expectLog: "INSTRUMENT ERROR");
-
-            failures += Check(results, "the real error code is captured, not deferred to the panel",
-                "The status byte only says 0x04. The 8902A carries the code in the read sentinel, so " +
-                "one extra read turns 'read the front panel' into 'Error 33: power sensor reference " +
-                "error' — worth it where a panel observation costs an operator round-trip.",
-                link => ErrorScript(link, 100),
-                expectThrow: true,
-                expectLog: "error code 33");
-
-            failures += Check(results, "normal completion",
-                "Data Ready after the minimum settle: completes, does not throw.",
-                link => link.Poll(0x00, 100).Poll(0x41, 1),
-                expectThrow: false,
-                expectLog: "complete");
-
-            failures += Check(results, "stale Data Ready is not completion",
-                "Data Ready already set on entry (left by the previous read) must not end the wait " +
-                "before the minimum settle, or a later error is missed.",
-                link => ErrorScript(link.Poll(0x41, 10), 80),
-                expectThrow: true,
-                expectLog: "INSTRUMENT ERROR");
-
-            failures += Check(results, "failed polls are not reported as 0x00",
-                "Every poll throws. Must report a failed poll, must NOT claim status 0x00, and must " +
-                "NOT raise a phantom instrument error from -1 & 0x04.",
-                link => { link.TrailingPoll = ScriptedInstrumentLink.PollFault; return link; },
-                expectThrow: false,
-                expectLog: "no successful poll",
-                rejectLog: "0x00");
-
-            failures += Check(results, "no SRQ and a clean final poll is 'no error raised', not 'complete'",
-                "Status never changes. Must fall out at the budget, poll once, and say only what it " +
-                "knows: no error bit was latched. Does not throw — a sweep that works today keeps working.",
-                link => link,                       // TrailingPoll defaults to 0x00
-                expectThrow: false,
-                expectLog: "no error raised");
-
-            failures += CheckPollingCannotHideTheError(results);
+            // The CALIBRATE-algorithm cases that lived here tested the SRQ-era Calibrate(), which #41
+            // replaced (the 8902A does not report a CALIBRATE error over HP-IB at all — V17). The new
+            // routine is covered by tests/HP-Attenuator.Core.Tests (dotnet test).
 
             failures += CheckFailedWriteIsTraced(results);
             failures += CheckFailedRelayWriteIsAdmitted(results);
@@ -299,12 +257,12 @@ namespace HpAttenuator.TestHarness
         {
             var link = new ScriptedInstrumentLink { FailWrites = true };
             var log = new StringBuilder();
-            var rx = new Hp8902A(link) { CalibrateMinSettleMs = MinSettleMs, CalibrateBudgetMs = BudgetMs };
+            var rx = new Hp8902A(link);
 
             Action<string> previous = Hp8902A.DebugLog;
             Hp8902A.DebugLog = m => log.AppendLine(m);
             bool threw = false;
-            try { rx.Calibrate(); }
+            try { rx.SetReference(); }               // SET REF goes out as "RF" through Send
             catch { threw = true; }
             finally { Hp8902A.DebugLog = previous; }
 
@@ -313,7 +271,7 @@ namespace HpAttenuator.TestHarness
             if (!threw) problems.Add("the write failure must still propagate");
             if (text.IndexOf("WRITE FAILED", StringComparison.Ordinal) < 0)
                 problems.Add("the failed write is missing from the trace");
-            if (text.IndexOf("C1", StringComparison.Ordinal) < 0)
+            if (text.IndexOf("< RF", StringComparison.Ordinal) < 0)
                 problems.Add("the trace does not say WHICH command failed");
 
             bool ok = problems.Count == 0;
@@ -326,158 +284,5 @@ namespace HpAttenuator.TestHarness
             return ok ? 0 : 1;
         }
 
-        /// <summary>
-        /// Script for a CALIBRATE that runs quietly for <paramref name="quiet"/> polls and then raises
-        /// an instrument error. The trailing 0x04 and the queued sentinel let the follow-up read inside
-        /// the driver retrieve the actual code: +9000003300E+01 decodes to Error 33, the "power sensor
-        /// reference error" that --force-range-cal reproducibly raises at 20 dB (#35).
-        /// </summary>
-        private static ScriptedInstrumentLink ErrorScript(ScriptedInstrumentLink link, int quiet)
-        {
-            link.TrailingPoll = 0x04;                       // the error stays latched for the read
-            return link.Poll(0x00, quiet).Poll(0x04, 1).Reads("+9000003300E+01");
-        }
-
-        private static int Check(
-            List<string> results,
-            string name,
-            string why,
-            Func<ScriptedInstrumentLink, ScriptedInstrumentLink> script,
-            bool expectThrow,
-            string expectLog,
-            string rejectLog = null)
-        {
-            var link = script(new ScriptedInstrumentLink());
-            var log = new StringBuilder();
-
-            var rx = new Hp8902A(link)
-            {
-                DataReadyPollMs = PollMs,
-                CalibrateMinSettleMs = MinSettleMs,
-                CalibrateBudgetMs = BudgetMs,
-                PollTimeoutMs = PollBoundMs,
-            };
-
-            Action<string> previous = Hp8902A.DebugLog;
-            Hp8902A.DebugLog = m => log.AppendLine(m);
-
-            bool threw = false;
-            string thrown = null;
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            try { rx.Calibrate(); }
-            catch (Exception ex) { threw = true; thrown = ex.GetType().Name; }
-            finally { Hp8902A.DebugLog = previous; }
-            sw.Stop();
-
-            string text = log.ToString();
-            var problems = new List<string>();
-
-            if (threw != expectThrow)
-                problems.Add(expectThrow ? $"expected a throw, got none" : $"unexpected {thrown}");
-            if (expectLog != null && text.IndexOf(expectLog, StringComparison.OrdinalIgnoreCase) < 0)
-                problems.Add($"log missing \"{expectLog}\"");
-            if (rejectLog != null && text.IndexOf(rejectLog, StringComparison.Ordinal) >= 0)
-                problems.Add($"log must not contain \"{rejectLog}\"");
-
-            // The whole point of #34: the wait must outlast the minimum settle before it concludes
-            // anything. A verdict reached sooner is the old bug returning.
-            if (sw.ElapsedMilliseconds < MinSettleMs)
-                problems.Add($"concluded in {sw.ElapsedMilliseconds} ms, before the {MinSettleMs} ms minimum settle");
-
-            // V17 (2026-10-15): the 8902A cannot set a status bit while it is being polled (O&C 3-32),
-            // so every poll after C1 must answer a service request — apart from the stale-state clear
-            // before C1, the --debug trace poll (two attempts when it fails), and the one decisive poll
-            // at the end of the budget.
-            if (link.PollCount > link.SrqWaits + 4)
-                problems.Add($"{link.PollCount} polls for {link.SrqWaits} SRQ waits — polling without a " +
-                             "service request holds off the bit being waited for");
-
-            // Run the OLD algorithm over an identical script. A regression test that the code it
-            // replaces would also pass proves nothing; this makes the discrimination visible instead
-            // of asserted. "MISSED" below is the #34 defect reproducing on demand.
-            bool legacyThrew = LegacyCalibrate(script(new ScriptedInstrumentLink()));
-            string legacy = legacyThrew == expectThrow
-                ? "[grey]old code: same verdict[/]"
-                : expectThrow
-                    ? "[red]old code: MISSED the error - this is #34[/]"
-                    : "[yellow]old code: differed[/]";
-
-            bool ok = problems.Count == 0;
-            results.Add((ok ? "[green]  PASS[/] " : "[red]  FAIL[/] ") + name.EscapeMarkup() +
-                        $" [grey]({sw.ElapsedMilliseconds} ms, {link.PollCount} polls)[/]" +
-                        (ok ? "" : "\n         [red]" + string.Join("; ", problems).EscapeMarkup() + "[/]") +
-                        "\n         [grey]" + why.EscapeMarkup() + "[/]" +
-                        "\n         " + legacy);
-            return ok ? 0 : 1;
-        }
-
-        /// <summary>
-        /// The bench failure of 2026-10-15 (V17), reproduced: Error 33 on the panel, status 0x00 in the
-        /// log for 30 s. The scripted link refuses to reveal a pending bit to a poll that follows the
-        /// previous one too closely — the 8902A's documented limit (O&amp;C 3-32). The first #34 fix
-        /// polled every 250 ms and so never saw the error; waiting for SRQ and polling once does.
-        /// </summary>
-        private static int CheckPollingCannotHideTheError(List<string> results)
-        {
-            ScriptedInstrumentLink Script() =>
-                ErrorScript(new ScriptedInstrumentLink { PollSuppressionMs = 50 }, 100);
-
-            var link = Script();
-            var rx = new Hp8902A(link)
-            {
-                DataReadyPollMs = PollMs, CalibrateMinSettleMs = MinSettleMs,
-                CalibrateBudgetMs = BudgetMs, PollTimeoutMs = PollBoundMs, DataReadyBudgetMs = ReadBudgetMs,
-            };
-            string text = Capture(() => rx.Calibrate(), out long ms, out string thrown);
-
-            var problems = new List<string>();
-            if (thrown == null) problems.Add("the error was not reported");
-            if (text.IndexOf("INSTRUMENT ERROR", StringComparison.Ordinal) < 0) problems.Add("log missing \"INSTRUMENT ERROR\"");
-
-            bool legacyMissed = !LegacyPollingCalibrate(Script());
-            bool ok = problems.Count == 0;
-            results.Add((ok ? "[green]  PASS[/] " : "[red]  FAIL[/] ") +
-                        $"an error raised while being polled is still caught [grey]({ms} ms, {link.PollCount} polls)[/]" +
-                        (ok ? "" : "\n         [red]" + string.Join("; ", problems).EscapeMarkup() + "[/]") +
-                        "\n         [grey]O&C 3-32: the 8902A cannot alter its status byte while being polled. " +
-                        "V17 saw Error 33 on the panel and 0x00 in the log for 30 s.[/]" +
-                        (legacyMissed
-                            ? "\n         [red]old code (first #34 fix, 250 ms polling): MISSED the error - this is V17[/]"
-                            : "\n         [yellow]old code (first #34 fix): also caught it on this script[/]"));
-            return ok ? 0 : 1;
-        }
-
-        /// <summary>
-        /// The first #34 fix, kept ONLY for <see cref="CheckPollingCannotHideTheError"/>: poll every
-        /// interval until an error or the budget. Returns true if it would have reported a failure.
-        /// </summary>
-        private static bool LegacyPollingCalibrate(ScriptedInstrumentLink link)
-        {
-            link.Write("C1");
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            while (sw.ElapsedMilliseconds < BudgetMs)
-            {
-                System.Threading.Thread.Sleep(PollMs);
-                int sb;
-                try { sb = link.SerialPoll(); } catch { continue; }
-                if ((sb & 0x04) != 0) return true;
-            }
-            return false;
-        }
-
-        /// <summary>
-        /// The implementation this fix replaces, kept ONLY so the cases above can be shown to
-        /// discriminate: press CALIBRATE, sleep a fixed 2500 ms, serial-poll exactly once, and judge
-        /// the calibration on that single sample. Returns true if it would have reported a failure.
-        /// Settled cycles take 6.5-7.4 s on the bench, so this samples roughly 4 s early.
-        /// </summary>
-        private static bool LegacyCalibrate(ScriptedInstrumentLink link)
-        {
-            link.Write("C1");
-            System.Threading.Thread.Sleep(MinSettleMs);   // stands in for the fixed 2500 ms
-            int sb = -1;
-            try { sb = link.SerialPoll(); } catch { /* poll failed; leave sb = -1 (unknown) */ }
-            return sb >= 0 && (sb & 0x04) != 0;
-        }
     }
 }

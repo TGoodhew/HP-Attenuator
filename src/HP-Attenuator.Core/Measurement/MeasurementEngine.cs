@@ -354,6 +354,20 @@ namespace HpAttenuator.Measurement
                     point.MeasuredAttenuationDb = -normRelDb;
                     point.ErrorDb = point.MeasuredAttenuationDb - expected;
                 }
+                catch (TrflCalibrationFailedException cex)
+                {
+                    // A boundary CALIBRATE that could not be confirmed. Every reading after it would rest
+                    // on a range factor nobody can vouch for, so this frequency stops HERE (#41).
+                    point.Error = $"CALIBRATE not confirmed: {cex.Result.Message}";
+                    point.MeasuredRelativeDb = double.NaN;
+                    point.MeasuredAttenuationDb = double.NaN;
+                    point.ErrorDb = double.NaN;
+                    Trace?.Invoke($"*** stopped at {atten} dB: {cex.Message} — the attenuator and source are left where they are: nothing is stepped after an unconfirmed CALIBRATE (#41) ***");
+                    result.Points.Add(point);
+                    onPoint?.Invoke(++index, total, point);
+                    result.Warning = $"stopped at {atten} dB — a range CALIBRATE could not be confirmed: {cex.Result.Message}";
+                    break;
+                }
                 catch (System.Exception ex)
                 {
                     // Capture the full detail — for a FormatException ex.Message holds the raw 8902A
@@ -784,7 +798,7 @@ namespace HpAttenuator.Measurement
             bool haveBaseline = false;
             double baselineRelDb = 0.0;
             try { baselineRelDb = ReadRelativeDbWithRetry(ReferenceReadAttempts); haveBaseline = true; }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is TrflCalibrationFailedException))
             {
                 // Say it. The run still completes — but every point below now carries an unknown
                 // offset, and without this line the results look entirely normal (#39). The software
@@ -818,6 +832,18 @@ namespace HpAttenuator.Measurement
                     point.MeasuredRelativeDb = norm;
                     point.MeasuredAttenuationDb = -norm;
                     point.ErrorDb = point.MeasuredAttenuationDb - s.ExpectedDb;
+                }
+                catch (TrflCalibrationFailedException cex)
+                {
+                    point.Error = $"CALIBRATE not confirmed: {cex.Result.Message}";
+                    point.MeasuredRelativeDb = double.NaN;
+                    point.MeasuredAttenuationDb = double.NaN;
+                    point.ErrorDb = double.NaN;
+                    Trace?.Invoke($"*** stopped at {s.ExpectedDb} dB: {cex.Message} — the attenuator and source are left where they are: nothing is stepped after an unconfirmed CALIBRATE (#41) ***");
+                    result.Points.Add(point);
+                    onPoint?.Invoke(++index, total, point);
+                    result.Warning = $"stopped at {s.ExpectedDb} dB — a range CALIBRATE could not be confirmed: {cex.Result.Message}";
+                    return result;   // NOT reset to 0 dB either: nothing moves after an unconfirmed CALIBRATE
                 }
                 catch (System.Exception ex)
                 {
@@ -943,8 +969,11 @@ namespace HpAttenuator.Measurement
                         // fired. The attenuator is already set + settled, so the level is steady for C1.
                         if (_options.RangeCalibrate && boundaryCals < MaxBoundaryCalibrations)
                         {
-                            try { _receiver.Calibrate(); boundaryCals++; }   // Calibrate() waits + surfaces a cal error (#8)
-                            catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
+                            // A CALIBRATE that cannot be confirmed propagates (#41): the caller stops
+                            // rather than stepping on. Anything else keeps the old recovery.
+                            try { _receiver.Calibrate(); boundaryCals++; }
+                            catch (Exception cex) when (!(cex is TrflCalibrationFailedException))
+                            { try { _receiver.ClearError(); } catch { /* keep going */ } }
                         }
                     }
                     else
@@ -992,10 +1021,15 @@ namespace HpAttenuator.Measurement
 
             try
             {
-                _receiver.Calibrate();                 // C1 — waits for completion + surfaces a cal error (#8)
+                _receiver.Calibrate();                 // C1, confirmed positively (#41)
                 boundaryCals++;
             }
-            catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
+            catch (Exception ex) when (!(ex is TrflCalibrationFailedException))
+            {
+                // A bus-level failure keeps the old recovery; an unconfirmed CALIBRATE propagates so the
+                // sweep stops instead of stepping the attenuator on a range nobody can vouch for.
+                try { _receiver.ClearError(); } catch { /* keep going */ }
+            }
         }
 
         /// <summary>
@@ -1136,7 +1170,15 @@ namespace HpAttenuator.Measurement
                 PanelWatch?.Invoke(uncal
                     ? $"the CALIBRATE at {db} dB — RECAL/UNCAL should be lit on the panel now"
                     : $"the forced CALIBRATE at {db} dB — note whether RECAL/UNCAL is lit (it may not be)");
-                try { _receiver.Calibrate(); cals++; }   // Calibrate() waits + surfaces a cal error (#8)
+                try { _receiver.Calibrate(); cals++; }   // C1, confirmed positively (#41)
+                catch (TrflCalibrationFailedException cex)
+                {
+                    // Stop the descent where it is. The next step would move the attenuator after a
+                    // CALIBRATE nobody can vouch for, and SET REF would then be taken on top of it (#41).
+                    Trace?.Invoke($"range-cal: STOPPED at {db} dB — {cex.Message}. " +
+                                  $"{cals} CALIBRATE(s) confirmed before it. the attenuator and source are left where they are: nothing is stepped after an unconfirmed CALIBRATE (#41).");
+                    throw;
+                }
                 catch { try { _receiver.ClearError(); } catch { /* keep going */ } }
                 PanelReview?.Invoke($"After the CALIBRATE at {db} dB — did the reading stay valid (and any RECAL/UNCAL clear)?");
             }

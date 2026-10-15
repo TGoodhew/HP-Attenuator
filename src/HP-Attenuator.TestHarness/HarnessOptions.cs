@@ -37,6 +37,7 @@ namespace HpAttenuator.TestHarness
         public bool Profile;        // --profile : attribute sweep wall-clock by category (#2)
         public bool PanelReview;    // --panel-review : pause to have the operator read the 8902A front panel
         public bool CalProbe;       // --cal-probe : force one Tuned RF Level CALIBRATE and trace it (hunt Error 35)
+        public TrflCalibrationOptions Cal = new TrflCalibrationOptions();   // --cal-* : TRFL CALIBRATE settings (#41)
         public bool CalThenRead;    // --cal-then-read : cal-probe presses C1 and reads at once (V17 detection probe)
         public int[] CalProbeDepths;  // --cal-probe-depths a,b,... : cal-probe depths (default 0..110 step 10)
         public bool CalSelfTest;    // --cal-selftest : headless check of the CALIBRATE completion poll (#34); no instruments
@@ -125,6 +126,14 @@ namespace HpAttenuator.TestHarness
                             ? I(Need(args, ++i)) : 1;
                         break;
                     case "--cal-then-read": o.CalThenRead = true; break;
+                    // TRFL CALIBRATE settings (#41) — defaults live in TrflCalibrationOptions.
+                    case "--cal-gate-samples": o.Cal.StabilitySamples = I(Need(args, ++i)); break;
+                    case "--cal-gate-tol": o.Cal.StabilityToleranceDb = D(Need(args, ++i)); break;
+                    case "--cal-retries": o.Cal.MaxRetries = I(Need(args, ++i)); break;
+                    case "--cal-retry-wait-ms": o.Cal.RetryWaitMs = I(Need(args, ++i)); break;
+                    case "--cal-result-timeout-ms": o.Cal.ResultTimeoutMs = I(Need(args, ++i)); break;
+                    case "--cal-suspect-hold-ms": o.Cal.SuspectHoldMs = I(Need(args, ++i)); break;
+                    case "--cal-suspect-fails": o.Cal.SuspectHoldIsFailure = true; break;
                     case "--cal-probe-depths":
                         o.CalProbeDepths = System.Array.ConvertAll(Need(args, ++i).Split(','), x => I(x.Trim()));
                         break;
@@ -226,6 +235,19 @@ Usage: HP-Attenuator.TestHarness [options]
   --cal-max-age H      Reuse a session sensor cal up to H hours old (default 8). The cal is
                        done once per session and skipped automatically while fresh.
   --no-beep            Silence the short beep emitted on every instrument command.
+  --cal-gate-samples N Tuned RF Level CALIBRATE (#41): readings taken before C1 to check the
+                       level is steady (default 3; 0 = no gate). Each is a ~6 s settled read.
+  --cal-gate-tol dB    Maximum spread of those readings (default 0.10 dB).
+  --cal-retries N      Retries for Error 33/34/35, an unsteady level, or a CALIBRATE that left
+                       RECAL/UNCAL asserted (default 2).
+  --cal-retry-wait-ms  Wait before re-gating and retrying (default 3000).
+  --cal-result-timeout-ms
+                       Wait for the post-C1 result read (default 60000).
+  --cal-suspect-hold-ms
+                       Flag a CALIBRATE that releases the bus sooner than this as SUSPECT
+                       (default 10000; 0 = off). Two bench points only: ~18 s clean, ~6.7 s
+                       with Error 33. Warn-only unless --cal-suspect-fails.
+  --cal-suspect-fails  Treat a SUSPECT CALIBRATE as failed (stop) instead of warning.
   --cal-selftest       Headless regression check of the CALIBRATE completion poll (#34),
                        run against a scripted link. No instruments, no GPIB, no --hardware:
                        drives the real Hp8902A driver over scripted status bytes. Simulation

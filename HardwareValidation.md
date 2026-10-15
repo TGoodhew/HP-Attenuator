@@ -71,6 +71,7 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V15 | **#30** — leveller silently no-ops when the first level read is UNCAL, taking the adaptive step plan and #21 limits down with it | `issue-30-leveller-uncal-recovery` | ⬜ | — 2026-10-15: no regression, but the first read was not UNCAL, so the recovery path was not exercised |
 | V16 | `--hold-before-cal` — gate each CALIBRATE on a file so an observation can be timed to it | `issue-17-cal-hold-gate` | ✅ | — used 5x on 2026-09-15; found #34 and #35 |
 | V17 | **#34** — CALIBRATE waits for completion instead of sampling 2500 ms in | `issue-34-calibrate-completion-poll` → `issue-34-srq-completion` | ❌ | **2026-10-15: the 8902A never reports a CALIBRATE's Error 33 over HP-IB** — not in the status byte, not on the read. See V17 below |
+| V19 | **#41** — TRFL CALIBRATE confirmed by gate + result read, per-error handling, stops on failure | `issue-41-trfl-cal-errors` | ⬜ | — needs V17's panel watching again; see V19 below |
 | V18 | **#36** — read budget enforced across a blocking poll; per-poll timing; bus release verified | `issue-36-bounded-poll` | ⬜ | — not run (bench stopped 2026-10-15). Partial: the per-poll timing worked on every read, see V18 |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-24-sf-matrix` | ✅ | **REINSTATED 2026-09-04**: reaches 99 dB / −100.5 dBm vs average's 96 dB, tracks linearly, fails honestly. The earlier rejection was made without measuring residual FM (18 Hz, well in spec). |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
@@ -1030,6 +1031,34 @@ inferred: from the bus-hold time, from the reference shift, or by not issuing de
   blocks 6.0-9.0 s** (`poll #1 took 6.1 s (SB=0x41)`). The 8902A holds the poll until its cycle ends
   (O&C 3-22), so the old "DataReady SET after 6.0 s" was never many fast polls. **This confirms the 15 s
   per-poll floor was necessary:** a 5 s bound would have failed every read on this bench.
+
+---
+
+## V19 — #41 TRFL CALIBRATE without SRQ  ⬜ built, awaiting bench
+
+- **Issue:** [#41](https://github.com/TGoodhew/HP-Attenuator/issues/41). Branch `issue-41-trfl-cal-errors`
+  (on `bench-2026-10-15`). Follow-up diagnostic: [#42](https://github.com/TGoodhew/HP-Attenuator/issues/42).
+- **What changed:** stability gate → C1 → triggered read → decode; success needs a valid reading and no
+  RECAL/UNCAL; per-error handling (33/34/35 retry, 31 guided sensor cal, 32 report, 30 `1.0SP`+`9.0SP`);
+  bus-hold time logged and short holds flagged SUSPECT; and nothing is stepped after an unconfirmed CALIBRATE.
+- **Verified off-bench:** `dotnet test` 63/63; `--cal-selftest` 5/5; simulated sweeps PASS (plain and
+  `--sim-uncal-first-read 1`).
+- **Bench procedure** (fresh sensor cal first; the instruments were power-cycled after 2026-10-15):
+  1. Re-run the V17 command with the panel watched at each hold:
+     ```powershell
+     dotnet run --project src/HP-Attenuator.TestHarness -- --hardware --x-atten 8494 --atten-sweep `
+       --freq 3000 --astop 30 --astep 10 --force-range-cal --hold-before-cal <file> --debug `
+       --skip-sensor-cal --out DebugResults/v47-v19.csv
+     ```
+  2. Read the aqua `TRFL CAL` lines at 0, 20 and 60 dB: gate spread, raw result, **held bus** time, verdict.
+  3. **Expected:** 0 and 20 dB `CONFIRMED` with a hold of roughly 15-18 s; 60 dB (Error 33 on the panel)
+     most likely still `CONFIRMED`, since the error does not reach HP-IB, but **SUSPECT** if its hold is
+     again ~6.7 s. That hold-time split, over more points, is what decides whether SUSPECT can become a
+     failure (`--cal-suspect-fails`).
+  4. The gate's logged spread tests the source-wander hypothesis: expect a few thousandths of a dB.
+- **PASS =** every CALIBRATE logged with raw strings and hold time, no attenuator step after a failure,
+  and a SUSPECT flag on the 60 dB Error 33 (or a recorded counter-example that kills the heuristic).
+- **Not yet run on hardware.**
 
 ---
 

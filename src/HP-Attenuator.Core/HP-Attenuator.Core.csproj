@@ -14,4 +14,9 @@
     <PackageReference Include="Kelary.Ivi.Visa" Version="7.2.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Hp8902A.ParseReading's exception contract is unit-tested (#41). -->
+    <InternalsVisibleTo Include="HP-Attenuator.Core.Tests" />
+  </ItemGroup>
+
 </Project>
