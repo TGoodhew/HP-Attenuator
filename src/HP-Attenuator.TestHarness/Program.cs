@@ -868,6 +868,21 @@ namespace HpAttenuator.TestHarness
                 System.Threading.Thread.Sleep(settle);
                 AnsiConsole.MarkupLine($"[bold]{atten} dB[/] — before: {Read(out _).EscapeMarkup()}");
 
+                if (opt.CalRoutine)
+                {
+                    // #35 bisect: the full #41 routine at this depth (gate, C1, read, decode), so each
+                    // depth also yields a cycle time against the panel's verdict.
+                    MeasurementEngine.PanelWatch?.Invoke($"the #41 CALIBRATE routine at {atten} dB");
+                    try { h.Calibrate(); }
+                    catch (TrflCalibrationFailedException cex)
+                    {
+                        AnsiConsole.MarkupLine($"   [red]not confirmed:[/] {cex.Result.Message.EscapeMarkup()}");
+                    }
+                    MeasurementEngine.PanelReview?.Invoke($"after the CALIBRATE at {atten} dB");
+                    AnsiConsole.MarkupLine($"   after: {Read(out _).EscapeMarkup()}");
+                    continue;
+                }
+
                 MeasurementEngine.PanelWatch?.Invoke($"C1 then an immediate read at {atten} dB");
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 h.PressCalibrate();

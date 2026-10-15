@@ -38,7 +38,8 @@ namespace HpAttenuator.TestHarness
         public bool PanelReview;    // --panel-review : pause to have the operator read the 8902A front panel
         public bool CalProbe;       // --cal-probe : force one Tuned RF Level CALIBRATE and trace it (hunt Error 35)
         public TrflCalibrationOptions Cal = new TrflCalibrationOptions();   // --cal-* : TRFL CALIBRATE settings (#41)
-        public bool CalThenRead;    // --cal-then-read : cal-probe presses C1 and reads at once (V17 detection probe)
+        public bool CalThenRead;
+        public bool CalRoutine;     // --cal-routine : with --cal-then-read, run the full #41 Calibrate() at each depth (#35 bisect)    // --cal-then-read : cal-probe presses C1 and reads at once (V17 detection probe)
         public int[] CalProbeDepths;  // --cal-probe-depths a,b,... : cal-probe depths (default 0..110 step 10)
         public bool CalSelfTest;    // --cal-selftest : headless check of the CALIBRATE completion poll (#34); no instruments
         public int SimUncalReads;   // --sim-uncal-first-read [n] : sim only — first n Tuned RF Level reads return UNCAL (#30)
@@ -126,6 +127,7 @@ namespace HpAttenuator.TestHarness
                             ? I(Need(args, ++i)) : 1;
                         break;
                     case "--cal-then-read": o.CalThenRead = true; break;
+                    case "--cal-routine": o.CalThenRead = true; o.CalRoutine = true; break;
                     // TRFL CALIBRATE settings (#41) — defaults live in TrflCalibrationOptions.
                     case "--cal-gate-samples": o.Cal.StabilitySamples = I(Need(args, ++i)); break;
                     case "--cal-gate-tol": o.Cal.StabilityToleranceDb = D(Need(args, ++i)); break;
