@@ -755,6 +755,8 @@ namespace HpAttenuator.TestHarness
                                    "Error 31/33 = sensor not zeroed/calibrated.[/]");
             AnsiConsole.WriteLine();
 
+            if (opt.CalThenRead) return RunCalThenRead(opt, rx, attenuator, freq, plan);
+
             rx.BeginAttenuationMeasurement(freq, plan.Regime, plan.LoMHz);
             rx.BeginRangeCalibration();
             attenuator.SetEngaged(System.Array.Empty<int>());     // 0 dB
@@ -803,6 +805,63 @@ namespace HpAttenuator.TestHarness
         /// This used to return 0 on failure, which is indistinguishable from a genuine 0x00 status —
         /// and that is exactly the reading the V10 bench runs recorded while the front panel was
         /// showing Error 33. Callers must render a negative result as "poll failed", not as 0x00.</summary>
+        /// <summary>
+        /// V17 detection probe (2026-10-15). The status byte never reports a CALIBRATE's Error 33 — the
+        /// SRQ lamp did not light and a single post-cycle poll read 0x00 — so try the other channel the
+        /// 8902A has: press C1 and IMMEDIATELY take a triggered read. If the error is on the display
+        /// when that read completes, the 8902A should return the error sentinel (+9000003300E+01)
+        /// instead of a level. Conditions match the engine's range-cal descent: before SET REF, RECAL
+        /// status unmasked, settled (not free-run) reads. Each C1 is gated by --hold-before-cal.
+        /// </summary>
+        private static int RunCalThenRead(HarnessOptions opt, IMeasuringReceiver rx, IStepAttenuator attenuator,
+            double freq, LoPlan plan)
+        {
+            if (!(rx is Hp8902A h))
+            {
+                AnsiConsole.MarkupLine("[yellow]--cal-then-read needs the real 8902A (--hardware).[/]");
+                return 2;
+            }
+            int[] depths = opt.CalProbeDepths ?? new[] { 20, 60 };
+            int settle = Math.Max(opt.Sweep.SettleMs, 500);
+            AnsiConsole.MarkupLine($"[grey]Cal-then-read probe at {string.Join(", ", depths)} dB: C1, then an immediate " +
+                                   "triggered read, then a second read. Pre-SET-REF, as in the range-cal descent.[/]");
+
+            rx.BeginAttenuationMeasurement(freq, plan.Regime, plan.LoMHz);
+            rx.EnableRecalStatus();
+
+            string Read(out int code)
+            {
+                code = 0;
+                try { return rx.ReadTunedLevelDbm().ToString("0.00", CultureInfo.InvariantCulture) + " dBm"; }
+                catch (Hp8902AException ex) { code = ex.Code; return $"Error {ex.Code} ({ex.Message})"; }
+                catch (Exception ex) { return ex.GetType().Name; }
+            }
+
+            foreach (int atten in depths)
+            {
+                attenuator.SetAttenuationDb(atten);
+                System.Threading.Thread.Sleep(settle);
+                AnsiConsole.MarkupLine($"[bold]{atten} dB[/] — before: {Read(out _).EscapeMarkup()}");
+
+                MeasurementEngine.PanelWatch?.Invoke($"C1 then an immediate read at {atten} dB");
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                h.PressCalibrate();
+                string first = Read(out int code1);
+                long firstMs = sw.ElapsedMilliseconds;
+                string second = Read(out int code2);
+                long secondMs = sw.ElapsedMilliseconds;
+                MeasurementEngine.PanelReview?.Invoke($"after C1 at {atten} dB");
+
+                AnsiConsole.MarkupLine($"   read 1 at {firstMs / 1000.0:0.0} s: {first.EscapeMarkup()}" +
+                                       (code1 > 0 ? "  [red]<-- the error came back on the read[/]" : ""));
+                AnsiConsole.MarkupLine($"   read 2 at {secondMs / 1000.0:0.0} s: {second.EscapeMarkup()}" +
+                                       (code2 > 0 ? "  [red]<-- error[/]" : ""));
+                if (code1 > 0 || code2 > 0) { try { rx.ClearError(); } catch { } }
+            }
+            attenuator.SetAttenuationDb(0);
+            return 0;
+        }
+
         private static int SafePoll(IMeasuringReceiver rx)
         {
             try { return rx.PollStatusByte(); } catch { return -1; }

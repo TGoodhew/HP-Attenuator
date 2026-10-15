@@ -579,6 +579,14 @@ namespace HpAttenuator.Instruments
             if (err) throw CalibrateFailure(sb);
         }
 
+        /// <summary>
+        /// Presses CALIBRATE (C1) and returns at once — no completion wait, no verdict. Diagnostic only
+        /// (<c>--cal-then-read</c>): V17 showed the status byte never reports Error 33, so the probe
+        /// follows C1 immediately with a triggered read to see whether the error comes back as the
+        /// read sentinel instead.
+        /// </summary>
+        public void PressCalibrate() => Send("C1");
+
         /// <summary>One bounded serial poll for <see cref="Calibrate"/>; -1 if it failed. The first
         /// failure's type is logged — a wedged bus must not look like a quiet instrument (#36).</summary>
         private int PollOnce(ref int polls, ref int failures)
