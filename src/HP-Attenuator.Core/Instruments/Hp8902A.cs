@@ -484,86 +484,113 @@ namespace HpAttenuator.Instruments
         public int CalibrateBudgetMs { get; set; } = CalibrateBudgetMsDefault;
 
         /// <summary>
-        /// Presses CALIBRATE (C1) and waits for the cycle to actually finish before judging it (#34).
+        /// Presses CALIBRATE (C1) and judges it by the status byte — WITHOUT polling during the cycle.
         ///
-        /// The previous implementation slept a fixed 2500 ms and polled the status byte exactly once.
-        /// Settled CALIBRATE cycles take 6.5-7.4 s, so that single sample landed roughly 4 s before the
-        /// calibration completed and could not see an error the calibration had not yet raised. Two
-        /// bench runs logged "status = 0x00" while the front panel showed **Error 33** — which means
-        /// every "CALIBRATE succeeded" this harness has ever reported was unverified.
+        /// History, because each step was a bench finding:
+        /// - The original slept a fixed 2500 ms and polled once. Settled cycles take 6.5-7.4 s, so two
+        ///   runs logged "status = 0x00" while the panel showed Error 33 (V10, #34).
+        /// - The first #34 fix polled every 250 ms for up to 30 s. On the bench (2026-10-15, V17) it
+        ///   logged 0x00 for the whole 30 s while the panel showed Error 33 at 60 dB — and never saw a
+        ///   completion signal on the clean ones either. The manual says why (O&amp;C 3-32): "The
+        ///   Measuring Receiver cannot alter the Status Byte while in serial poll mode; therefore, it is
+        ///   not possible to continually poll the Status Byte while waiting for a condition to cause a
+        ///   bit to be set." Continuous polling held off the very bit it was waiting for.
         ///
-        /// Now: hold the same 2500 ms minimum (so this can never finish sooner than the behaviour it
-        /// replaces), then poll the status byte until the receiver reports completion — Data Ready
-        /// (0x01) or an instrument error (0x04) — up to <see cref="CalibrateBudgetMs"/>. An error seen
-        /// at ANY poll in that window fails the calibration, instead of only an error that happened to
-        /// be latched at t=2500 ms.
+        /// Now, as the manual intends: clear any stale status, press C1, WAIT FOR SRQ without polling,
+        /// and serial-poll once when it arrives. The same page also says "once any Status Byte bit has
+        /// been set, it remains set until the Status Byte is read", so even if SRQ events never reach
+        /// us, the single poll at the end of the budget still sees a latched error. Data Ready seen
+        /// before <see cref="CalibrateMinSettleMs"/> is not believed (it can be the previous cycle's).
         ///
-        /// A failed serial poll is reported as a failed poll, NOT as 0x00 (#36): SerialPoll returns a
-        /// byte and can never be negative, so the old "sb &lt; 0 ? 0 : sb" rendering made a thrown poll
-        /// and a genuine zero status print identically — and those imply opposite root causes.
-        ///
-        /// Exhausting the budget without a completion signal is logged as UNCONFIRMED and does not
-        /// throw: a sweep that works today must keep working. The caller should treat an unconfirmed
-        /// calibration as untrusted rather than as a pass.
+        /// No SRQ within <see cref="CalibrateBudgetMs"/> and a clean final poll is logged as
+        /// "no error raised" — not "complete": a CALIBRATE in hold mode may produce no Data Ready, so
+        /// the absence of an error is the strongest positive statement available. It does not throw.
+        /// A failed serial poll is reported as a failed poll, never as 0x00 (#36).
         /// </summary>
         public void Calibrate()
         {
+            // Stale state first: an SRQ queued by the previous read, or a latched status bit, must not
+            // be mistaken for this calibration's result. Reading the status byte clears it.
+            try { _link.DiscardServiceRequests(); } catch { /* best effort; the min-settle rule still applies */ }
+            try { _link.SerialPoll(PollTimeoutMs); } catch { /* best effort */ }
+
             Send("C1");
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             int sb = -1;            // last SUCCESSFUL poll; -1 = never polled successfully
-            int polls = 0, pollFailures = 0;
-            bool err = false, complete = false;
+            int polls = 0, pollFailures = 0, srqs = 0;
+            bool err = false, complete = false, srqUnavailable = false;
 
             while (true)
             {
-                Thread.Sleep(DataReadyPollMs);
-
-                polls++;
-                int s;
-                // Bounded by what is left of the budget, as in ReadMeasurement (#36): the budget check
-                // below only runs between polls, so an unbounded poll could overrun it by a whole
-                // session timeout.
                 long remaining = CalibrateBudgetMs - sw.ElapsedMilliseconds;
-                try { s = _link.SerialPoll((int)Math.Max(remaining, PollTimeoutMs)); }
+                if (remaining <= 0) break;
+
+                bool srq;
+                try { srq = _link.WaitForServiceRequest((int)remaining); }
                 catch (Exception ex)
                 {
-                    pollFailures++;
-                    // Log the first failure's type — the old code swallowed it entirely, so a wedged
-                    // bus was indistinguishable from a quiet instrument (#36).
-                    if (pollFailures == 1)
-                        DebugLog?.Invoke($"8902A CALIBRATE poll failed ({ex.GetType().Name}) — retrying");
-                    s = -1;
+                    // No SRQ support: sit out the budget without polling, then poll once below. The
+                    // latched bit makes that sufficient to catch an error, just not early.
+                    if (!srqUnavailable)
+                        DebugLog?.Invoke($"8902A CALIBRATE: SRQ wait unavailable ({ex.GetType().Name}) — " +
+                                         "waiting out the budget, then polling once");
+                    srqUnavailable = true;
+                    Thread.Sleep((int)Math.Max(0, CalibrateBudgetMs - sw.ElapsedMilliseconds));
+                    break;
                 }
+                if (!srq) break;                          // budget spent with no service request
+                srqs++;
 
+                int s = PollOnce(ref polls, ref pollFailures);
+                if (s < 0) { Thread.Sleep(DataReadyPollMs); continue; }
+                sb = s;
+                if ((s & InstrErrorBit) != 0) { err = true; break; }
+                if ((s & DataReadyBit) != 0 && sw.ElapsedMilliseconds >= CalibrateMinSettleMs) { complete = true; break; }
+                // Anything else (stale Data Ready, a mode-change bit) — keep waiting for the next SRQ.
+            }
+
+            // The decisive read if no SRQ settled it: one poll, after the cycle, of a latched byte.
+            if (!err && !complete)
+            {
+                int s = PollOnce(ref polls, ref pollFailures);
                 if (s >= 0)
                 {
                     sb = s;
-                    if ((s & InstrErrorBit) != 0) { err = true; break; }
-                    // Only believe Data Ready once the minimum settle has passed; before that it can
-                    // still be the previous measurement's flag rather than this calibration's.
-                    if ((s & DataReadyBit) != 0 && sw.ElapsedMilliseconds >= CalibrateMinSettleMs)
-                    {
-                        complete = true;
-                        break;
-                    }
+                    if ((s & InstrErrorBit) != 0) err = true;
+                    else if ((s & DataReadyBit) != 0) complete = true;
                 }
-
-                if (sw.ElapsedMilliseconds >= CalibrateBudgetMs) break;
             }
 
             string status = sb < 0
                 ? $"no successful poll in {polls} attempts"
                 : $"status = 0x{sb:X2}";
-            string verdict = err        ? "  <-- INSTRUMENT ERROR (0x04) — reference/boundary cal FAILED"
-                           : complete   ? ""
-                                        : "  <-- UNCONFIRMED: no completion signal within budget; do NOT trust this calibration";
-            DebugLog?.Invoke($"8902A CALIBRATE {(complete ? "complete" : err ? "failed" : "UNCONFIRMED")} " +
-                             $"after {sw.ElapsedMilliseconds / 1000.0:0.0} s, {status}" +
-                             (pollFailures > 0 ? $", {pollFailures}/{polls} polls failed" : "") +
+            string outcome = err ? "failed" : complete ? "complete" : sb >= 0 ? "no error raised" : "UNCONFIRMED";
+            string verdict = err      ? "  <-- INSTRUMENT ERROR (0x04) — reference/boundary cal FAILED"
+                           : complete ? ""
+                           : sb >= 0  ? "  (no Data Ready either — normal in hold mode; no error bit was latched)"
+                                      : "  <-- UNCONFIRMED: the status byte could not be read; do NOT trust this calibration";
+            DebugLog?.Invoke($"8902A CALIBRATE {outcome} after {sw.ElapsedMilliseconds / 1000.0:0.0} s, {status}, " +
+                             $"{srqs} SRQ(s), {polls} poll(s)" +
+                             (pollFailures > 0 ? $", {pollFailures} failed" : "") +
+                             (srqUnavailable ? ", SRQ unavailable" : "") +
                              verdict);
 
             if (err) throw CalibrateFailure(sb);
+        }
+
+        /// <summary>One bounded serial poll for <see cref="Calibrate"/>; -1 if it failed. The first
+        /// failure's type is logged — a wedged bus must not look like a quiet instrument (#36).</summary>
+        private int PollOnce(ref int polls, ref int failures)
+        {
+            polls++;
+            try { return _link.SerialPoll(PollTimeoutMs); }
+            catch (Exception ex)
+            {
+                if (++failures == 1)
+                    DebugLog?.Invoke($"8902A CALIBRATE poll failed ({ex.GetType().Name})");
+                return -1;
+            }
         }
 
         /// <summary>

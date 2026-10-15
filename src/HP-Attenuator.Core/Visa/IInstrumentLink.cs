@@ -38,6 +38,18 @@ namespace HpAttenuator.Visa
         /// </summary>
         byte SerialPoll(int timeoutMs);
 
+        /// <summary>Drops any service requests already queued, so a later
+        /// <see cref="WaitForServiceRequest"/> only sees ones raised after this call.</summary>
+        void DiscardServiceRequests();
+
+        /// <summary>
+        /// Waits for the instrument to assert SRQ, WITHOUT serial-polling while it waits. Returns true
+        /// if a service request arrived, false if <paramref name="timeoutMs"/> passed without one.
+        /// Exists because the 8902A cannot set a status bit while it is being polled (O&amp;C 3-32), so
+        /// "poll until the bit appears" can wait forever for a bit it is itself holding off (#34).
+        /// </summary>
+        bool WaitForServiceRequest(int timeoutMs);
+
         /// <summary>The commands sent so far, most recent last.</summary>
         IReadOnlyList<string> History { get; }
     }

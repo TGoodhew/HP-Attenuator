@@ -72,12 +72,14 @@ namespace HpAttenuator.TestHarness
                 expectLog: "no successful poll",
                 rejectLog: "0x00");
 
-            failures += Check(results, "no completion signal is UNCONFIRMED, not success",
-                "Status never changes. Must fall out at the budget and say so — a sweep that works " +
-                "today must keep working, so this does not throw.",
+            failures += Check(results, "no SRQ and a clean final poll is 'no error raised', not 'complete'",
+                "Status never changes. Must fall out at the budget, poll once, and say only what it " +
+                "knows: no error bit was latched. Does not throw — a sweep that works today keeps working.",
                 link => link,                       // TrailingPoll defaults to 0x00
                 expectThrow: false,
-                expectLog: "UNCONFIRMED");
+                expectLog: "no error raised");
+
+            failures += CheckPollingCannotHideTheError(results);
 
             failures += CheckFailedWriteIsTraced(results);
             failures += CheckFailedRelayWriteIsAdmitted(results);
@@ -353,6 +355,7 @@ namespace HpAttenuator.TestHarness
                 DataReadyPollMs = PollMs,
                 CalibrateMinSettleMs = MinSettleMs,
                 CalibrateBudgetMs = BudgetMs,
+                PollTimeoutMs = PollBoundMs,
             };
 
             Action<string> previous = Hp8902A.DebugLog;
@@ -381,6 +384,14 @@ namespace HpAttenuator.TestHarness
             if (sw.ElapsedMilliseconds < MinSettleMs)
                 problems.Add($"concluded in {sw.ElapsedMilliseconds} ms, before the {MinSettleMs} ms minimum settle");
 
+            // V17 (2026-10-15): the 8902A cannot set a status bit while it is being polled (O&C 3-32),
+            // so every poll after C1 must answer a service request — apart from the stale-state clear
+            // before C1, the --debug trace poll (two attempts when it fails), and the one decisive poll
+            // at the end of the budget.
+            if (link.PollCount > link.SrqWaits + 4)
+                problems.Add($"{link.PollCount} polls for {link.SrqWaits} SRQ waits — polling without a " +
+                             "service request holds off the bit being waited for");
+
             // Run the OLD algorithm over an identical script. A regression test that the code it
             // replaces would also pass proves nothing; this makes the discrimination visible instead
             // of asserted. "MISSED" below is the #34 defect reproducing on demand.
@@ -398,6 +409,60 @@ namespace HpAttenuator.TestHarness
                         "\n         [grey]" + why.EscapeMarkup() + "[/]" +
                         "\n         " + legacy);
             return ok ? 0 : 1;
+        }
+
+        /// <summary>
+        /// The bench failure of 2026-10-15 (V17), reproduced: Error 33 on the panel, status 0x00 in the
+        /// log for 30 s. The scripted link refuses to reveal a pending bit to a poll that follows the
+        /// previous one too closely — the 8902A's documented limit (O&amp;C 3-32). The first #34 fix
+        /// polled every 250 ms and so never saw the error; waiting for SRQ and polling once does.
+        /// </summary>
+        private static int CheckPollingCannotHideTheError(List<string> results)
+        {
+            ScriptedInstrumentLink Script() =>
+                ErrorScript(new ScriptedInstrumentLink { PollSuppressionMs = 50 }, 100);
+
+            var link = Script();
+            var rx = new Hp8902A(link)
+            {
+                DataReadyPollMs = PollMs, CalibrateMinSettleMs = MinSettleMs,
+                CalibrateBudgetMs = BudgetMs, PollTimeoutMs = PollBoundMs, DataReadyBudgetMs = ReadBudgetMs,
+            };
+            string text = Capture(() => rx.Calibrate(), out long ms, out string thrown);
+
+            var problems = new List<string>();
+            if (thrown == null) problems.Add("the error was not reported");
+            if (text.IndexOf("INSTRUMENT ERROR", StringComparison.Ordinal) < 0) problems.Add("log missing \"INSTRUMENT ERROR\"");
+
+            bool legacyMissed = !LegacyPollingCalibrate(Script());
+            bool ok = problems.Count == 0;
+            results.Add((ok ? "[green]  PASS[/] " : "[red]  FAIL[/] ") +
+                        $"an error raised while being polled is still caught [grey]({ms} ms, {link.PollCount} polls)[/]" +
+                        (ok ? "" : "\n         [red]" + string.Join("; ", problems).EscapeMarkup() + "[/]") +
+                        "\n         [grey]O&C 3-32: the 8902A cannot alter its status byte while being polled. " +
+                        "V17 saw Error 33 on the panel and 0x00 in the log for 30 s.[/]" +
+                        (legacyMissed
+                            ? "\n         [red]old code (first #34 fix, 250 ms polling): MISSED the error - this is V17[/]"
+                            : "\n         [yellow]old code (first #34 fix): also caught it on this script[/]"));
+            return ok ? 0 : 1;
+        }
+
+        /// <summary>
+        /// The first #34 fix, kept ONLY for <see cref="CheckPollingCannotHideTheError"/>: poll every
+        /// interval until an error or the budget. Returns true if it would have reported a failure.
+        /// </summary>
+        private static bool LegacyPollingCalibrate(ScriptedInstrumentLink link)
+        {
+            link.Write("C1");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < BudgetMs)
+            {
+                System.Threading.Thread.Sleep(PollMs);
+                int sb;
+                try { sb = link.SerialPoll(); } catch { continue; }
+                if ((sb & 0x04) != 0) return true;
+            }
+            return false;
         }
 
         /// <summary>
