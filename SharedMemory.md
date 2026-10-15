@@ -1,6 +1,6 @@
 # Shared Memory — HP-Attenuator working state
 
-A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-10-15 (evening).
+A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-10-16.
 (Personal per-machine notes live outside the repo; this file is the shared, committed record.)
 
 ## Working model (author is traveling — away from the GPIB rig until back in Renton)
@@ -13,6 +13,40 @@ A cross-machine handoff snapshot so work can continue from anywhere. Updated 202
   bench-validated and the author says so.
 - **Standing git default: commit + push** every change, branches included. No manual merge-to-`main`
   gate anymore — combine freely; validation is deferred to the ledger, not blocked before merge.
+
+## STOPPING POINT — 2026-10-16, bench session (sources RF off, instruments in local; bench left ON)
+
+**Merge candidate: `bench-2026-10-15`** (now also carries `issue-41` follow-ups and `issue-42-srq-diagnostic`).
+Nothing merged to `main`. Sensor cal done this session (1.000 mW); TRFL scale left good (-1.017 dBm at
+source 0 dBm, 3 GHz) after a final `--trfl-recal`. A power cycle will need a fresh sensor cal.
+
+### Results (details: HardwareValidation.md § V19, § V18, "#35 / #42 bench findings")
+- **V19 ✅** — the #41 routine logged every CALIBRATE and flagged every panel-observed Error 33 SUSPECT.
+  SUSPECT was moved to **cycle time** (clean 19.4-24.0 s vs Error 33 14.2-16.4 s, nine points) after the
+  bus-hold measure gave a 0.1 s false alarm in `--trfl-recal`. Gate spread 0.000-0.006 dB throughout, so
+  source wander does not cause Error 33 here.
+- **V18 ⬜** — 31/31 PASS at 5 GHz; the hang did not recur, so the bound was not exercised. The source
+  sat at +3.55 dBm (9/15: +3.15 passed, +2.35 hung).
+- **#35 is not a depth limit:** 0/20/50 dB clean, 30/40/60 dB Error 33. Hypothesis: CALIBRATE works at
+  range boundaries only. After the clean 50 dB CALIBRATE, 80/90 dB error fell from +1.60/+2.70 to
+  +1.18/+1.32. **Next: force-cal depths {0, 20, 50} instead of {0, 20, 55}.**
+- **#42:** Entry (24) and Operating (01) errors set the Instrument Error bit (0x46 / 0x44, SRQ lamp lit).
+  No 30-series error occurred in the run, so V17's dark-lamp Error 33 is still the only one.
+- **New defect: status byte lost after a long hold.** With `--hold-before-cal` holds, both controls lit
+  SRQ but the harness read 0x00 and the lamp went out; without holds, they read correctly, and a plain
+  64-bit VISA session reads 0x46 after a 3 s delay. Unexplained (NI-488.2 autopolling suspected). Treat
+  any status read after a hold as suspect.
+
+### Next, in order
+1. **Chase the lost status byte offline** — check NI MAX → GPIB0 → "Automatic Serial Polling"; reproduce
+   with a held `--srq-diag` control only. 2. **Boundary test:** forced-cal descent at {0, 20, 50} with the
+   panel watched, then a 0-110 dB sweep (does 80-90 dB improve further? — V4). 3. Provoke a 30-series
+   error with the SRQ lamp watched (#42). 4. V15 and V18 stay ⬜ until their failure modes recur.
+
+### Protocol notes
+- One beep = watch, two = stop. With the #41 routine, the stability gate runs ~18 s AFTER a hold is
+  released and BEFORE C1, so release silently and beep once when the gate line appears (script used:
+  release on the gate-file, beep on the `TRFL CAL attempt N: gate` line, double-beep on `held bus`).
 
 ## STOPPING POINT — 2026-10-15 evening, bench session then code (instruments powered OFF)
 
