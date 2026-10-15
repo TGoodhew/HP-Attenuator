@@ -13,6 +13,43 @@ What's on `main` but not yet confirmed against the real hardware is tracked in
 
 ## Unreleased
 
+### #36 (structural half): the read budget is enforced, every poll is timed, the bus release is checked (branch `issue-36-bounded-poll`)
+
+Stacked on `issue-36-visa-scan-ambiguity`. Ledger row **V18**. The two items that actually explain
+the 5 GHz hang's 134.5 s, plus the post-hang path that hid what happened next.
+
+- **The 30 s read budget was not enforced.** `ReadMeasurement` checked it only between polls, and
+  every poll inherited the 60 s session timeout, so one unanswered poll carried the wait past it
+  without bound. New `IInstrumentLink.SerialPoll(timeoutMs)` narrows the VISA timeout for one poll;
+  each poll now gets only what is left of the budget (never less than 15 s). `Calibrate()`'s
+  completion poll (#34) had the same shape and is bounded the same way.
+- **Per-poll timing.** The `--debug` summary line now gives poll count, time inside polls, the
+  longest poll and the failures with their exception type; any poll over 1 s is logged as it happens;
+  the retrieve is timed and a failed retrieve is traced. This is what separates "the receiver kept
+  answering 0x00" from "the bus stopped answering" — the fork the rest of #36 depends on.
+- **`ReleaseBus()` checks that it worked.** It used to return normally whatever happened, because
+  `Clear()` swallows its own failure. It now polls after the device clear and throws if the 8902A
+  still does not answer; the sweep then reports `bus NOT released` and skips the probe, instead of
+  saying "released it" and running a probe that can only time out (both 5 GHz hangs).
+- **Diagnostic, RECAL and `--debug` trace polls are bounded at 15 s.** That is above the longest
+  legitimate cycle (O&C 3-22: the handshake is held until a triggered cycle completes, ~12 s near the
+  floor) and a quarter of the 60 s they used to inherit. A failed diagnostic poll now prints
+  `[serial poll failed]` in the point error instead of leaving the status byte silently absent.
+- **The budgets, reconciled:** worst case for one settled read that never completes is now 30 s
+  (budget) + 15 s (one poll's overrun) + 60 s (the retrieve, deliberately left at the session
+  timeout) ≈ 105 s, every part logged. Before, it had no bound.
+- **`--profile` splits the 8902A's settled reads** into trigger / wait (and time inside polls) /
+  retrieve / settle, collected without `--debug`. This is the attribution V9's 18.4 s/read needs.
+
+**From the old logs, an inference to check on the bench:** a poll that succeeds with 0x00 costs
+milliseconds, so 134.5 s needs one poll lasting ≥ 104.5 s — longer than the 60 s session timeout. That
+favours "the bus stopped answering" over "the receiver reported 0x00", and suggests NI-VISA may not
+honour the timeout on a serial poll. If so, the new bound will not hold either, and the per-poll log
+will show it.
+
+**Verified:** `--cal-selftest` 11/11 PASS (three new cases; the hung-poll case is also run against the
+legacy loop, which overruns its budget five-fold). Simulated sweep PASS. **Not run on hardware.**
+
 ### #36 (third instance): an unreachable VISA reported as "no instruments found" (branch `issue-36-visa-scan-ambiguity`)
 
 Stacked on `issue-39-silent-measurement-decisions`. The same conflation as rendering a failed serial

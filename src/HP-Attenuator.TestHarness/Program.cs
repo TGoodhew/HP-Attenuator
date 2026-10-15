@@ -273,7 +273,7 @@ namespace HpAttenuator.TestHarness
                 IStepAttenuator attenuator = bench.MakeAttenuator(config);
 
                 var engine = new MeasurementEngine(bench.Source, bench.Lo, attenuator, bench.Receiver, opt.Sweep);
-                return RunSweep(opt, engine, config);
+                return RunSweep(opt, engine, config, bench.Receiver as Hp8902A);
             }
             catch (Exception ex)
             {
@@ -1202,7 +1202,8 @@ namespace HpAttenuator.TestHarness
 
         // ---- Sweep + reporting ---------------------------------------------
 
-        private static int RunSweep(HarnessOptions opt, MeasurementEngine engine, AttenuatorConfig config)
+        private static int RunSweep(HarnessOptions opt, MeasurementEngine engine, AttenuatorConfig config,
+            Hp8902A receiver = null)
         {
             IReadOnlyList<double> frequencies =
                 (opt.Full || opt.ExplicitFreq)
@@ -1376,7 +1377,7 @@ namespace HpAttenuator.TestHarness
             summary.AddRow("Verdict", pass ? "[green]PASS[/]" : "[red]FAIL[/]");
             AnsiConsole.Write(summary);
 
-            if (opt.Profile) RenderTimingProfile(timing);
+            if (opt.Profile) RenderTimingProfile(timing, receiver?.ReadTimes);
 
             return pass ? 0 : 1;
         }
@@ -1385,7 +1386,7 @@ namespace HpAttenuator.TestHarness
         /// optimization targets the measured hotspot. Settled reads normally dominate; a large range-cal
         /// pre-pass or per-step settle is the next candidate (poll-on-status instead of fixed sleeps, cf.
         /// #8); per-command I/O only shows up big under --debug (its per-command serial poll).</summary>
-        private static void RenderTimingProfile(SweepTiming timing)
+        private static void RenderTimingProfile(SweepTiming timing, Hp8902A.ReadPhaseTimes reads = null)
         {
             long total = timing.TotalMs;
             AnsiConsole.WriteLine();
@@ -1405,6 +1406,38 @@ namespace HpAttenuator.TestHarness
                 " fixed waits (range-cal pre-pass, per-step settle) are the tunable targets — poll-on-status" +
                 " instead of blind sleeps (cf. #8 post-calibrate). Per-command GPIB I/O is negligible unless" +
                 " --debug is on (it polls after every command).[/]");
+
+            if (reads != null && reads.Reads > 0) RenderReadPhases(reads);
+        }
+
+        /// <summary>
+        /// #36 / V9: splits the 8902A's settled reads into trigger / wait / retrieve / settle, and the
+        /// wait into time INSIDE serial polls vs sleeping between them. V9 found 18.4 s per read with
+        /// successful reads metronomic at ~6 s, and nothing to say where the rest went; this is that
+        /// attribution. Covers every settled read the driver made this run (levelling and reference
+        /// reads included), so its total can exceed the sweep's "settled read" row.
+        /// </summary>
+        private static void RenderReadPhases(Hp8902A.ReadPhaseTimes r)
+        {
+            long total = r.TriggerMs + r.WaitMs + r.RetrieveMs + r.SettleMs;
+            var t = new Table().Border(TableBorder.Rounded)
+                .Title($"8902A settled reads — where the time went ({r.Reads} reads, all this run)");
+            t.AddColumn("Phase");
+            t.AddColumn(new TableColumn("Time").RightAligned());
+            t.AddColumn(new TableColumn("%").RightAligned());
+            t.AddColumn(new TableColumn("Per read").RightAligned());
+            void Row(string name, long ms) =>
+                t.AddRow(name, $"{ms / 1000.0:0.00} s", total > 0 ? $"{100.0 * ms / total:0.0}%" : "—",
+                         $"{ms / 1000.0 / r.Reads:0.00} s");
+            Row("trigger (T3 write)", r.TriggerMs);
+            Row("wait for status", r.WaitMs);
+            Row("[grey]  of which inside polls[/]", r.InsidePollsMs);
+            Row("retrieve (read)", r.RetrieveMs);
+            Row("post-read settle", r.SettleMs);
+            AnsiConsole.Write(t);
+            AnsiConsole.MarkupLine($"[grey]{r.Polls} polls, {r.FailedPolls} failed, longest " +
+                $"{r.LongestPollMs / 1000.0:0.00} s. Time inside polls close to the whole wait means the " +
+                "bus was slow to answer (or held — O&C 3-22), not that the receiver was slow to settle.[/]");
         }
 
         private static void RenderFrequencyTable(FreqPointResult r, double tol)

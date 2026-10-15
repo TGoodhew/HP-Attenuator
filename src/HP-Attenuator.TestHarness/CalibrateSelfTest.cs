@@ -81,17 +81,167 @@ namespace HpAttenuator.TestHarness
 
             failures += CheckFailedWriteIsTraced(results);
             failures += CheckFailedRelayWriteIsAdmitted(results);
+            failures += CheckHungPollCannotOverrunReadBudget(results);
+            failures += CheckReadPhasesAreAttributed(results);
+            failures += CheckUnreleasedBusIsReported(results);
 
             AnsiConsole.WriteLine();
             foreach (string r in results) AnsiConsole.MarkupLine(r);
             AnsiConsole.WriteLine();
 
             if (failures == 0)
-                AnsiConsole.MarkupLine("[green]CALIBRATE self-test PASS[/] — all 8 cases behaved as specified.");
+                AnsiConsole.MarkupLine($"[green]CALIBRATE self-test PASS[/] — all {results.Count} cases behaved as specified.");
             else
-                AnsiConsole.MarkupLine($"[red]CALIBRATE self-test FAIL[/] — {failures} of 8 cases failed.");
+                AnsiConsole.MarkupLine($"[red]CALIBRATE self-test FAIL[/] — {failures} of {results.Count} cases failed.");
 
             return failures == 0 ? 0 : 1;
+        }
+
+        // Scaled-down read timings for the #36 cases. Ratios as on the bench: a poll that is never
+        // answered blocks for the whole session timeout (60 s there, HangMs here), which is several
+        // times the read budget (30 s there, ReadBudgetMs here).
+        private const int ReadBudgetMs = 600;
+        private const int PollBoundMs = 200;
+        private const int HangMs = 3000;
+
+        /// <summary>
+        /// A serial poll that is never answered must not carry the read past its budget (#36). This is
+        /// the 5 GHz hang: the budget was checked only BETWEEN polls and each poll inherited the 60 s
+        /// session timeout, so a 30 s budget was logged as "NOT set after 134.5 s". The legacy loop is
+        /// run over the same script to show the overrun reproducing.
+        /// </summary>
+        private static int CheckHungPollCannotOverrunReadBudget(List<string> results)
+        {
+            ScriptedInstrumentLink Script()
+            {
+                var l = new ScriptedInstrumentLink { HangMs = HangMs, TrailingPoll = ScriptedInstrumentLink.PollHang };
+                return l.Poll(0x00, 3);                     // a few quiet polls, then the bus stops answering
+            }
+
+            var link = Script();
+            var rx = new Hp8902A(link) { DataReadyPollMs = PollMs, DataReadyBudgetMs = ReadBudgetMs, PollTimeoutMs = PollBoundMs };
+            string text = Capture(() => rx.ReadRelativeDb(), out long ms, out _);
+
+            long limit = ReadBudgetMs + PollBoundMs + 300;  // budget + one bounded poll + scheduling slack
+            var problems = new List<string>();
+            if (ms > limit) problems.Add($"took {ms} ms, past the {limit} ms bound");
+            if (text.IndexOf("FAILED (first: TimeoutException)", StringComparison.Ordinal) < 0)
+                problems.Add("the summary does not name the failed polls and their exception");
+            if (text.IndexOf("read budget spent", StringComparison.Ordinal) < 0)
+                problems.Add("the summary does not say the budget ran out");
+            if (text.IndexOf("(serial poll failed)", StringComparison.Ordinal) < 0)
+                problems.Add("the final failed poll is not reported as a failed poll");
+
+            long legacyMs = LegacyReadWait(Script());
+            bool ok = problems.Count == 0;
+            results.Add((ok ? "[green]  PASS[/] " : "[red]  FAIL[/] ") +
+                        $"a poll that never answers cannot overrun the read budget [grey]({ms} ms, budget {ReadBudgetMs} ms)[/]" +
+                        (ok ? "" : "\n         [red]" + string.Join("; ", problems).EscapeMarkup() + "[/]") +
+                        "\n         [grey]The 5 GHz hang: a 30 s budget logged as 134.5 s, because one poll " +
+                        "inherited the 60 s session timeout and the budget was only checked between polls.[/]" +
+                        (legacyMs > ReadBudgetMs + PollBoundMs
+                            ? $"\n         [red]old code: overran the {ReadBudgetMs} ms budget to {legacyMs} ms - this is #36[/]"
+                            : "\n         [yellow]old code: did not overrun on this script[/]"));
+            return ok ? 0 : 1;
+        }
+
+        /// <summary>
+        /// A normal settled read is attributed phase by phase (#36, V9): the debug summary says how
+        /// many polls ran and how long was spent inside them, and <see cref="Hp8902A.ReadTimes"/>
+        /// accumulates the same split for <c>--profile</c>, which runs without <c>--debug</c>.
+        /// </summary>
+        private static int CheckReadPhasesAreAttributed(List<string> results)
+        {
+            var link = new ScriptedInstrumentLink().Poll(0x00, 10).Poll(0x41).Reads("-0000011951E-03");
+            var rx = new Hp8902A(link) { DataReadyPollMs = PollMs, DataReadyBudgetMs = ReadBudgetMs, PollTimeoutMs = PollBoundMs };
+            double value = double.NaN;
+            string text = Capture(() => value = rx.ReadRelativeDb(), out _, out string thrown);
+
+            var t = rx.ReadTimes;
+            var problems = new List<string>();
+            if (thrown != null) problems.Add($"unexpected {thrown}");
+            if (Math.Abs(value - (-11.951)) > 1e-6) problems.Add($"read {value}, expected -11.951");
+            if (text.IndexOf("11 polls", StringComparison.Ordinal) < 0) problems.Add("the summary does not count the polls");
+            if (text.IndexOf("inside them", StringComparison.Ordinal) < 0) problems.Add("the summary does not say how long was spent inside polls");
+            if (text.IndexOf("retrieve", StringComparison.Ordinal) < 0) problems.Add("the retrieve is not timed");
+            if (t.Reads != 1 || t.Polls != 11 || t.FailedPolls != 0)
+                problems.Add($"ReadTimes counted {t.Reads} reads / {t.Polls} polls / {t.FailedPolls} failed, expected 1 / 11 / 0");
+            if (t.WaitMs < t.InsidePollsMs) problems.Add("time inside polls exceeds the whole wait");
+
+            bool ok = problems.Count == 0;
+            results.Add((ok ? "[green]  PASS[/] " : "[red]  FAIL[/] ") +
+                        "a settled read is attributed: trigger / wait (and inside polls) / retrieve / settle" +
+                        (ok ? "" : "\n         [red]" + string.Join("; ", problems).EscapeMarkup() + "[/]") +
+                        "\n         [grey]What V9's unexplained 18.4 s/read needs, available to --profile without --debug.[/]" +
+                        "\n         [grey]old code: one line, total elapsed only[/]");
+            return ok ? 0 : 1;
+        }
+
+        /// <summary>
+        /// A device clear that does not free the bus must be reported, not assumed (#36). ReleaseBus
+        /// used to return normally whatever happened, so the sweep said "released it" and ran the
+        /// post-hang probe on a bus that could only time out again — which is what both 5 GHz hangs
+        /// logged. Also checks the healthy case still succeeds quietly.
+        /// </summary>
+        private static int CheckUnreleasedBusIsReported(List<string> results)
+        {
+            var held = new ScriptedInstrumentLink { TrailingPoll = ScriptedInstrumentLink.PollHang };
+            var rxHeld = new Hp8902A(held) { PollTimeoutMs = PollBoundMs };
+            string text = Capture(() => rxHeld.ReleaseBus(), out _, out string thrownHeld);
+
+            var freed = new ScriptedInstrumentLink();            // answers 0x00 after the clear
+            var rxFreed = new Hp8902A(freed) { PollTimeoutMs = PollBoundMs };
+            Capture(() => rxFreed.ReleaseBus(), out _, out string thrownFreed);
+
+            var problems = new List<string>();
+            if (thrownHeld == null) problems.Add("a bus that still does not answer was reported as released");
+            if (text.IndexOf("no answer to a serial poll after device clear", StringComparison.Ordinal) < 0)
+                problems.Add("the failed release check is not traced");
+            if (thrownFreed != null) problems.Add($"a bus that answers after the clear threw {thrownFreed}");
+            if (!System.Linq.Enumerable.Contains(held.History, "<CLEAR>")) problems.Add("no device clear was sent");
+
+            bool ok = problems.Count == 0;
+            results.Add((ok ? "[green]  PASS[/] " : "[red]  FAIL[/] ") +
+                        "a device clear that does not free the bus is reported, not assumed" +
+                        (ok ? "" : "\n         [red]" + string.Join("; ", problems).EscapeMarkup() + "[/]") +
+                        "\n         [grey]Both 5 GHz hangs said \"released it\", then the probe failed with " +
+                        "IOTimeoutException on the same bus.[/]" +
+                        "\n         [grey]old code: returned normally either way[/]");
+            return ok ? 0 : 1;
+        }
+
+        /// <summary>Runs <paramref name="action"/> with <see cref="Hp8902A.DebugLog"/> captured; returns
+        /// the log, the elapsed time and the type of anything thrown (null if nothing was).</summary>
+        private static string Capture(Action action, out long ms, out string thrown)
+        {
+            var log = new StringBuilder();
+            Action<string> previous = Hp8902A.DebugLog;
+            Hp8902A.DebugLog = m => log.AppendLine(m);
+            thrown = null;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try { action(); }
+            catch (Exception ex) { thrown = ex.GetType().Name; }
+            finally { Hp8902A.DebugLog = previous; }
+            ms = sw.ElapsedMilliseconds;
+            return log.ToString();
+        }
+
+        /// <summary>
+        /// The wait loop this fix replaces, kept ONLY to show the hung-poll case discriminates: the
+        /// budget is tested between polls, and each poll is unbounded (it inherits the session
+        /// timeout). Returns how long the wait took.
+        /// </summary>
+        private static long LegacyReadWait(ScriptedInstrumentLink link)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < ReadBudgetMs)
+            {
+                int sb;
+                try { sb = link.SerialPoll(); } catch { sb = -1; }
+                if (sb >= 0 && (sb & 0x21) != 0) break;
+                System.Threading.Thread.Sleep(PollMs);
+            }
+            return sw.ElapsedMilliseconds;
         }
 
         /// <summary>

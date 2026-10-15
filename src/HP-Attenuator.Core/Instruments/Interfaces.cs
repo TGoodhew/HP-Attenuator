@@ -240,6 +240,10 @@ namespace HpAttenuator.Instruments
         /// next write to ANY instrument times out too. A device clear aborts the cycle and frees the
         /// bus — it also resets the receiver to its preset state, so the caller must re-establish the
         /// measurement before using it again.
+        ///
+        /// Throws if the bus is still held afterwards (#36) — i.e. the receiver does not answer a
+        /// serial poll after the clear. It used to return normally either way, so the caller reported
+        /// "released" and probed a bus that could only time out again.
         /// </summary>
         void ReleaseBus();
 

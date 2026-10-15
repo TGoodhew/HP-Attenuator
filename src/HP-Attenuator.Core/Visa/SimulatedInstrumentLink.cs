@@ -30,6 +30,8 @@ namespace HpAttenuator.Visa
 
         public byte SerialPoll() => 0; // no condition bits in the simulated link
 
+        public byte SerialPoll(int timeoutMs) => 0;
+
         public void Dispose() { /* nothing to release */ }
     }
 }

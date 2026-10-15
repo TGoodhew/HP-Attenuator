@@ -347,7 +347,7 @@ namespace HpAttenuator.Measurement
                     string detail = ex is Hp8902AException ? ex.Message : (isTimeout ? "read timeout" : ex.Message);
                     int sb = -1;
                     try { sb = _receiver.PollStatusByte(); } catch { /* ignore */ }
-                    point.Error = sb >= 0 ? $"{detail} [SB=0x{sb:X2}]" : detail;
+                    point.Error = sb >= 0 ? $"{detail} [SB=0x{sb:X2}]" : $"{detail} [serial poll failed]";
                     point.MeasuredRelativeDb = double.NaN;
                     point.MeasuredAttenuationDb = double.NaN;
                     point.ErrorDb = double.NaN;
@@ -361,7 +361,29 @@ namespace HpAttenuator.Measurement
                         // floor / unrecoverable at the fixed timeout, and the device clear drops the
                         // relative reference, so continuing would only log garbage. Waiting for
                         // measurement completion instead of a blind timeout is issue #10.
-                        try { _receiver.ReleaseBus(); } catch { /* best effort */ }
+                        // ReleaseBus now verifies the 8902A answers afterwards and throws if it does
+                        // not (#36). It used to return normally either way, so this said "released it"
+                        // and ran the probe below on a bus that may still have been held — the probe
+                        // then failed with IOTimeoutException in both 5 GHz hangs.
+                        string releaseFailure = null;
+                        try { _receiver.ReleaseBus(); }
+                        catch (Exception rex) { releaseFailure = rex.Message; }
+
+                        if (releaseFailure != null)
+                        {
+                            // A probe on a bus that is still held can only time out again, and would
+                            // report that as if it were a finding about the signal. Say what is known.
+                            string held = $"bus NOT released: {releaseFailure} — post-hang probe skipped; " +
+                                          "the 8902A/GPIB needs attention (power-cycle or interface clear) " +
+                                          "before anything else will run";
+                            Trace?.Invoke("*** " + held + " ***");
+                            point.Error = $"{point.Error} | {held}";
+                            result.Points.Add(point);
+                            onPoint?.Invoke(++index, total, point);
+                            result.Warning = $"stopped at {atten} dB — the 8902A read timed out and the " +
+                                             $"GPIB bus could NOT be released. {held}";
+                            break;
+                        }
 
                         // DIAGNOSTIC (#9 vs #10): the bus is now free but we don't know WHY the read
                         // hung. Re-establish the context and do an M5 RF-frequency read — the counter
@@ -788,7 +810,7 @@ namespace HpAttenuator.Measurement
                     string detail = ex is Hp8902AException ? ex.Message : (isTimeout ? "read timeout" : ex.Message);
                     int sb = -1;
                     try { sb = _receiver.PollStatusByte(); } catch { /* ignore */ }
-                    point.Error = sb >= 0 ? $"{detail} [SB=0x{sb:X2}]" : detail;
+                    point.Error = sb >= 0 ? $"{detail} [SB=0x{sb:X2}]" : $"{detail} [serial poll failed]";
                     point.MeasuredRelativeDb = double.NaN;
                     point.MeasuredAttenuationDb = double.NaN;
                     point.ErrorDb = double.NaN;

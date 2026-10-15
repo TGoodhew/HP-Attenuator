@@ -70,6 +70,8 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V14 | Leveller straddle fix — a coarse jump that overshoots must not settle on the far-below sample (18 GHz: ref was 13 dB low) | `issue-24-sf-matrix` | ✅ | — |
 | V15 | **#30** — leveller silently no-ops when the first level read is UNCAL, taking the adaptive step plan and #21 limits down with it | _needs a branch_ | 🔨 | — found 2026-09-15 |
 | V16 | `--hold-before-cal` — gate each CALIBRATE on a file so an observation can be timed to it | `issue-17-cal-hold-gate` | ✅ | — used 5x on 2026-09-15; found #34 and #35 |
+| V17 | **#34** — CALIBRATE waits for completion instead of sampling 2500 ms in | `issue-34-calibrate-completion-poll` | ⬜ | — highest priority; see V17 below |
+| V18 | **#36** — read budget enforced across a blocking poll; per-poll timing; bus release verified | `issue-36-bounded-poll` | ⬜ | — the 5 GHz hang re-run; see V18 below |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-24-sf-matrix` | ✅ | **REINSTATED 2026-09-04**: reaches 99 dB / −100.5 dBm vs average's 96 dB, tracks linearly, fails honestly. The earlier rejection was made without measuring residual FM (18 Hz, well in spec). |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -883,6 +885,56 @@ Every section reproduced to within **0.09 dB** across a 13 dB change of referenc
   capture read can in principle block up to 60 s if no sentinel is queued.
 - **PASS =** a real Error 33 is reported as a failure, with an elapsed time matching the observed
   cycle, and no `0x00` standing in for a failed poll.
+- **Not yet run on hardware.**
+
+---
+
+## V18 — #36 bounded poll, per-poll timing, verified bus release  ⬜ built, awaiting bench
+
+- **Issue:** [#36](https://github.com/TGoodhew/HP-Attenuator/issues/36). Branch
+  `issue-36-bounded-poll`, STACKED on `issue-36-visa-scan-ambiguity` (top of the #34 stack).
+- **What was wrong:** `ReadMeasurement` checked its 30 s budget only *between* serial polls, and each
+  poll inherited the 60 s session timeout. One poll that did not answer overran the budget without
+  bound — the 5 GHz hang logged `DataReady NOT set after 134.5 s` against 30 s. `Calibrate()` had the
+  same shape. After the hang, the diagnostic poll ran unbounded on the bus that had just hung, and
+  `ReleaseBus()` returned normally whether or not the device clear took effect — so the sweep
+  reported "released it" and ran a probe that failed with `IOTimeoutException` both times.
+- **What the old logs already say (inference, not a finding):** a poll that *succeeds* returning 0x00
+  costs milliseconds, so a loop that only ever saw 0x00 would have exited at ~30 s. Reaching 134.5 s
+  needs a single poll lasting **at least 104.5 s** — longer than the 60 s session timeout. That points
+  at the bus not answering rather than the receiver answering 0x00, and suggests NI-VISA may not honour
+  the timeout for a serial poll. This bench run is what confirms or kills both.
+- **What changed:**
+  1. Each poll is given only what is left of the budget (never less than 15 s), via a new
+     `IInstrumentLink.SerialPoll(timeoutMs)` that narrows the VISA timeout for that one call. Same in
+     `Calibrate()`. Diagnostic, RECAL and `--debug` trace polls are bounded at 15 s.
+  2. The `--debug` summary line now reads, for example:
+     `DataReady SET after 6.0 s (SB=0x41) — 24 polls, 0.1 s inside them, longest 0.01 s`, plus
+     `N FAILED (first: <exception>)` and `30 s read budget spent` when they apply. Any single poll
+     over 1 s is logged on its own as it happens. The retrieve is timed, and a failed retrieve is traced.
+  3. `ReleaseBus()` polls after the device clear and throws if the 8902A still does not answer. The
+     sweep then says `bus NOT released ... post-hang probe skipped` instead of probing a held bus.
+  4. `--profile` gains a second table that splits every 8902A settled read into trigger / wait (and
+     time inside polls) / retrieve / settle. This is the attribution **V9's 18.4 s/read** has lacked.
+- **Verified off-bench:** `--cal-selftest` 11/11 PASS. The hung-poll case finishes in ~630 ms
+  against a 600 ms budget; the legacy loop over the same script overruns to ~3 s
+  (`old code: overran ... - this is #36`). Simulated sweep PASS.
+- **Bench procedure** (no front-panel observation needed):
+  1. Re-run the 5 GHz hang with `--debug` — the `v38`/`v39` command verbatim from their log headers,
+     i.e. `--atten-sweep --freq 5000 --astop 30 --astep 1 --debug --skip-sensor-cal` plus whatever
+     detector/ref flags those runs used. Read the lines around 13 dB:
+     - `(SB=0x00) — N polls, ~0 s inside them` → the receiver really reports 0x00; suspect the
+       over-range / status-mask mechanism (the `--ref-target -2` comparison in #36 is the next test).
+     - `poll #k took 15.0 s and FAILED (...)` → the bus stopped answering; a GPIB-side fault.
+     - `poll #k took` **well over 15 s** → NI-VISA is not honouring the poll timeout. Record the figure;
+       the bound then has to move off the session timeout.
+  2. Wherever it stops, the `DataReady NOT set after` figure should be **≤ ~45 s**, not 134.5 s.
+  3. Read the release line: `bus released` (then the probe result means something) or
+     `bus NOT released` (power-cycle the 8902A before anything else).
+  4. Separately, for V9: any clean sweep with `--profile` and **without** `--debug`; read the new
+     settled-read table.
+- **PASS =** the hang (if it recurs) is bounded and attributed to one of the cases above, and the
+  release line tells the truth about the bus.
 - **Not yet run on hardware.**
 
 ---

@@ -30,6 +30,14 @@ namespace HpAttenuator.Visa
         /// </summary>
         byte SerialPoll();
 
+        /// <summary>
+        /// <see cref="SerialPoll()"/> with its own timeout, so one poll cannot run past the caller's
+        /// budget (#36). The parameterless poll inherits the session timeout, which is sized for the
+        /// longest measurement READ (60 s) — far too long for a single status-byte poll, and the
+        /// reason a 30 s read budget was observed to overrun to 134.5 s.
+        /// </summary>
+        byte SerialPoll(int timeoutMs);
+
         /// <summary>The commands sent so far, most recent last.</summary>
         IReadOnlyList<string> History { get; }
     }

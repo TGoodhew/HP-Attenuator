@@ -88,6 +88,23 @@ namespace HpAttenuator.Visa
             return (byte)_session.ReadStatusByte();
         }
 
+        public byte SerialPoll(int timeoutMs)
+        {
+            // Bound this one poll by temporarily narrowing the session timeout, then restore it so the
+            // next measurement READ gets its full budget back (#36). This is deliberately NOT done by
+            // abandoning the call on another thread: a VISA operation left in flight on the session
+            // would collide with whatever the caller does next on the same bus.
+            //
+            // UNVERIFIED on the bench: the 5 GHz hang suggests a single ReadStatusByte ran for at least
+            // 104.5 s against a 60 s session timeout, so NI-VISA may not honour this timeout for a
+            // serial poll (or may apply it per handshake phase). The per-poll durations the driver now
+            // logs are what will show whether the bound actually holds.
+            int saved = _session.TimeoutMilliseconds;
+            _session.TimeoutMilliseconds = Math.Max(1, timeoutMs);
+            try { return (byte)_session.ReadStatusByte(); }
+            finally { _session.TimeoutMilliseconds = saved; }
+        }
+
         /// <summary>
         /// Lists VISA INSTR resources visible to the resource manager.
         ///

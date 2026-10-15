@@ -96,13 +96,15 @@ namespace HpAttenuator.Instruments
         /// following <c>S4</c>): the 8902A is briefly busy reconfiguring and doesn't answer within the
         /// VISA timeout (issue #4). It is benign — every later command polls cleanly and the
         /// measurement proceeds — so a single retry usually catches the settled status. Returns -1 if
-        /// the poll still fails. Debug path only (never on the measurement hot path).
+        /// the poll still fails. Debug path only (never on the measurement hot path). Each attempt is
+        /// bounded by <see cref="PollTimeoutMs"/> (#36) — unbounded, a poll that never answered cost a
+        /// full session timeout per attempt, after every command.
         /// </summary>
         private int PollStatusForTrace()
         {
             for (int attempt = 0; attempt < 2; attempt++)
             {
-                try { return _link.SerialPoll(); }
+                try { return _link.SerialPoll(PollTimeoutMs); }
                 catch { if (attempt == 0) Thread.Sleep(TracePollRetryMs); }
             }
             return -1;
@@ -396,7 +398,53 @@ namespace HpAttenuator.Instruments
         /// Well above the longest legitimate settled read (~6 s typical, ~12 s near the floor) so a
         /// real measurement always finishes first; a stalled read past this propagates as a timeout so
         /// the caller can release the bus (#11) — kept modest so a genuine hang recovers promptly.</summary>
-        private const int DataReadyBudgetMs = 30000;
+        private const int DataReadyBudgetMsDefault = 30000;
+
+        /// <summary>
+        /// The read budget, ms — and since #36 it is actually enforced. It used to be tested only
+        /// BETWEEN polls while each poll inherited the 60 s session timeout, so one poll that did not
+        /// answer overran it without bound: the 5 GHz hang logged "NOT set after 134.5 s" against this
+        /// 30 s. Now each poll is given only what is left of the budget (never less than
+        /// <see cref="PollTimeoutMs"/>), so the wait ends within budget + one poll timeout.
+        ///
+        /// The budgets, reconciled — worst case for one settled read that never completes:
+        /// this budget (30 s) + at most one <see cref="PollTimeoutMs"/> of overrun (15 s) + the
+        /// retrieve, which still uses the session timeout (60 s, <c>--read-timeout-ms</c>) because a
+        /// slow-but-real result must not be cut off. ~105 s, every part of it now logged — against
+        /// an unbounded total before. Overridable for the self-test.
+        /// </summary>
+        public int DataReadyBudgetMs { get; set; } = DataReadyBudgetMsDefault;
+
+        /// <summary>
+        /// Timeout for a single serial poll that has no larger budget to draw on, ms: diagnostic polls,
+        /// the release check, and the floor for the last poll of a read (so the poll that decides a
+        /// read is a fair one, not a 10 ms sliver that fails and muddies the diagnosis). A healthy
+        /// 8902A answers a poll in milliseconds — but it inhibits the bus handshake until a triggered
+        /// cycle completes (O&amp;C 3-22), so a poll can legitimately wait out a cycle: ~6 s settled,
+        /// ~12 s near the floor. 15 s clears that and is still a quarter of the 60 s session timeout
+        /// every poll used to inherit. Overridable for the self-test.
+        /// </summary>
+        public int PollTimeoutMs { get; set; } = 15000;
+
+        /// <summary>A poll slower than this is logged on its own as it happens, ms — so a hang is
+        /// visible in the log while it is in progress, not only in the summary after it.</summary>
+        private const int SlowPollMs = 1000;
+
+        /// <summary>
+        /// Where settled-read time goes, accumulated across every read this driver makes (#36, V9):
+        /// trigger write, waiting on the status byte (and how much of that was spent INSIDE polls
+        /// rather than sleeping between them), retrieving the result, and the post-read settle.
+        /// Collected whether or not <see cref="DebugLog"/> is set, so <c>--profile</c> (which must run
+        /// without <c>--debug</c>) can report it. V9's unexplained 18.4 s/read needs exactly this split.
+        /// </summary>
+        public sealed class ReadPhaseTimes
+        {
+            public int Reads;
+            public long TriggerMs, WaitMs, InsidePollsMs, RetrieveMs, SettleMs, LongestPollMs;
+            public int Polls, FailedPolls;
+        }
+
+        public ReadPhaseTimes ReadTimes { get; } = new ReadPhaseTimes();
 
         public void BeginRangeCalibration()
         {
@@ -411,9 +459,12 @@ namespace HpAttenuator.Instruments
         /// ranging instead of auto-ranging.</summary>
         public void EnableRecalStatus() => UnmaskMeasurementStatus();
 
-        public bool RecalRequested() => (_link.SerialPoll() & RecalStatusBit) != 0;
+        public bool RecalRequested() => (_link.SerialPoll(PollTimeoutMs) & RecalStatusBit) != 0;
 
-        public int PollStatusByte() => _link.SerialPoll();
+        /// <summary>Diagnostic poll, bounded by <see cref="PollTimeoutMs"/>. The sweep calls this right
+        /// after a read has timed out — i.e. on the bus that just hung — where an unbounded poll could
+        /// add another full session timeout before anything is released (#36).</summary>
+        public int PollStatusByte() => _link.SerialPoll(PollTimeoutMs);
 
         /// <summary>Minimum time to let a CALIBRATE (C1) run before its status byte is believed, ms.
         /// The receiver does not clear Data Ready instantly on C1, so sampling immediately can read the
@@ -470,7 +521,11 @@ namespace HpAttenuator.Instruments
 
                 polls++;
                 int s;
-                try { s = _link.SerialPoll(); }
+                // Bounded by what is left of the budget, as in ReadMeasurement (#36): the budget check
+                // below only runs between polls, so an unbounded poll could overrun it by a whole
+                // session timeout.
+                long remaining = CalibrateBudgetMs - sw.ElapsedMilliseconds;
+                try { s = _link.SerialPoll((int)Math.Max(remaining, PollTimeoutMs)); }
                 catch (Exception ex)
                 {
                     pollFailures++;
@@ -565,12 +620,47 @@ namespace HpAttenuator.Instruments
             Settle();
         }
 
+        /// <summary>Settle after the device clear before checking the 8902A answers again, ms.</summary>
+        private const int ReleaseSettleMs = 500;
+
+        /// <summary>
+        /// GPIB device clear (SDC). Aborts a measurement cycle that is holding the bus handshake
+        /// (O&amp;C 3-22) and frees the bus so the next write can't collide. Resets the 8902A to preset —
+        /// caller must re-setup.
+        ///
+        /// Then CHECKS that it worked (#36). <c>_link.Clear()</c> swallows its own failure (some
+        /// listen-only devices ignore clear), so this used to return normally whether or not the bus
+        /// was freed — and the sweep went on to report "released it" and run the post-hang probe, which
+        /// failed with IOTimeoutException in both 5 GHz hangs. That is consistent with a clear that did
+        /// not take, and nothing recorded it. Now a serial poll that still does not answer after the
+        /// clear (twice, <see cref="PollTimeoutMs"/> each) throws, so the caller knows the bus is still
+        /// held instead of discovering it one timeout later.
+        /// </summary>
         public void ReleaseBus()
         {
-            // GPIB device clear (SDC). Aborts a measurement cycle that is holding the bus handshake
-            // (O&C 3-22) and frees the bus so the next write can't collide. Best-effort: _link.Clear()
-            // swallows a device that ignores clear. Resets the 8902A to preset — caller must re-setup.
             _link.Clear();
+
+            Exception last = null;
+            for (int attempt = 1; attempt <= 2; attempt++)
+            {
+                Thread.Sleep(ReleaseSettleMs);   // SDC presets the 8902A; give it a moment
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                try
+                {
+                    int sb = _link.SerialPoll(PollTimeoutMs);
+                    DebugLog?.Invoke($"8902A bus released: answers a serial poll after device clear (SB=0x{sb:X2})");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    DebugLog?.Invoke($"8902A release check {attempt}/2: no answer to a serial poll after " +
+                                     $"device clear ({ex.GetType().Name}, {sw.ElapsedMilliseconds / 1000.0:0.0} s)");
+                }
+            }
+            throw new System.IO.IOException(
+                "device clear sent, but the 8902A still does not answer a serial poll — the bus is NOT " +
+                $"released (last: {last?.GetType().Name})", last);
         }
 
         public double ReadRelativeDb()
@@ -681,38 +771,92 @@ namespace HpAttenuator.Instruments
         /// or the appropriate error. If nothing completes within <see cref="DataReadyBudgetMs"/> the
         /// read is attempted anyway and any GPIB timeout propagates so the caller can release the bus
         /// (#11). Verified on hardware via the former <c>--handshake-probe</c>; ~6 s per settled read.
+        ///
+        /// Since #36 the budget is enforced across a blocking poll (see <see cref="DataReadyBudgetMs"/>),
+        /// and every phase is timed into <see cref="ReadTimes"/>: under <c>--debug</c> the summary line
+        /// says how many polls ran, how many failed and with what, and how much of the wait was spent
+        /// INSIDE polls — which is what separates "the 8902A kept answering 0x00" (fast polls, time in
+        /// the sleeps) from "the bus stopped answering" (time inside one or two polls).
         /// </summary>
         private double ReadMeasurement()
         {
+            var t = ReadTimes;
+            var phase = System.Diagnostics.Stopwatch.StartNew();
             _link.Write("T3");                       // trigger; do NOT block-read yet
+            t.Reads++;
+            t.TriggerMs += phase.ElapsedMilliseconds;
+
             var sw = System.Diagnostics.Stopwatch.StartNew();
             int sb = -1;
-            bool ready = false;
-            while (sw.ElapsedMilliseconds < DataReadyBudgetMs)
+            bool ready = false, budgetSpent = false;
+            int polls = 0, failed = 0;
+            long insidePolls = 0, longest = 0;
+            string firstFailure = null;
+            while (true)
             {
-                try { sb = _link.SerialPoll(); } catch { sb = -1; }
+                long remaining = DataReadyBudgetMs - sw.ElapsedMilliseconds;
+                if (remaining <= 0) { budgetSpent = true; break; }
+
+                // Give this poll only what is left of the budget, so it cannot carry the wait past it.
+                polls++;
+                string failure = null;
+                var pw = System.Diagnostics.Stopwatch.StartNew();
+                try { sb = _link.SerialPoll((int)Math.Max(remaining, PollTimeoutMs)); }
+                catch (Exception ex) { sb = -1; failed++; failure = ex.GetType().Name; firstFailure ??= failure; }
+                pw.Stop();
+                insidePolls += pw.ElapsedMilliseconds;
+                longest = Math.Max(longest, pw.ElapsedMilliseconds);
+                if (pw.ElapsedMilliseconds >= SlowPollMs)
+                    DebugLog?.Invoke($"8902A poll #{polls} took {pw.ElapsedMilliseconds / 1000.0:0.0} s " +
+                                     (failure != null ? $"and FAILED ({failure})" : $"(SB=0x{sb:X2})"));
+
                 if (sb >= 0 && (sb & RecalStatusBit) != 0) break;                     // RECAL/UNCAL
                 if (sb >= 0 && (sb & (DataReadyBit | InstrErrorBit)) != 0) { ready = true; break; }
                 Thread.Sleep(DataReadyPollMs);
             }
+            sw.Stop();
+            t.WaitMs += sw.ElapsedMilliseconds;
+            t.InsidePollsMs += insidePolls;
+            t.LongestPollMs = Math.Max(t.LongestPollMs, longest);
+            t.Polls += polls;
+            t.FailedPolls += failed;
+
             // A failed poll is reported as a failed poll, not as 0x00 (#36). SerialPoll returns a byte
             // and is never negative, so sb = -1 can only come from the catch above — but the old
             // rendering printed it as "SB=0x00", identical to a genuine zero status. Those imply
             // opposite root causes (wedged bus vs lost status mask), and the 5 GHz hang turns on which.
             DebugLog?.Invoke($"8902A DataReady {(ready ? "SET" : "NOT set")} after " +
                              $"{sw.ElapsedMilliseconds / 1000.0:0.0} s " +
-                             (sb < 0 ? "(serial poll failed)" : $"(SB=0x{sb:X2})"));
+                             (sb < 0 ? "(serial poll failed)" : $"(SB=0x{sb:X2})") +
+                             $" — {polls} polls, {insidePolls / 1000.0:0.0} s inside them, longest " +
+                             $"{longest / 1000.0:0.00} s" +
+                             (failed > 0 ? $", {failed} FAILED (first: {firstFailure})" : "") +
+                             (budgetSpent ? $" — {DataReadyBudgetMs / 1000.0:0.#} s read budget spent" : ""));
 
             // RECAL set but no result produced → the range needs calibrating at this level.
             if (sb >= 0 && (sb & RecalStatusBit) != 0 && !ready) throw Hp8902AException.Uncal();
 
-            string raw = _link.Read();               // retrieve the now-ready result
-            DebugLog?.Invoke($"8902A read after DataReady: '{raw}'");
+            phase.Restart();
+            string raw;
+            try { raw = _link.Read(); }              // retrieve the now-ready result
+            catch (Exception ex)
+            {
+                t.RetrieveMs += phase.ElapsedMilliseconds;
+                DebugLog?.Invoke($"8902A retrieve FAILED after {phase.ElapsedMilliseconds / 1000.0:0.0} s " +
+                                 $"({ex.GetType().Name})" +
+                                 (ready ? "" : " — Data Ready was never seen, so there may have been nothing to read"));
+                throw;
+            }
+            t.RetrieveMs += phase.ElapsedMilliseconds;
+            DebugLog?.Invoke($"8902A read after DataReady: '{raw}' (retrieve {phase.ElapsedMilliseconds / 1000.0:0.00} s)");
+
+            phase.Restart();
             Settle();
+            t.SettleMs += phase.ElapsedMilliseconds;
             try { return ParseReading(raw); }
             catch (FormatException)
             {
-                if ((_link.SerialPoll() & RecalStatusBit) != 0) throw Hp8902AException.Uncal();
+                if ((_link.SerialPoll(PollTimeoutMs) & RecalStatusBit) != 0) throw Hp8902AException.Uncal();
                 throw;
             }
         }

@@ -15,12 +15,21 @@ namespace HpAttenuator.Visa
     ///
     /// A scripted entry can also be a <see cref="PollFault"/>, which makes <see cref="SerialPoll"/>
     /// throw — the case the old code rendered as "0x00" and could not be distinguished from a genuine
-    /// zero status byte.
+    /// zero status byte. A <see cref="PollHang"/> entry models a poll the instrument never answers:
+    /// it blocks for the caller's timeout (or <see cref="HangMs"/> for the unbounded poll) and then
+    /// throws — the shape of the 5 GHz hang, where one poll overran the whole read budget (#36).
     /// </summary>
     public sealed class ScriptedInstrumentLink : IInstrumentLink
     {
         /// <summary>A scripted serial poll that throws instead of returning a status byte.</summary>
         public const int PollFault = -1;
+
+        /// <summary>A scripted serial poll that is never answered: blocks, then throws.</summary>
+        public const int PollHang = -2;
+
+        /// <summary>How long a <see cref="PollHang"/> blocks when the caller gives no timeout — stands
+        /// in for the session timeout the parameterless poll inherits. Defaults to 2000 ms.</summary>
+        public int HangMs { get; set; } = 2000;
 
         private readonly Queue<int> _polls = new Queue<int>();
         private readonly Queue<string> _reads = new Queue<string>();
@@ -76,12 +85,21 @@ namespace HpAttenuator.Visa
             return Read();
         }
 
-        public byte SerialPoll()
+        public byte SerialPoll() => Poll(HangMs);
+
+        public byte SerialPoll(int timeoutMs) => Poll(timeoutMs);
+
+        private byte Poll(int blockMs)
         {
             PollCount++;
             int sb = _polls.Count > 0 ? _polls.Dequeue() : TrailingPoll;
             if (sb == PollFault)
                 throw new TimeoutException("scripted serial-poll fault");
+            if (sb == PollHang)
+            {
+                System.Threading.Thread.Sleep(Math.Max(0, blockMs));
+                throw new TimeoutException("scripted serial poll never answered");
+            }
             return (byte)sb;
         }
 
