@@ -1,6 +1,6 @@
 # Shared Memory — HP-Attenuator working state
 
-A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-09-15.
+A cross-machine handoff snapshot so work can continue from anywhere. Updated 2026-10-15.
 (Personal per-machine notes live outside the repo; this file is the shared, committed record.)
 
 ## Working model (author is traveling — away from the GPIB rig until back in Renton)
@@ -13,6 +13,37 @@ A cross-machine handoff snapshot so work can continue from anywhere. Updated 202
   bench-validated and the author says so.
 - **Standing git default: commit + push** every change, branches included. No manual merge-to-`main`
   gate anymore — combine freely; validation is deferred to the ledger, not blocked before merge.
+
+## STOPPING POINT — 2026-10-15, code-only session (bench never touched)
+
+**One new branch pushed, not merged: `issue-36-bounded-poll` (`09a95cb`), STACKED on
+`issue-36-visa-scan-ambiguity`, so it is now the top of the #34 stack. Ledger row V18. No GPIB, no
+VISA session, no `--hardware` run.** This was item 3 of the "Next, in order" list below.
+
+- **The 30 s read budget is now enforced.** New `IInstrumentLink.SerialPoll(timeoutMs)` narrows the
+  VISA timeout for one poll; each poll gets what is left of the budget, never under 15 s. `Calibrate()`
+  had the same unbounded shape and is fixed too. 15 s, not tighter, because the 8902A holds the
+  handshake until a triggered cycle completes (O&C 3-22; ~12 s near the floor).
+- **Every poll is timed.** The `--debug` line now says poll count, time *inside* polls, longest poll,
+  and failures with their exception type. `--profile` gets a trigger/wait/retrieve/settle table for
+  the 8902A's reads **without `--debug`**: the V9 attribution.
+- **`ReleaseBus()` now checks that it worked**, and the sweep skips the probe if it did not.
+  **Correction to #36's original text:** the probe already ran *after* the release. The real gap was
+  that `Clear()` swallows its own failure, so "released it" was printed whether or not it was true.
+  Another instance of the recurring shape below.
+- **Inference from the old logs (unconfirmed):** a poll that succeeds with 0x00 is fast, so 134.5 s
+  needs **one poll ≥ 104.5 s**, which is longer than the 60 s session timeout. That favours "the bus
+  stopped answering", and suggests NI-VISA may not honour the timeout on `ReadStatusByte`. If so, the
+  new bound won't hold either, and the per-poll log will show it. That would itself be the finding.
+- Self-test **11/11**. The hung-poll case shows the legacy loop overrunning its budget five-fold.
+
+**Merge order is now:** `issue-34` → `issue-36-fail-visible-in-trace` → `issue-37` → `issue-39` →
+`issue-36-visa-scan-ambiguity` → **`issue-36-bounded-poll`**. Nothing merged, nothing HW-validated.
+
+**Next, in order (supersedes the list below):** 1. Bench **V17** (#34, still highest). 2. Bench
+**V15** (#30). 3. Bench **V18**: the 5 GHz re-run with `--debug`, which now answers which side of the
+connector the hang is on. Plus any clean `--profile` sweep for V9. 4. **#35** after V17.
+Still open on #36 after this: nothing in code. The rest is the bench run.
 
 ## STOPPING POINT — 2026-09-15 evening, code-only session (bench never touched)
 
