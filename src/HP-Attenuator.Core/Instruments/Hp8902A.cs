@@ -770,6 +770,12 @@ namespace HpAttenuator.Instruments
         /// </summary>
         public void PressCalibrate() => Send("C1");
 
+        /// <summary>
+        /// Sends one raw HP-IB code. Diagnostic only (<c>--srq-diag</c>, #42), for codes the driver has
+        /// no method for — an SRQ mask value, or a deliberately invalid code to provoke an Entry Error.
+        /// </summary>
+        public void SendDiagnostic(string command) => Send(command);
+
         public void SetReference()
         {
             Send("RF");   // SET REF (special function 26) at the current level

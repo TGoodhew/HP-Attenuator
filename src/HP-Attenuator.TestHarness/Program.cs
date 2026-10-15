@@ -178,6 +178,9 @@ namespace HpAttenuator.TestHarness
                 if (opt.CalProbe)
                     return RunCalProbe(opt, bench);
 
+                if (opt.SrqDiag)
+                    return RunSrqDiagnostic(opt, bench);
+
                 // The 8902A Tuned RF Level measurement requires a calibrated power sensor.
                 // Calibrate ONCE PER SESSION: if a fresh session cal exists (and --recal was
                 // not given), reuse the resident cal and skip the interactive step; otherwise
@@ -939,6 +942,117 @@ namespace HpAttenuator.TestHarness
                 AnsiConsole.MarkupLine("[yellow]Move the sensor back to the measurement position, then re-run — the " +
                                        "sensor procedure presets the 8902A, so this run's setup is gone.[/]");
             };
+        }
+
+        /// <summary>
+        /// #42: does a Tuned RF Level calibration error (30-39) EVER set a status bit? V17 says Error 33
+        /// does not: mask 22.37 in force, SRQ lamp dark, status 0x00. This tests the general claim with
+        /// controls, under mask 22.36SP = Instrument Error (4) + RECAL/UNCAL (32) (O&C p. 3-30/3-31):
+        /// <list type="number">
+        /// <item>an invalid HP-IB code — an Entry Error the manual says is "also an instrument error"
+        /// (p. 3-31), proving bit 4 CAN be seen on this bench;</item>
+        /// <item>C1 at 30 dB — Error 33, reproduced 30/40/60 dB on 2026-10-15/16;</item>
+        /// <item>C1 at 90 dB — an attempt at Error 32 ("calibration not possible"); the panel says
+        /// what it actually raised;</item>
+        /// <item>source RF off in free run — Operating Error 96 (the "--" display, p. 3-285).</item>
+        /// </list>
+        /// The status byte is read ONCE after each event, never during it: the instrument "cannot alter
+        /// the Status Byte while in serial poll mode" (p. 3-32), and a set bit "remains set until the
+        /// Status Byte is read" (p. 3-32), so one late poll sees anything that happened.
+        /// </summary>
+        private static int RunSrqDiagnostic(HarnessOptions opt, Bench bench)
+        {
+            if (!(bench.Receiver is Hp8902A rx))
+            {
+                AnsiConsole.MarkupLine("[yellow]--srq-diag needs the real 8902A (--hardware).[/]");
+                return 2;
+            }
+            // A --debug trace polls after every command, which would read (and clear) the very bits
+            // being tested, mid-event. Off for this diagnostic regardless of --debug.
+            Action<string> savedDebug = Hp8902A.DebugLog;
+            Hp8902A.DebugLog = null;
+
+            double freq = opt.RfPowerFreqMHz;
+            var plan = MicrowaveConverter.Plan(freq, bench.Lo.MinFrequencyMHz, bench.Lo.MaxFrequencyMHz);
+            bench.Source.SetFrequencyMHz(freq);
+            bench.Source.SetPowerDbm(opt.Sweep.SourcePowerDbm);
+            bench.Source.RfOn();
+            if (plan.Regime == MeasurementRegime.Converted)
+            {
+                bench.Lo.SetFrequencyMHz(plan.LoMHz);
+                bench.Lo.SetPowerDbm(opt.Sweep.LoPowerDbm);
+                bench.Lo.RfOn();
+            }
+            var attenuator = bench.MakeAttenuator(AttenuatorConfig.Default());
+            int settle = Math.Max(opt.Sweep.SettleMs, 500);
+
+            rx.BeginAttenuationMeasurement(freq, plan.Regime, plan.LoMHz);
+            rx.SendDiagnostic("22.36SP");                 // the mask under test (#42)
+            AnsiConsole.MarkupLine($"[grey]SRQ diagnostic (#42) at {freq:0.###} MHz, mask 22.36SP " +
+                                   "(Instrument Error 4 + RECAL/UNCAL 32). One poll per event, after it.[/]");
+
+            int Poll() { try { return rx.PollStatusByte(); } catch { return -1; } }
+            string Sb(int sb) => sb < 0 ? "poll failed" : $"0x{sb:X2}";
+            string Bits(int sb) => sb < 0 ? "?" :
+                string.Join(" + ", new[] { (1, "DataReady"), (2, "HP-IB code err"), (4, "INSTRUMENT ERROR"),
+                                           (8, "limit"), (16, "offset change"), (32, "RECAL/UNCAL"), (64, "RQS") }
+                    .Where(b => (sb & b.Item1) != 0).Select(b => b.Item2).DefaultIfEmpty("none"));
+            string Level() { try { return rx.ReadTunedLevelDbm().ToString("0.00", CultureInfo.InvariantCulture) + " dBm"; }
+                             catch (Exception ex) { return ex is Hp8902AException h ? h.Message : ex.GetType().Name; } }
+
+            var rows = new List<(string Event, int Sb)>();
+            void Event(string name, Action setup, Action provoke, int waitMs)
+            {
+                setup?.Invoke();
+                Poll();                                    // read = clear anything already latched
+                MeasurementEngine.PanelWatch?.Invoke(name);
+                provoke();
+                System.Threading.Thread.Sleep(waitMs);     // NO polling while it happens (p. 3-32)
+                int sb = Poll();
+                MeasurementEngine.PanelReview?.Invoke($"after: {name}");
+                AnsiConsole.MarkupLine($"   [bold]{name.EscapeMarkup()}[/]: status {Sb(sb)} = {Bits(sb).EscapeMarkup()}");
+                rows.Add((name, sb));
+                try { rx.ClearError(); } catch { }
+                Poll();
+            }
+
+            try
+            {
+                Event("Entry Error control: invalid HP-IB code 'QQ' (Error 24)",
+                      () => { attenuator.SetAttenuationDb(0); System.Threading.Thread.Sleep(settle); },
+                      () => rx.SendDiagnostic("QQ"), 3000);
+
+                Event("TRFL Calibration Error: C1 at 30 dB (Error 33 expected)",
+                      () => { attenuator.SetAttenuationDb(30); System.Threading.Thread.Sleep(settle);
+                              AnsiConsole.MarkupLine($"   [grey]30 dB before: {Level().EscapeMarkup()}[/]"); },
+                      () => rx.PressCalibrate(), 25000);
+
+                Event("TRFL Calibration Error attempt: C1 at 90 dB (Error 32?)",
+                      () => { attenuator.SetAttenuationDb(90); System.Threading.Thread.Sleep(settle);
+                              AnsiConsole.MarkupLine($"   [grey]90 dB before: {Level().EscapeMarkup()}[/]"); },
+                      () => rx.PressCalibrate(), 25000);
+
+                Event("Operating Error: source RF off, free run (Error 96 / '--' expected)",
+                      () => { attenuator.SetAttenuationDb(0); System.Threading.Thread.Sleep(settle); },
+                      () => { bench.Source.RfOff(); rx.SendDiagnostic("T0"); }, 10000);
+            }
+            finally
+            {
+                try { bench.Source.RfOn(); } catch { }
+                try { rx.SendDiagnostic("T3"); rx.SendDiagnostic("22.37SP"); } catch { }
+                try { attenuator.SetAttenuationDb(0); } catch { }
+                Hp8902A.DebugLog = savedDebug;
+            }
+
+            AnsiConsole.WriteLine();
+            var t = new Table().Border(TableBorder.Rounded).Title("#42 — status byte after each event (mask 22.36SP)");
+            t.AddColumn("Event"); t.AddColumn("Status"); t.AddColumn("Bits");
+            foreach (var r in rows) t.AddRow(r.Event.EscapeMarkup(), Sb(r.Sb), Bits(r.Sb).EscapeMarkup());
+            AnsiConsole.Write(t);
+            AnsiConsole.MarkupLine("[grey]Compare each row with what the panel showed. A 30-series row with no " +
+                                   "INSTRUMENT ERROR bit, beside a control row that has it, confirms the hypothesis.[/]");
+            AnsiConsole.MarkupLine("[yellow]The C1s rewrote range factors: run --trfl-recal before measuring.[/]");
+            return 0;
         }
 
         private static int SafePoll(IMeasuringReceiver rx)

@@ -41,6 +41,7 @@ namespace HpAttenuator.TestHarness
         public bool CalThenRead;
         public bool CalRoutine;     // --cal-routine : with --cal-then-read, run the full #41 Calibrate() at each depth (#35 bisect)    // --cal-then-read : cal-probe presses C1 and reads at once (V17 detection probe)
         public int[] CalProbeDepths;  // --cal-probe-depths a,b,... : cal-probe depths (default 0..110 step 10)
+        public bool SrqDiag;        // --srq-diag : #42 — do 30-series errors ever set a status bit? (bench, panel watched)
         public bool CalSelfTest;    // --cal-selftest : headless check of the CALIBRATE completion poll (#34); no instruments
         public int SimUncalReads;   // --sim-uncal-first-read [n] : sim only — first n Tuned RF Level reads return UNCAL (#30)
         public bool ExplicitAstop;  // user gave --astop (don't auto-fill the attenuator max)
@@ -121,6 +122,7 @@ namespace HpAttenuator.TestHarness
                     case "--panel-review": o.PanelReview = true; break;
                     case "--cal-probe": o.CalProbe = true; break;
                     case "--cal-selftest": o.CalSelfTest = true; break;
+                    case "--srq-diag": o.SrqDiag = true; break;
                     // Sim-only fault injection for #30: make the leveller's first read(s) come back UNCAL.
                     case "--sim-uncal-first-read":
                         o.SimUncalReads = (i + 1 < args.Length && !args[i + 1].StartsWith("-"))
@@ -250,6 +252,11 @@ Usage: HP-Attenuator.TestHarness [options]
                        SUSPECT (default 18000; 0 = off). Bench: clean 19.4-24.0 s, Error 33
                        14.2-16.4 s (9 points, 3 GHz). Warn-only unless --cal-suspect-fails.
   --cal-suspect-fails  Treat a SUSPECT CALIBRATE as failed (stop) instead of warning.
+  --srq-diag           #42 bench diagnostic: under SRQ mask 22.36SP, provoke an Entry Error
+                       (control), Error 33, an Error 32 attempt and Operating Error 96, and
+                       read the status byte ONCE after each. Use with --hold-before-cal so each
+                       event can be watched on the panel. Run WITHOUT --debug (its per-command
+                       poll would read, and clear, the status byte mid-event).
   --cal-selftest       Headless regression check of the CALIBRATE completion poll (#34),
                        run against a scripted link. No instruments, no GPIB, no --hardware:
                        drives the real Hp8902A driver over scripted status bytes. Simulation
