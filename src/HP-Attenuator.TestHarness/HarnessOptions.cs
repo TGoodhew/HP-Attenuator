@@ -37,6 +37,8 @@ namespace HpAttenuator.TestHarness
         public bool Profile;        // --profile : attribute sweep wall-clock by category (#2)
         public bool PanelReview;    // --panel-review : pause to have the operator read the 8902A front panel
         public bool CalProbe;       // --cal-probe : force one Tuned RF Level CALIBRATE and trace it (hunt Error 35)
+        public bool CalThenRead;    // --cal-then-read : cal-probe presses C1 and reads at once (V17 detection probe)
+        public int[] CalProbeDepths;  // --cal-probe-depths a,b,... : cal-probe depths (default 0..110 step 10)
         public bool CalSelfTest;    // --cal-selftest : headless check of the CALIBRATE completion poll (#34); no instruments
         public bool ExplicitAstop;  // user gave --astop (don't auto-fill the attenuator max)
         public bool ExplicitAstep;  // user gave --astep (don't force 1 dB steps)
@@ -116,6 +118,10 @@ namespace HpAttenuator.TestHarness
                     case "--panel-review": o.PanelReview = true; break;
                     case "--cal-probe": o.CalProbe = true; break;
                     case "--cal-selftest": o.CalSelfTest = true; break;
+                    case "--cal-then-read": o.CalThenRead = true; break;
+                    case "--cal-probe-depths":
+                        o.CalProbeDepths = System.Array.ConvertAll(Need(args, ++i).Split(','), x => I(x.Trim()));
+                        break;
                     case "--freq": o.RfPowerFreqMHz = D(Need(args, ++i)); break;
                     case "--atten": o.RfPowerAttenDb = I(Need(args, ++i)); break;
                     case "--load-cal": o.LoadCal = true; break;
