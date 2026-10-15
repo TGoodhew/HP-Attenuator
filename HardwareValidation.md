@@ -68,10 +68,10 @@ command, the pass criterion, and where the fix goes if it fails. Keep the issue 
 | V12 | #22 — fine (1 dB) steps from 90 dB to the floor characterize the last few dB | `issue-22-fine-step-near-floor` | ✅ | — |
 | V13 | #23 — reference leveled to 0 dBm; step plan derived from the attenuator + path floor | `issue-23-zero-dbm-ref-adaptive-steps` | ✅ | — |
 | V14 | Leveller straddle fix — a coarse jump that overshoots must not settle on the far-below sample (18 GHz: ref was 13 dB low) | `issue-24-sf-matrix` | ✅ | — |
-| V15 | **#30** — leveller silently no-ops when the first level read is UNCAL, taking the adaptive step plan and #21 limits down with it | _needs a branch_ | 🔨 | — found 2026-09-15 |
+| V15 | **#30** — leveller silently no-ops when the first level read is UNCAL, taking the adaptive step plan and #21 limits down with it | `issue-30-leveller-uncal-recovery` | ⬜ | — 2026-10-15: no regression, but the first read was not UNCAL, so the recovery path was not exercised |
 | V16 | `--hold-before-cal` — gate each CALIBRATE on a file so an observation can be timed to it | `issue-17-cal-hold-gate` | ✅ | — used 5x on 2026-09-15; found #34 and #35 |
-| V17 | **#34** — CALIBRATE waits for completion instead of sampling 2500 ms in | `issue-34-calibrate-completion-poll` | ⬜ | — highest priority; see V17 below |
-| V18 | **#36** — read budget enforced across a blocking poll; per-poll timing; bus release verified | `issue-36-bounded-poll` | ⬜ | — the 5 GHz hang re-run; see V18 below |
+| V17 | **#34** — CALIBRATE waits for completion instead of sampling 2500 ms in | `issue-34-calibrate-completion-poll` → `issue-34-srq-completion` | ❌ | **2026-10-15: the 8902A never reports a CALIBRATE's Error 33 over HP-IB** — not in the status byte, not on the read. See V17 below |
+| V18 | **#36** — read budget enforced across a blocking poll; per-poll timing; bus release verified | `issue-36-bounded-poll` | ⬜ | — not run (bench stopped 2026-10-15). Partial: the per-poll timing worked on every read, see V18 |
 | — | #14 — `--detector sync` (IF Synchronous) | `issue-24-sf-matrix` | ✅ | **REINSTATED 2026-09-04**: reaches 99 dB / −100.5 dBm vs average's 96 dB, tracks linearly, fails honestly. The earlier rejection was made without measuring residual FM (18 Hz, well in spec). |
 | — | #14 — `--track-mode` (SF 32.9) | `issue-14-synchronous-deep-sweep` | ⏭️ | rejected: for a drifting source; defeats #16 leveler |
 
@@ -873,6 +873,19 @@ dotnet run --project src/HP-Attenuator.TestHarness -- --x-atten 8494 --atten-swe
   Note it must be run **without** `--detector sync` — the synchronous detector did not hit UNCAL at
   3 GHz and therefore does not reproduce the defect.
 
+
+### Result — no regression, recovery path NOT exercised (2026-10-15, `v46-v15-regression`)
+
+The ledger's regression command, from `bench-2026-10-15`, right after `--trfl-recal`. The first level
+read was a valid -1.061 dBm, not UNCAL, so the #30 recovery never ran. **Leave ⬜.** SF 39.9 does not
+clear factors on this firmware, so UNCAL cannot be forced. Retry opportunistically, as with V8.
+Everything downstream of a successful levelling behaved: settled at -0.036 dBm, a **29-point** plan,
+and #21 skipped 100/110 dB.
+
+The verdict was **FAIL on depth, not on #30**: 0-70 dB within 0.5 dB (+0.4 from 40 dB is digit 7's known
+in-spec section error), then 80 dB +1.60 and 90 dB +2.70 before compressing into the floor. That is
+V4's "+1.4/+2.7 dB drift" on uncalibrated deep ranges with the average detector. Today's two Error-33
+CALIBRATEs at 60 dB may also have left a bad factor below that depth.
 ---
 
 ## V17 — #34 CALIBRATE completion poll  ⬜ built, awaiting bench
@@ -924,7 +937,45 @@ dotnet run --project src/HP-Attenuator.TestHarness -- --x-atten 8494 --atten-swe
   capture read can in principle block up to 60 s if no sentinel is queued.
 - **PASS =** a real Error 33 is reported as a failure, with an elapsed time matching the observed
   cycle, and no `0x00` standing in for a failed poll.
-- **Not yet run on hardware.**
+
+### Result — FAIL, 2026-10-15 (bench branch `bench-2026-10-15`; four runs, author at the panel)
+
+Fresh sensor cal first (zero 0.0 nW, reference 1.000 mW). Every CALIBRATE was gated with
+`--hold-before-cal` and observed on the panel. 3 GHz, 8494 on X.
+
+| Run | Code | 0 dB | 20 dB | 60 dB |
+|---|---|---|---|---|
+| `v42-v17` | first #34 fix (poll every 250 ms) | panel clean · log UNCONFIRMED 31.9 s | panel clean · log UNCONFIRMED | **panel Error 33** · log UNCONFIRMED, 0x00 throughout |
+| `v43-v17b` | SRQ wait + one poll (`issue-34-srq-completion`) | panel clean · log "no error raised" | panel clean · "no error raised" | **panel Error 33** · log "no error raised", 0x00 |
+| `v44-calread` | `--cal-then-read`: C1 then an immediate triggered read | — | panel clean · reads -19.66 dBm | **panel Error 33** · both reads a normal -60.07 dBm |
+
+**The 8902A does not report a TRFL CALIBRATE error over HP-IB at all** (firmware 94.199):
+1. **Not in the status byte.** With mask `22.37SP` in force (Data Ready bits arrived all run) and no
+   polling during the cycle, the single poll after it read 0x00, and the author confirmed the **SRQ
+   lamp never lit**. So the Instrument Error bit (O&C 3-31: "asserted ... when an error is displayed")
+   is not set for Error 33.
+2. **Not on the read.** C1 followed at once by a triggered read returned a normal level while Error 33
+   was on the display.
+3. Continuous polling was a separate, real defect (O&C 3-32: the 8902A "cannot alter the Status Byte
+   while in serial poll mode"). It is fixed on `issue-34-srq-completion`, but fixing it did not make
+   Error 33 visible.
+
+**Other findings from these runs:**
+- **The VISA SRQ event is unavailable here.** `EnableEvent(ServiceRequest)` / `WaitOnEvent` threw
+  `NativeVisaException` (message not captured). The fallback (wait out the budget, poll once) ran.
+- **A CALIBRATE holds the bus.** After C1, the next bus transaction waited about 18 s at 20 dB (clean;
+  the panel cycle looked 15 s or more) and about 6.7 s at 60 dB (Error 33). Two points only, but a
+  failed cycle may abort early. **Candidate detector.**
+- **A failed deep CALIBRATE damages the absolute reference.** After each 60 dB Error 33, the 0 dB
+  reading moved (+1.0 dB in `v42`, +0.37 dB in `v43`). Relative sweeps were unaffected (both PASS,
+  0-30 dB within 0.16 dB). `--trfl-recal` restored it (+0.355 -> -1.061 dBm, `v45`).
+- **#35: 20 dB calibrated clean three times out of three** once nothing changed the level mid-cycle.
+  The 9/15 Error 33 at 20 dB came from the old 2.5 s code stepping the attenuator while a 6.5-7.4 s
+  CALIBRATE was still running ("maintain consistency in ... level at the SENSOR during calibration").
+  The genuine limit lies between 20 and 60 dB.
+
+**Consequence:** no polling or reading strategy can make V17 pass. A failed CALIBRATE has to be
+inferred: from the bus-hold time, from the reference shift, or by not issuing deep CALIBRATEs.
 
 ---
 
@@ -974,7 +1025,11 @@ dotnet run --project src/HP-Attenuator.TestHarness -- --x-atten 8494 --atten-swe
      settled-read table.
 - **PASS =** the hang (if it recurs) is bounded and attributed to one of the cases above, and the
   release line tells the truth about the bus.
-- **Not yet run on hardware.**
+- **Not run as its own recipe** (bench stopped 2026-10-15). **Partial evidence from the V17/V15 runs:**
+  the per-poll lines worked on every read, and showed that **a settled read is ONE serial poll that
+  blocks 6.0-9.0 s** (`poll #1 took 6.1 s (SB=0x41)`). The 8902A holds the poll until its cycle ends
+  (O&C 3-22), so the old "DataReady SET after 6.0 s" was never many fast polls. **This confirms the 15 s
+  per-poll floor was necessary:** a 5 s bound would have failed every read on this bench.
 
 ---
 
