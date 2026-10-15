@@ -32,6 +32,10 @@ namespace HpAttenuator.Visa
 
         public byte SerialPoll(int timeoutMs) => 0;
 
+        public void DiscardServiceRequests() { }
+
+        public bool WaitForServiceRequest(int timeoutMs) => false;   // never requests service
+
         public void Dispose() { /* nothing to release */ }
     }
 }

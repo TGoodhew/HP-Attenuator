@@ -105,6 +105,34 @@ namespace HpAttenuator.Visa
             finally { _session.TimeoutMilliseconds = saved; }
         }
 
+        private bool _srqEnabled;
+
+        private void EnsureSrqEnabled()
+        {
+            if (_srqEnabled) return;
+            _session.EnableEvent(EventType.ServiceRequest);
+            _srqEnabled = true;
+        }
+
+        public void DiscardServiceRequests()
+        {
+            EnsureSrqEnabled();
+            _session.DiscardEvents(EventType.ServiceRequest);
+        }
+
+        public bool WaitForServiceRequest(int timeoutMs)
+        {
+            // On GPIB, VISA serial-polls the device itself when SRQ asserts and queues the byte, so the
+            // ReadStatusByte that follows returns that byte rather than polling a second time.
+            EnsureSrqEnabled();
+            try
+            {
+                _session.WaitOnEvent(EventType.ServiceRequest, Math.Max(1, timeoutMs));
+                return true;
+            }
+            catch (IOTimeoutException) { return false; }
+        }
+
         /// <summary>
         /// Lists VISA INSTR resources visible to the resource manager.
         ///
@@ -145,6 +173,7 @@ namespace HpAttenuator.Visa
 
         public void Dispose()
         {
+            if (_srqEnabled) { try { _session.DisableEvent(EventType.ServiceRequest); } catch { /* ignore */ } }
             try { _session?.Dispose(); } catch { /* ignore */ }
         }
     }
