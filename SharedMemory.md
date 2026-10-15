@@ -43,6 +43,29 @@ source 0 dBm, 3 GHz) after a final `--trfl-recal`. A power cycle will need a fre
    panel watched, then a 0-110 dB sweep (does 80-90 dB improve further? — V4). 3. Provoke a 30-series
    error with the SRQ lamp watched (#42). 4. V15 and V18 stay ⬜ until their failure modes recur.
 
+### After the bench closed (same day): research from another session, reconciled
+
+The author pasted a research handoff on the 30-series errors (manual pages, inferences, research paths).
+Checked against the scan (8902A.pdf p. 3-104) and today's bench data:
+- **Sharper #35 hypothesis [inference]:** a range factor is computed "by comparing the level measured
+  during the initial power sensor calibration to the level measured for each RF range", and the manual
+  says to calibrate when "only the RECAL annunciator is displayed" (p. 3-104). So a C1 at a range
+  boundary is a range-to-range cal, and a C1 elsewhere may re-reference to the POWER SENSOR. That
+  explains 30/40/60 dB Error 33 (sensor can't hold -30 dBm and below, worse behind the 11792A's 10 dB
+  pad), the 20 dB "clean" CALIBRATE that shifted readings ~+0.46 dB (re-referenced to a -20 dBm sensor
+  reading), and 50 dB clean (a real boundary). **Cheap test:** after a forced 20 dB CALIBRATE, compare
+  the TRFL reading with RF POWER (sensor) at the same setting; add it to the {0, 20, 50} boundary run.
+- **Where today's data narrows the research:** source wander is effectively ruled out (gate spread
+  0.000-0.006 dB before every Error 33); C1 off-boundary gave 33, never 32; a read straight after C1
+  returns a normal level, not the sentinel; "Error 33 never raises SRQ whatever the mask" rests on one
+  observation under 22.37 only. This bench is the 11792A + 11793A, not the 11722A the research assumes.
+- Not yet posted to #35/#42; offered, not done.
+
+**Filed upstream:** [TGoodhew/GPIB-MCP#168](https://github.com/TGoodhew/GPIB-MCP/issues/168) —
+gpib-mcp `manual_search` returns "no text extractor available" for every 8902A PDF (needs `pdftotext`;
+a copy exists at `C:\Program Files\Git\mingw64in\pdftotext.exe`, not on the server's PATH). Use
+ManualForge `read_manual_page` for the manuals meanwhile.
+
 ### Protocol notes
 - One beep = watch, two = stop. With the #41 routine, the stability gate runs ~18 s AFTER a hold is
   released and BEFORE C1, so release silently and beep once when the gate line appears (script used:
